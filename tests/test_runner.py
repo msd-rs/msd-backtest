@@ -17,6 +17,12 @@ class TestStrategy(Strategy):
     ctx.sell(sell, 1.0)
 
 
+def run_strategy(dp: DataProvider):
+  account = Account(1000.0, dp)
+  runner = Runner(account)
+  runner.run(TestStrategy())
+
+
 def test_runner():
   dp = DataProvider(
     {
@@ -29,14 +35,29 @@ def test_runner():
     },
     symbols=["a", "b"],
   )
-  account = Account(1000.0, dp)
 
-  runner = Runner(account)
-  runner.run(TestStrategy())
+  run_strategy(dp)
 
   ror = dp.all("ror")
   ror_v = np.tile([0.0, 0.0, 0.5, 0.5, 0.5], 2)
   assert np.allclose(ror, ror_v)
+
+
+def test_bench_runner(benchmark):
+  SYMBOLS = 300
+  BARS = 10000
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(BARS), SYMBOLS),
+      "open": np.tile(np.arange(BARS, dtype=np.float64), SYMBOLS),
+      "high": np.tile(np.arange(BARS, dtype=np.float64), SYMBOLS),
+      "low": np.tile(np.arange(BARS, dtype=np.float64), SYMBOLS),
+      "close": np.tile(np.arange(BARS, dtype=np.float64), SYMBOLS),
+      "price": np.tile(np.arange(BARS, dtype=np.float64), SYMBOLS),
+    },
+    symbols=[f"a{i}" for i in range(SYMBOLS)],
+  )
+  benchmark(run_strategy, dp)
 
 
 if __name__ == "__main__":

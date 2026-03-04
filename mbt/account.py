@@ -1,5 +1,9 @@
+from pathlib import Path
+import json
+from dataclasses import dataclass
 from .data_provider import DataProvider
 import numpy as np
+import logging
 
 
 ACTION_KEEP = 0
@@ -11,6 +15,8 @@ ACTION_BUY_NO_CASH = 5
 ACTION_SELL = 2
 ACTION_SELL_PERCENT = 4
 ACTION_SELL_NO_HOLD = 6
+
+logger = logging.getLogger(__name__)
 
 
 class Position:
@@ -32,13 +38,15 @@ class Position:
   def from_cash(cash: float, price: float, unit: int = 100) -> "Position":
     if price == 0:
       return Position.zero()
-    shares = int(cash / price / unit)
+    shares = int(cash / price)
     shares = shares - shares % unit  # round down to unit
     return Position(float(shares), price)
 
   def __add__(self, other: "Position") -> "Position":
     value = self.value + other.value
     shares = self.shares + other.shares
+    if shares <= 0:
+      return Position.zero()
     return Position(shares, value / shares)
 
   def __sub__(self, other: "Position") -> "Position":
@@ -47,6 +55,9 @@ class Position:
     if shares <= 0:
       return Position.zero()
     return Position(shares, value / shares)
+
+  def __str__(self):
+    return f"Position(shares={self.shares}, price={self.price})"
 
 
 class Operation:
@@ -65,8 +76,16 @@ class Operation:
     return Operation(ACTION_BUY, position)
 
   @staticmethod
+  def buy_percent(percent: float, price: float) -> "Operation":
+    return Operation(ACTION_BUY_PERCENT, Position(percent, price))
+
+  @staticmethod
   def sell(position: Position) -> "Operation":
     return Operation(ACTION_SELL, position)
+
+  @staticmethod
+  def sell_percent(percent: float, price: float) -> "Operation":
+    return Operation(ACTION_SELL_PERCENT, Position(percent, price))
 
   @staticmethod
   def buy_no_cash(position: Position) -> "Operation":
@@ -76,24 +95,95 @@ class Operation:
   def sell_no_hold(position: Position) -> "Operation":
     return Operation(ACTION_SELL_NO_HOLD, position)
 
+  def __str__(self):
+    kind = "None"
+    if self.action == ACTION_KEEP:
+      kind = "Keep"
+    elif self.action == ACTION_BUY:
+      kind = "Buy"
+    elif self.action == ACTION_BUY_PERCENT:
+      kind = "BuyPercent"
+    elif self.action == ACTION_SELL:
+      kind = "Sell"
+    elif self.action == ACTION_SELL_PERCENT:
+      kind = "SellPercent"
+    elif self.action == ACTION_BUY_NO_CASH:
+      kind = "BuyNoCash"
+    elif self.action == ACTION_SELL_NO_HOLD:
+      kind = "SellNoHold"
+    if self.position is None:
+      return f"{kind}"
+    return f"{kind}({self.position})"
 
-class Fee:
-  def __init__(self, dp: DataProvider):
-    self.dp = dp
+
+@dataclass
+class FeeItem:
+  ts: int = 0
+  commission_buy: float = 0.0
+  min_commission_buy: float = 0.0
+  tax_buy: float = 0.0
+  transaction_fee_buy: float = 0.0
+  commission_sell: float = 0.0
+  min_commission_sell: float = 0.0
+  tax_sell: float = 0.0
+  transaction_fee_sell: float = 0.0
 
   def buy(self, value: float) -> float:
-    commission = value * self.dp.last("COMMISSION_BUY", 0.0)
-    min_commission = self.dp.last("MIN_COMMISSION_BUY", 0.0)
-    tax = value * self.dp.last("TAX_BUY", 0.0)
-    transaction_fee = self.dp.last("TRANSACTION_FEE_BUY", 0.0)
+    commission = value * self.commission_buy
+    min_commission = self.min_commission_buy
+    tax = value * self.tax_buy
+    transaction_fee = self.transaction_fee_buy
     return max(commission, min_commission) + tax + transaction_fee
 
   def sell(self, value: float) -> float:
-    commission = value * self.dp.last("COMMISSION_SELL", 0.0)
-    min_commission = self.dp.last("MIN_COMMISSION_SELL", 0.0)
-    tax = value * self.dp.last("TAX_SELL", 0.0)
-    transaction_fee = self.dp.last("TRANSACTION_FEE_SELL", 0.0)
+    commission = value * self.commission_sell
+    min_commission = self.min_commission_sell
+    tax = value * self.tax_sell
+    transaction_fee = self.transaction_fee_sell
     return max(commission, min_commission) + tax + transaction_fee
+
+
+class Fee:
+  def __init__(self, config: list[FeeItem] | list[str] | str | bytes | None = None):
+    def build_fee_item(x):
+      return FeeItem(**x)
+
+    if isinstance(config, list):
+      if len(config) > 0 and isinstance(config[0], str):
+        self.config = [json.loads(x, object_hook=build_fee_item) for x in config]  # type: ignore
+        self.config.sort(key=lambda x: x.ts)
+      else:
+        self.config = config
+    elif isinstance(config, str):
+      p = Path(config)
+
+      if p.is_file():
+        self.config = json.load(p.open("r"), object_hook=build_fee_item)
+      else:
+        self.config = json.loads(config, object_hook=build_fee_item)
+    elif isinstance(config, bytes):
+      self.config = json.loads(config.decode("utf-8"), object_hook=build_fee_item)
+    else:
+      self.config = [FeeItem()]
+
+    # add a default fee item at the beginning when no fee item is provided
+    if len(self.config) == 0:
+      self.config = [FeeItem()]
+
+  def get(self, ts: int) -> FeeItem:
+    """
+    find the last fee item whose ts is less than or equal to the given ts
+    Args:
+      ts: timestamp
+    Returns:
+      fee item
+    """
+    for i in range(len(self.config)):
+      if self.config[i].ts > ts:
+        if i == 0:
+          return self.config[0]
+        return self.config[i - 1]
+    return self.config[-1]
 
 
 class Record:
@@ -101,7 +191,7 @@ class Record:
 
   def __init__(
     self,
-    date: int,
+    ts: int,
     operation: Operation,
     cash: float,
     hold_profit: float,
@@ -110,7 +200,7 @@ class Record:
   ):
     """
     Args:
-      date: date of the record
+      ts: timestamp of the record
       operation: incoming operation of the record
       cash: cash after operation
       hold_profit: profit when position was bought
@@ -119,7 +209,7 @@ class Record:
     """
 
     """the date of the record"""
-    self.date = date
+    self.ts = ts
     """incoming operation of the record"""
     self.operation = operation
     """cash after operation"""
@@ -142,20 +232,33 @@ class Account:
   data_provider used to get the actions, price, dividend, commission, etc.
   """
 
-  def __init__(self, initial_cash: float, dp: DataProvider):
+  def __init__(
+    self,
+    initial_cash: float,
+    dp: DataProvider,
+    /,
+    group: int = 0,
+    fee: Fee | None = None,
+    unit: int = 100,
+    slippage: float = 0.0,
+  ):
     """
     Args:
       initial_cash: initial cash of the account
       dp: data provider of the account, the data kinds will be used are:
-        - "PRICE": price of the stock, without dividend
-        - "GCASH": given cash per share in dividend
-        - "GSHARE": given share per share in dividend
+        - "price": price of the stock, without dividend
+        - "gcash": given cash per share in dividend
+        - "gshare": given share per share in dividend
+      unit: trading unit, default is 100
+      slippage: slippage of the buy and sell operations, for buy: deal_price = price * (1 + slippage), for sell: deal_price = price * (1 - slippage)
     """
 
     """initial cash of the account"""
     self.cash = initial_cash
     """data provider of the account"""
     self.dp = dp
+    """trading unit"""
+    self.unit = unit
     """position of the account"""
     self.position = Position(0, 0)
     """assets after first buy operation"""
@@ -165,78 +268,133 @@ class Account:
     """records of the account"""
     self.records = []
     """fee calculator"""
-    self.fee = Fee(dp)
+    self.fee = fee if fee is not None else Fee()
+    """slippage of the buy and sell operations"""
+    self.slippage = slippage
+    """group index"""
+    self.group = group
+
+    s = self.group * dp.bars
+    e = s + dp.bars
+    """history of assets for current group"""
+    self.assets = dp.all("assets", create_if_not_exist=np.float64)[s:e]
+    """history of rate of return for current group"""
+    self.ror = dp.all("ror", create_if_not_exist=np.float64)[s:e]
+
+    self.assets.fill(initial_cash)
+    self.ror.fill(0.0)
+
+  def clone(self, group: int = 0) -> "Account":
+    return Account(
+      self.cash,
+      self.dp,
+      group=group,
+      fee=self.fee,
+      unit=self.unit,
+      slippage=self.slippage,
+    )
 
   @property
-  def assets(self):
+  def asset(self):
+    """current asset"""
     return self.position.value + self.cash
 
-  def do_operation(self, date: int, operation: Operation):
+  def do_operation(self, ts: int, operation: Operation):
     """
+    perform operation, add record to records
+
     Args:
-      date: date of the record
-      operation: incoming operation of the record
+        ts: timestamp of the record
+        operation: incoming operation of the record
     """
 
     if operation.position is None:
-      return
+      if operation.action == ACTION_KEEP:
+        self.assets[ts] = self.asset
+        self.ror[ts] = self.asset / self.assets[0] - 1
+        logger.debug(
+          f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
+        )
+        return
+      else:
+        raise ValueError(f"invalid operation: {operation}")
 
     if operation.action == ACTION_BUY:
-      operation = self.do_buy(operation.position)
+      operation = self.do_buy(ts, operation.position)
     elif operation.action == ACTION_BUY_PERCENT:
       operation = self.do_buy(
+        ts,
         Position.from_cash(
-          self.cash * operation.position.shares, operation.position.price
-        )
+          self.cash * operation.position.shares, operation.position.price, self.unit
+        ),
       )
     elif operation.action == ACTION_SELL:
-      operation = self.do_sell(operation.position)
+      operation = self.do_sell(ts, operation.position)
     elif operation.action == ACTION_SELL_PERCENT:
       operation = self.do_sell(
+        ts,
         Position(
-          float(int(self.position.shares * operation.position.shares)),
+          self.position.shares * operation.position.shares,
           operation.position.price,
-        )
+        ),
       )
     hold_profit = (
-      (self.assets - self.per_assets) / self.per_assets if self.per_assets > 0 else 0.0
+      (self.asset - self.per_assets) / self.per_assets if self.per_assets > 0 else 0.0
     )
     self.records.append(
-      Record(date, operation, self.cash, hold_profit, self.position, self.deducted)
+      Record(ts, operation, self.cash, hold_profit, self.position, self.deducted)
+    )
+    self.assets[ts] = self.asset
+    self.ror[ts] = self.asset / self.assets[0] - 1
+    logger.debug(
+      f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
     )
 
-  def do_buy(self, position: Position) -> Operation:
+  def do_buy(self, ts: int, position: Position) -> Operation:
     """
+    perform buy operation
+
     Args:
-      position: position to buy
+        ts: timestamp of the record
+        position: position to buy
+
+    Returns:
+        operation: because buy operation may be rejected or partially filled, return the actual operation
     """
 
     if self.cash == 0:
       return Operation.buy_no_cash(Position(0, 0))
 
-    fee = self.fee.buy(position.value)
+    fee_item = self.fee.get(ts)
+    fee = fee_item.buy(position.value)
     if position.value + fee > self.cash:
-      position = Position.from_cash(self.cash - fee, position.price)
+      position = Position.from_cash(self.cash - fee, position.price, self.unit)
 
     self.cash -= position.value + fee
     self.position += position
-    self.deducted = self.fee.buy(position.value)
+    self.deducted = fee_item.buy(position.value)
     if self.per_assets == 0:
-      self.per_assets = self.assets
+      self.per_assets = self.asset
     return position
 
-  def do_sell(self, position: Position) -> Operation:
+  def do_sell(self, ts: int, position: Position) -> Operation:
     """
+    perform sell operation
     Args:
-      position: position to sell
+        ts: timestamp of the record
+        position: position to sell
+
+    Returns:
+        operation: because sell operation may be rejected or partially filled, return the actual operation
     """
 
     if position.shares > self.position.shares:
       position.shares = self.position.shares
 
-    self.cash += position.value - self.fee.sell(position.value)
+    fee_item = self.fee.get(ts)
+    self.cash += position.value - fee_item.sell(position.value)
     self.position -= position
-    self.deducted = self.fee.sell(position.value)
+    self.deducted = fee_item.sell(position.value)
     if self.position.shares == 0:
       self.per_assets = 0.0
     return position

@@ -29,12 +29,44 @@ class Context:
     """
     pass
 
+  def __getattr__(self, name: str) -> np.ndarray:
+    """
+    return the corresponding data
+
+    Args:
+      name: name of the data
+
+    Returns:
+      numpy array of the data
+    """
+    return self.data(name)
+
   def symbols(self) -> list[str]:
     """
     return the symbols of the account
 
     Returns:
       list of symbols
+    """
+    pass
+
+  def buy(self, flags: np.ndarray, percent: float = 1.0):
+    """
+    buy a position
+
+    Args:
+      flags: boolean array of flags, True means buy
+      percent: percent of cash to buy
+    """
+    pass
+
+  def sell(self, flags: np.ndarray, percent: float = 1.0):
+    """
+    sell a position
+
+    Args:
+      flags: boolean array of flags, True means sell
+      percent: percent of position to sell
     """
     pass
 

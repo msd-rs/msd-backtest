@@ -2,6 +2,7 @@
 project-includes = [
     "mbt",
     "tests",
+    ".",
 ]
 
 

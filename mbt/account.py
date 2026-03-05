@@ -280,9 +280,13 @@ class Account:
     self.assets = dp.all("assets", create_if_not_exist=np.float64)[s:e]
     """history of rate of return for current group"""
     self.ror = dp.all("ror", create_if_not_exist=np.float64)[s:e]
+    self.actions = dp.all("actions", create_if_not_exist=np.int32)[s:e]
+    self.action_shares = dp.all("action_shares", create_if_not_exist=np.float64)[s:e]
 
     self.assets.fill(initial_cash)
     self.ror.fill(0.0)
+    self.actions.fill(ACTION_KEEP)
+    self.action_shares.fill(0.0)
 
   def clone(self, group: int = 0) -> "Account":
     return Account(
@@ -346,6 +350,10 @@ class Account:
     )
     self.assets[ts] = self.asset
     self.ror[ts] = self.asset / self.assets[0] - 1
+    self.actions[ts] = operation.action
+    self.action_shares[ts] = (
+      operation.position.shares if operation.position is not None else 0.0
+    )
     logger.debug(
       f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
     )
@@ -375,7 +383,7 @@ class Account:
     self.deducted = fee_item.buy(position.value)
     if self.per_assets == 0:
       self.per_assets = self.asset
-    return position
+    return Operation.buy(position)
 
   def do_sell(self, ts: int, position: Position) -> Operation:
     """
@@ -397,4 +405,4 @@ class Account:
     self.deducted = fee_item.sell(position.value)
     if self.position.shares == 0:
       self.per_assets = 0.0
-    return position
+    return Operation.sell(position)

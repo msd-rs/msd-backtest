@@ -378,6 +378,9 @@ class Account:
     if position.value + fee > self.cash:
       position = Position.from_cash(self.cash - fee, position.price, self.unit)
 
+    if position.shares == 0:
+      return Operation.buy_no_cash(Position(0, 0))
+
     self.cash -= position.value + fee
     self.position += position
     self.deducted = fee_item.buy(position.value)
@@ -398,6 +401,9 @@ class Account:
 
     if position.shares > self.position.shares:
       position.shares = self.position.shares
+
+    if position.shares == 0:
+      return Operation.sell_no_hold(Position(0, 0))
 
     fee_item = self.fee.get(ts)
     self.cash += position.value - fee_item.sell(position.value)

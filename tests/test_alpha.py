@@ -1,8 +1,4 @@
-from mbt.strategy import Context
-from mbt.strategy import Strategy
-from mbt.runner import Runner
-from mbt.account import Account
-from mbt.data_provider import DataProvider
+from mbt import Context, Strategy, Runner, Account, DataProvider
 import pymsd
 import alpha as al
 import numpy as np
@@ -63,13 +59,25 @@ class DoubleMaStrategy(Strategy):
     ctx.sell(short_ma < long_ma, 1.0)
 
 
+def print_result(dp: DataProvider):
+  assets = dp.all("assets")
+  action_shares = dp.all("action_shares")
+  actions = dp.all("actions")
+  for i, symbol in enumerate(dp.symbols):
+    print(symbol)
+    s = i * dp.bars
+    e = s + dp.bars
+    print(assets[s:e])
+    print(action_shares[s:e])
+    print(actions[s:e])
+
+
 def main():
   dp, symbols = load_data_msd(MSD_HOST, SYMBOLS, "2020-01-01", "2020-12-31")
+  al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN)
   strategy = DoubleMaStrategy(5, 20)
   run_strategy(dp, strategy)
-  print(dp.all("assets"))
-  print(dp.all("action_shares"))
-  print(dp.all("actions"))
+  print_result(dp)
 
 
 if __name__ == "__main__":

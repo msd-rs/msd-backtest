@@ -16,10 +16,15 @@ dev = [
 
 [project.optional-dependencies]
 alpha = [
-  "pandas>=3.0",
   "py-alpha-lib>=0.2",
+]
+msd = [
   "pymsd>=0.1",
   "requests>=2.32",
+  "pandas>=3.0",
+]
+server = [
+  "fastapi[standard]>=0.135.1",
 ]
 
 

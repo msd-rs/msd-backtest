@@ -68,8 +68,8 @@ class Operation:
     self.position = position
 
   @staticmethod
-  def keep() -> "Operation":
-    return Operation(ACTION_KEEP, None)
+  def keep(price: float) -> "Operation":
+    return Operation(ACTION_KEEP, Position(0, price))
 
   @staticmethod
   def buy(position: Position) -> "Operation":
@@ -280,6 +280,9 @@ class Account:
     self.assets = dp.all("assets", create_if_not_exist=np.float64)[s:e]
     """history of rate of return for current group"""
     self.ror = dp.all("ror", create_if_not_exist=np.float64)[s:e]
+    """history of rate of return since last clear"""
+    self.ror_hold = dp.all("ror_hold", create_if_not_exist=np.float64)[s:e]
+
     self.actions = dp.all("actions", create_if_not_exist=np.int32)[s:e]
     self.action_shares = dp.all("action_shares", create_if_not_exist=np.float64)[s:e]
 
@@ -313,15 +316,7 @@ class Account:
     """
 
     if operation.position is None:
-      if operation.action == ACTION_KEEP:
-        self.assets[ts] = self.asset
-        self.ror[ts] = self.asset / self.assets[0] - 1
-        logger.debug(
-          f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
-        )
-        return
-      else:
-        raise ValueError(f"invalid operation: {operation}")
+      raise ValueError(f"invalid operation: {operation}")
 
     if operation.action == ACTION_BUY:
       operation = self.do_buy(ts, operation.position)
@@ -342,6 +337,11 @@ class Account:
           operation.position.price,
         ),
       )
+    elif operation.action == ACTION_KEEP:
+      self.position.price = operation.position.price
+    else:
+      raise ValueError(f"invalid operation: {operation}")
+
     hold_profit = (
       (self.asset - self.per_assets) / self.per_assets if self.per_assets > 0 else 0.0
     )
@@ -350,6 +350,7 @@ class Account:
     )
     self.assets[ts] = self.asset
     self.ror[ts] = self.asset / self.assets[0] - 1
+    self.ror_hold[ts] = hold_profit
     self.actions[ts] = operation.action
     self.action_shares[ts] = (
       operation.position.shares if operation.position is not None else 0.0

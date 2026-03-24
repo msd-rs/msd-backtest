@@ -1,14 +1,15 @@
-from mbt.runner import Runner
-from mbt.strategy import Context, Strategy
-from mbt.account import (
+from mbt import (
+  Runner,
+  Context,
+  Strategy,
   Account,
+  DataProvider,
   ACTION_BUY,
   ACTION_BUY_NO_CASH,
   ACTION_SELL,
   ACTION_SELL_NO_HOLD,
   ACTION_KEEP,
 )
-from mbt.data_provider import DataProvider
 import numpy as np
 
 

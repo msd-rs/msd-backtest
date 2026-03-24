@@ -17,7 +17,7 @@ class Context:
     """
     pass
 
-  def data(self, name: str) -> np.ndarray:
+  def data(self, name: str, /, symbol: str | None = None) -> np.ndarray:
     """
     return the corresponding data
 

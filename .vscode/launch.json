@@ -5,6 +5,26 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "cli",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "mbt.run.cli",
+            "args": [
+                "strategy/double_avg.py",
+                "-s",
+                "SH600000",
+                "-b",
+                "2025-01-01",
+                "-e",
+                "2025-12-31",
+            ],
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
             "request": "launch",

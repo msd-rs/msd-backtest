@@ -1,8 +1,4 @@
-from mbt.runner import Runner
-from mbt.strategy import Context
-from mbt.strategy import Strategy
-from mbt.account import Account
-from mbt.data_provider import DataProvider
+from mbt import Runner, Context, Strategy, Account, DataProvider
 import numpy as np
 import logging
 

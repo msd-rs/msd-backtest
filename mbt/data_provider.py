@@ -56,19 +56,30 @@ class DataProvider:
       if len(data[kind]) != len(dates):
         raise ValueError(f"data '{kind}' has different length from dates")
 
-  def all(self, kind: str, create_if_not_exist: DTypeLike | None = None) -> np.ndarray:
+  def all(
+    self,
+    kind: str,
+    /,
+    create_if_not_exist: DTypeLike | None = None,
+    symbol: str | None = None,
+  ) -> np.ndarray:
     """
     return the all data of the kind from the first to the last
     Args:
       kind: kind of data
       create_if_not_exist: if not None, create the data if it does not exist with the given dtype
+      symbol: symbol of the data, when provided, return the data of the symbol and tile it `groups` times
     """
     if kind not in self.data:
       if create_if_not_exist is not None:
         self.data[kind] = np.zeros(len(self.dates), dtype=create_if_not_exist)
       else:
         raise ValueError(f"data '{kind}' not found")
-    return self.data[kind]
+    if symbol is not None and self.groups > 1:
+      i = self.symbols.index(symbol)
+      return np.tile(self.data[kind][i * self.bars : (i + 1) * self.bars], self.groups)
+    else:
+      return self.data[kind]
 
   def __len__(self):
     return self.bars

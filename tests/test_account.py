@@ -1,11 +1,13 @@
-from mbt.account import (
+from mbt import (
   Account,
+  DataProvider,
   Operation,
   Position,
+)
+from mbt.account import (
   ACTION_BUY_PERCENT,
   ACTION_SELL_PERCENT,
 )
-from mbt.data_provider import DataProvider
 import numpy as np
 
 

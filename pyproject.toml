@@ -13,6 +13,9 @@ dev = [
     "pytest>=9.0.2",
     "pytest-benchmark>=5.2.3",
 ]
+excel = [
+    "openpyxl>=3.1.5",
+]
 
 [project.optional-dependencies]
 alpha = [
@@ -26,7 +29,6 @@ msd = [
 server = [
   "fastapi[standard]>=0.135.1",
 ]
-
 
 [tool.pytest.ini_options]
 pythonpath = [ "." ]

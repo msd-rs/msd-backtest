@@ -11,3 +11,6 @@ wheels/
 .python-version
 uv.lock
 .pytest_cache
+
+
+dev

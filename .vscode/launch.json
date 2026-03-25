@@ -17,6 +17,8 @@
                 "2025-01-01",
                 "-e",
                 "2025-12-31",
+                "-o",
+                "dev/a.json"
             ],
             "console": "integratedTerminal",
             "env": {

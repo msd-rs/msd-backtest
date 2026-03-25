@@ -84,7 +84,7 @@ def generate_adjustment_factors_all(
   return df
 
 
-def load_data_msd(
+def load_data(
   msd_host: str, symbols: list[str], start: str, end: str
 ) -> tuple[DataProvider, list[str]]:
 

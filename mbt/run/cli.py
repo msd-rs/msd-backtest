@@ -1,14 +1,24 @@
+import logging
+from typing import Tuple
 from mbt import DataProvider
 from mbt import Runner
 from mbt import Account
-from mbt.run.msd import load_data_msd
+from mbt.run.msd import load_data
 import argparse
 from mbt.run.backend import RunRequest
 import pandas as pd
 import numpy as np
+import json
+import logging
+
+logging.basicConfig(
+  format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
+)
+
+logger = logging.getLogger("backtest")
 
 
-def parse_args() -> tuple[RunRequest, str]:
+def parse_args() -> Tuple[RunRequest, str, str]:
   parser = argparse.ArgumentParser(description="Run a strategy")
   parser.add_argument(
     "strategy",
@@ -23,7 +33,17 @@ def parse_args() -> tuple[RunRequest, str]:
   parser.add_argument(
     "-m", "--msd", type=str, default="http://localhost:50510", help="MSD host"
   )
+  parser.add_argument(
+    "-o",
+    "--output",
+    default="",
+    help="output to, empty to stdout, or any supported file path, csv, excel",
+  )
+  parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
+
+  if args.verbose:
+    logging.getLogger().setLevel(logging.DEBUG)
 
   if args.strategy.endswith(".json"):
     with open(args.strategy, "r") as f:
@@ -49,7 +69,7 @@ def parse_args() -> tuple[RunRequest, str]:
   if len(args.symbols) == 0:
     raise ValueError("No symbols provided")
 
-  return req, args.msd
+  return req, args.msd, args.output
 
 
 def build_report(dp: DataProvider) -> pd.DataFrame:
@@ -69,16 +89,59 @@ def build_report(dp: DataProvider) -> pd.DataFrame:
   return df
 
 
-def main():
-  req, msd_host = parse_args()
-  dp, symbols = load_data_msd(msd_host, req.symbols, req.start, req.end)
-  account = Account(10000.0, dp)
-  runner = Runner(account)
-  runner.run(req.strategy)
-  df = build_report(dp)
-  pd.set_option("display.max_rows", None)
+def float_format(f: float) -> str:
+  s = f"{f:.6f}"
+  if "." in s:
+    s = s.rstrip("0").rstrip(".")
+  return s
 
-  print(df)
+
+def build_output(dp: DataProvider, symbols: list[str], df: pd.DataFrame, output: str):
+  ext = output.split(".")[-1].lower()
+  logger.info(f"output kind: {ext}")
+  if ext == "csv":
+    df.to_csv(output, index=False, float_format=float_format)  # type: ignore
+  elif ext == "xlsx":
+    with pd.ExcelWriter(output) as writer:
+      for i, symbol in enumerate(symbols):
+        df.iloc[i * dp.bars : (i + 1) * dp.bars].to_excel(
+          writer,
+          sheet_name=symbol,
+          index=False,
+          float_format="%.6f",
+        )
+  elif ext == "json":
+    data = {}
+    for i, symbol in enumerate(symbols):
+      d = df.iloc[i * dp.bars : (i + 1) * dp.bars].to_dict(orient="list")  # type: ignore
+      del d["symbol"]
+      d["date"] = [t.strftime("%Y-%m-%d %X").rstrip(" 00:00:00") for t in d["date"]]
+      data[symbol] = d
+    logger.info("build json")
+    with open(output, "w") as f:
+      json.dump(data, f, ensure_ascii=False)
+  else:
+    raise ValueError(f"unsupported output format: {ext}")
+  logger.info(f"output saved to: {output}")
+
+
+def main():
+  req, msd_host, output = parse_args()
+  logger.info(f"load data from {msd_host}")
+  dp, symbols = load_data(msd_host, req.symbols, req.start, req.end)
+  logger.info("data loaded")
+  account = Account(10000.0, dp)
+  logger.info("account created")
+  runner = Runner(account)
+  logger.info("runner created")
+  runner.run(req.strategy)
+  logger.info("strategy run")
+  df = build_report(dp)
+  logger.info("report built")
+  if len(output) > 0:
+    build_output(dp, symbols, df, output)
+  else:
+    print(df)
 
 
 if __name__ == "__main__":

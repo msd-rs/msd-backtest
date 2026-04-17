@@ -1,3 +1,5 @@
+from mbt.run.report import build_report
+from mbt.run.report import build_json_report
 import logging
 from typing import Tuple
 from mbt import DataProvider
@@ -72,23 +74,6 @@ def parse_args() -> Tuple[RunRequest, str, str]:
   return req, args.msd, args.output
 
 
-def build_report(dp: DataProvider) -> pd.DataFrame:
-  symbols = np.repeat(dp.symbols, dp.bars)
-  dates = dp.dates
-  df = pd.DataFrame(
-    {
-      "symbol": symbols,
-      "date": dates,
-      "price": dp.all("price"),
-      "close": dp.all("close"),
-      "ror": dp.all("ror"),
-      "ror_hold": dp.all("ror_hold"),
-      "actions": dp.all("actions"),
-    }
-  )
-  return df
-
-
 def float_format(f: float) -> str:
   s = f"{f:.6f}"
   if "." in s:
@@ -111,12 +96,7 @@ def build_output(dp: DataProvider, symbols: list[str], df: pd.DataFrame, output:
           float_format="%.6f",
         )
   elif ext == "json":
-    data = {}
-    for i, symbol in enumerate(symbols):
-      d = df.iloc[i * dp.bars : (i + 1) * dp.bars].to_dict(orient="list")  # type: ignore
-      del d["symbol"]
-      d["date"] = [t.strftime("%Y-%m-%d %X").rstrip(" 00:00:00") for t in d["date"]]
-      data[symbol] = d
+    data = build_json_report(dp, df)
     logger.info("build json")
     with open(output, "w") as f:
       json.dump(data, f, ensure_ascii=False)

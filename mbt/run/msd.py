@@ -84,9 +84,25 @@ def generate_adjustment_factors_all(
   return df
 
 
+def next_hook_al(i: int, groups: int, bars: int):
+  al.set_ctx(end=i + 1)
+
+
 def load_data(
   msd_host: str, symbols: list[str], start: str, end: str
 ) -> tuple[DataProvider, list[str]]:
+  """
+  create a DataProvider for backtesting from msd database.
+
+  Args:
+    msd_host: msd server host
+    symbols: symbols to backtest
+    start: start date
+    end: end date
+
+  Returns:
+    DataProvider and symbols
+  """
 
   client = pymsd.create_msd_pandas(msd_host)
 
@@ -99,8 +115,10 @@ def load_data(
   )
 
   data, symbols = client.concat(dfs, base=symbols[0], join="nan")
-  dp = DataProvider(data, symbols=symbols)
-  al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN)
+  if not data or "ts" not in data:
+    return DataProvider({"ts": np.array([])}, symbols=[]), []
+
+  dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
 
   data["price"] = data["close"].copy()  # keep original as price
   generate_adjustment_factors_all(data, dp.groups, dp.bars)
@@ -109,4 +127,9 @@ def load_data(
   data["high"] = data["high"] * data["bw_factor"]
   data["low"] = data["low"] * data["bw_factor"]
 
+  if dp.bars == 0:
+    raise ValueError("No data found for the given symbols and date range.")
+
+  # reset al context
+  al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
   return dp, symbols

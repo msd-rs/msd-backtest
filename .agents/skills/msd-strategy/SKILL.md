@@ -49,6 +49,27 @@ class Strategy(mbt.Strategy):
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.
   - `limited` used to check whether the bar had limit up/down, 0 for no limit, 1 for limit up, -1 for limit down
+  - Financial basic fields (基本财务简表, updated quarterly):
+    - `eps_basic`: basic earnings per share, 基本每股收益, 单位 元
+    - `eps_diluted`: diluted earnings per share, 摊薄每股收益, 单位 元
+    - `eps_deduct`: adjusted earnings per share, 扣非每股收益, 单位 元
+    - `bps`: book value per share, 每股净资产, 单位 元
+    - `net_profit`: net profit, 净利润, 单位 元
+    - `np_parent_growth`: net profit growth, 净利润增长率, 单位 无
+    - `net_profit_deduct`: adjusted net profit, 扣非净利润, 单位 元
+    - `total_revenue`: total revenue, 营业总收入, 单位 元
+    - `revenue_growth`: revenue growth, 营业总收入增长率, 单位 无
+    - `ocfps`: operating cash flow per share, 每股经营现金流量, 单位 元
+    - `undist_profit_ps`: undistributed profit per share, 每股未分配利润, 单位 元
+    - `capital_reserve_ps`: capital reserve per share, 每股资本公积金, 单位 元
+    - `gross_margin`: gross margin, 销售毛利率, 单位 无
+    - `sales_cost_rate`: sales cost rate, 销售成本率, 单位 无
+    - `net_margin`: net margin, 销售净利率, 单位 无
+    - `op_margin`: operating margin, 营业利润率, 单位 无
+    - `roe_diluted`: return on equity, 摊薄净资产收益率, 单位 无
+    - `roe`: return on equity, 净资产收益率, 单位 无
+    - `debt_asset_ratio`: debt asset ratio, 资产负债率, 单位 无
+  - 
 - `ctx.buy(signals: np.ndarray, percent: float = 1.0)`
   `ctx.sell(signals: np.ndarray, percent: float = 1.0)`
   buy/sell a position, `signals` is a boolean array of signals, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.

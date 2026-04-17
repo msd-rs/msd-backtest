@@ -247,8 +247,11 @@ class Account:
       initial_cash: initial cash of the account
       dp: data provider of the account, the data kinds will be used are:
         - "price": price of the stock, without dividend
-        - "gcash": given cash per share in dividend
-        - "gshare": given share per share in dividend
+        - "bonus": bonus per share in dividend
+        - "transfers": transfers per share in dividend
+        - "dividend": dividend per share in dividend
+        - "rightShare": right share per share in dividend
+        - "rightPrice": right price per share in dividend
       unit: trading unit, default is 100
       slippage: slippage of the buy and sell operations, for buy: deal_price = price * (1 + slippage), for sell: deal_price = price * (1 - slippage)
     """
@@ -286,6 +289,13 @@ class Account:
     self.actions = dp.all("actions", create_if_not_exist=np.int32)[s:e]
     self.action_shares = dp.all("action_shares", create_if_not_exist=np.float64)[s:e]
 
+    """corporate actions"""
+    self.dividends = dp.all("dividend", create_if_not_exist=np.float64)[s:e]
+    self.bonuses = dp.all("bonus", create_if_not_exist=np.float64)[s:e]
+    self.transfers = dp.all("transfers", create_if_not_exist=np.float64)[s:e]
+    self.right_shares = dp.all("rightShare", create_if_not_exist=np.float64)[s:e]
+    self.right_prices = dp.all("rightPrice", create_if_not_exist=np.float64)[s:e]
+
     self.assets.fill(initial_cash)
     self.ror.fill(0.0)
     self.actions.fill(ACTION_KEEP)
@@ -317,6 +327,20 @@ class Account:
 
     if operation.position is None:
       raise ValueError(f"invalid operation: {operation}")
+
+    if self.position.shares > 0:
+      dividend = self.dividends[ts]
+      bonus = self.bonuses[ts]
+      transfers = self.transfers[ts]
+      right_share = self.right_shares[ts]
+      right_price = self.right_prices[ts]
+
+      if dividend > 0 or bonus > 0 or transfers > 0 or right_share > 0:
+        self.cash += self.position.shares * (dividend / 10.0)
+        self.cash -= self.position.shares * (right_share / 10.0) * right_price
+        self.position.shares += self.position.shares * (
+          bonus / 10.0 + transfers / 10.0 + right_share / 10.0
+        )
 
     if operation.action == ACTION_BUY:
       operation = self.do_buy(ts, operation.position)

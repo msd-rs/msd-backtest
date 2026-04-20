@@ -7,7 +7,7 @@ def uniform_ror(a: np.ndarray) -> np.ndarray:
   base = a[0]
   if base == 0:
     return a
-  return ((a - base) / base * 1000).astype(np.int32)
+  return ((a - base) / base * 1000).round(0)
 
 
 def build_report(dp: DataProvider) -> pd.DataFrame:
@@ -17,10 +17,10 @@ def build_report(dp: DataProvider) -> pd.DataFrame:
     {
       "symbol": symbols,
       "date": dates,
-      "close": (dp.all("close") * 1000).astype(np.int64) / 1000.0,
+      "close": (dp.all("close") * 1000).round(0),
       "close_ror": uniform_ror(dp.all("close")),
-      "ror": (dp.all("ror") * 1000).astype(np.int32),
-      "ror_hold": (dp.all("ror_hold") * 1000).astype(np.int32),
+      "ror": (dp.all("ror") * 1000).round(0),
+      "ror_hold": (dp.all("ror_hold") * 1000).round(0),
       "actions": dp.all("actions"),
     }
   )

@@ -1,3 +1,4 @@
+from asyncio import coroutines
 from mbt.run.report import build_report
 from mbt.run.report import build_json_report
 import logging
@@ -9,15 +10,31 @@ from mbt.run.msd import load_data
 import argparse
 from mbt.run.backend import RunRequest
 import pandas as pd
-import numpy as np
 import json
-import logging
+import os
 
 logging.basicConfig(
   format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
 )
 
 logger = logging.getLogger("backtest")
+
+
+def expand_symbols(symbols: list[str]) -> list[str]:
+  """read as file when input is a file path, and expand it. otherwise, return the input as a list of symbols"""
+  expanded = []
+  for s in symbols:
+    if os.path.isfile(s):
+      with open(s, "r") as f:
+        lines = filter(
+          lambda x: len(x) > 0 and not x.startswith("#"),
+          map(lambda x: x.strip(), f.readlines()),
+        )
+        expanded.extend(lines)
+    else:
+      expanded.append(s)
+
+  return expanded
 
 
 def parse_args() -> Tuple[RunRequest, str, str]:
@@ -51,7 +68,7 @@ def parse_args() -> Tuple[RunRequest, str, str]:
     with open(args.strategy, "r") as f:
       req = RunRequest.from_json(
         f,
-        symbols=args.symbols,
+        symbols=expand_symbols(args.symbols),
         start=args.begin,
         end=args.end,
         args=args.args,
@@ -109,13 +126,15 @@ def main():
   req, msd_host, output = parse_args()
   logger.info(f"load data from {msd_host}")
   dp, symbols = load_data(msd_host, req.symbols, req.start, req.end)
-  logger.info("data loaded")
+  logger.info(
+    f"data loaded, symbols: {len(symbols)}, bars per symbol: {dp.bars}, total_bars: {dp.groups * dp.bars}"
+  )
   account = Account(10000.0, dp)
   logger.info("account created")
   runner = Runner(account)
   logger.info("runner created")
   runner.run(req.strategy)
-  logger.info("strategy run")
+  logger.info("strategy finished")
   df = build_report(dp)
   logger.info("report built")
   if len(output) > 0:

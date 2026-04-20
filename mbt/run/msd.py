@@ -2,6 +2,9 @@ import pymsd
 from mbt import DataProvider
 import alpha as al
 import numpy as np
+import logging
+
+logger = logging.getLogger("msd_loader")
 
 
 def generate_adjustment_factors(df: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -113,8 +116,10 @@ def load_data(
     end=end,
     join={"stock_dividend": "zero", "*": "backward"},
   )
+  logger.info(f"data loaded from msd, {len(dfs)} symbols")
 
   data, symbols = client.concat(dfs, base=symbols[0], join="nan")
+  logger.info("data concatenated")
   if not data or "ts" not in data:
     return DataProvider({"ts": np.array([])}, symbols=[]), []
 
@@ -122,10 +127,12 @@ def load_data(
 
   data["price"] = data["close"].copy()  # keep original as price
   generate_adjustment_factors_all(data, dp.groups, dp.bars)
+  logger.info("adjustment factors generated")
   data["open"] = data["open"] * data["bw_factor"]
   data["close"] = data["close"] * data["bw_factor"]
   data["high"] = data["high"] * data["bw_factor"]
   data["low"] = data["low"] * data["bw_factor"]
+  logger.info("adjustment factors applied")
 
   if dp.bars == 0:
     raise ValueError("No data found for the given symbols and date range.")

@@ -99,7 +99,7 @@ class DataProvider:
       s, e = self.symbol_indices(index)
       return self.data[kind][s : e]
     else:
-      return self.data[kind][index * self.bars : (index + 1) * self.bars]
+      return self.data[kind][index: index + self.bars]
 
   def symbol_indices(self, symbol: str) -> tuple[int, int]:
     """

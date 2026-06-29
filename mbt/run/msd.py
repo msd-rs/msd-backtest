@@ -18,7 +18,7 @@ def generate_adjustment_factors(df: dict[str, np.ndarray]) -> dict[str, np.ndarr
   """
 
   # 2. 获取前一天的收盘价 (Pre-close)
-  pre_close = df["close"]
+  pre_close = al.REF(df["close"], 1)
 
   # 3. 计算除权除息日的变动比例 k
   # k = (前收盘 - 每股分红 + 配股比例 * 配股价) / (1 + 每股送股 + 每股转增 + 配股比例) / 前收盘
@@ -26,11 +26,11 @@ def generate_adjustment_factors(df: dict[str, np.ndarray]) -> dict[str, np.ndarr
 
   # 分子：调整后的总价
   numerator = (
-    pre_close - df["dividend"] / 10.0 + df["right_shares"] / 10.0 * df["right_price"]
+    pre_close - df["dividend"]+ df["right_shares"] * df["right_price"]
   )
   # 分母：调整后的总股本比例
   denominator = (
-    1 + df["transfer_shares"] / 10.0 + df["transfer_shares"] / 10.0 + df["right_shares"] / 10.0
+    1 + df["transfer_shares"] + df["transfer_shares"] + df["right_shares"] 
   ) * pre_close
 
   # 计算每日变动系数 k
@@ -125,13 +125,18 @@ def load_data(
 
   dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
 
-  data["price"] = data["close"].copy()  # keep original as price
-  generate_adjustment_factors_all(data, dp.groups, dp.bars)
+  # keep original as price
+  data["price"] = data["close"].copy()
+
+  data["bw_price"] = al.BW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
+  data["fw_price"] = al.FW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
+
   logger.info("adjustment factors generated")
-  data["open"] = data["open"] * data["bw_factor"]
-  data["close"] = data["close"] * data["bw_factor"]
-  data["high"] = data["high"] * data["bw_factor"]
-  data["low"] = data["low"] * data["bw_factor"]
+  # apply forward factor to all price related columns used to do technical analysis
+  data["open"] = al.FW_SPLIT(data["open"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
+  data["high"] = al.FW_SPLIT(data["high"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
+  data["low"] = al.FW_SPLIT(data["low"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
+  data["close"] = data["fw_price"]
   logger.info("adjustment factors applied")
 
   if dp.bars == 0:

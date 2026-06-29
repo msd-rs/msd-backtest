@@ -20,7 +20,7 @@
                 "-m",
                 "http://localhost:50511",
                 "-o",
-                "dev/a.json"
+                "dev/a.xlsx"
             ],
             "console": "integratedTerminal",
             "env": {

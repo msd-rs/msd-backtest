@@ -131,7 +131,11 @@ def build_output(reports: list[Report], output: str):
       df_metrics = pd.DataFrame([r.metrics(True) for r in reports])
       df_metrics.to_excel(writer, sheet_name="metrics", index=False)
       for report in reports:
-        df = pd.DataFrame(report.detailed())
+        data = report.detailed()
+        data['price'] = report.price
+        data['fw_price'] = report.fw_price
+        data['bw_price'] = report.bw_price
+        df = pd.DataFrame(data)
         df.to_excel(
           writer,
           sheet_name=report.symbol,

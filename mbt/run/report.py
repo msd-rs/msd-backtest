@@ -9,16 +9,19 @@ class Report:
     self.symbol = symbol
     s, e = dp.symbol_indices(symbol)
     self.date = dp.dates[s:e]
-    self.close = np.round(dp.slice("close", symbol), 2)
-    self.ror = np.round(dp.slice("ror", symbol), 4)
-    self.ror_hold = np.round(dp.slice("ror_hold", symbol), 4)
-    self.actions = dp.slice("actions", symbol)
+    self.ror = np.round(dp.slice("ror", s), 4)
+    self.ror_hold = np.round(dp.slice("ror_hold", s), 4)
+    self.ror_original = np.round(uniform_ror(dp.slice("bw_price", s)), 4)
+    self.actions = dp.slice("actions", s)
+    self.price = dp.slice("price", s)
+    self.fw_price = np.round(dp.slice("fw_price", s), 3)
+    self.bw_price = np.round(dp.slice("bw_price", s), 3)
     self.calcaute_metrics(dp)
     
 
 
   def calcaute_metrics(self, dp: DataProvider):
-    bechmark = uniform_ror(dp.slice("close", 0))
+    bechmark = uniform_ror(dp.slice("bw_price", 0))
 
     # 1. Convert cumulative returns to daily returns
     strategy_ratio = 1.0 + self.ror
@@ -84,7 +87,7 @@ class Report:
       calmar = 0.0
 
     # 3. Trade-level metrics
-    action_shares = dp.slice("action_shares", self.symbol) if "action_shares" in dp.data else np.zeros_like(self.close)
+    action_shares = dp.slice("action_shares", self.symbol) if "action_shares" in dp.data else np.zeros_like(self.price)
 
     # Track shares held at each bar
     shares = np.zeros(len(self.actions))
@@ -188,6 +191,7 @@ class Report:
       "date": self.date,
       "ror": self.ror,
       "ror_hold": self.ror_hold,
+      "ror_original": self.ror_original,
       "actions": self.actions,
     }
     if not with_symbol:

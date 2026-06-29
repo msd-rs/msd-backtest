@@ -12,7 +12,7 @@ def generate_adjustment_factors(df: dict[str, np.ndarray]) -> dict[str, np.ndarr
   计算前复权和后复权因子
 
   Arguments:
-    df:  必须包含: ts(按时间升序), close, bonus, transfers, dividend, rightShare, rightPrice
+    df:  必须包含: ts(按时间升序), close(原始股价), dividend(每股分红), transfer_shares(每股送转股), right_shares(每股配股数), right_price(配股价)
   Returns:
     包含前复权因子 fw_factor 和后复权因子 bw_factor 的 DataFrame
   """
@@ -26,11 +26,11 @@ def generate_adjustment_factors(df: dict[str, np.ndarray]) -> dict[str, np.ndarr
 
   # 分子：调整后的总价
   numerator = (
-    pre_close - df["dividend"] / 10.0 + df["rightShare"] / 10.0 * df["rightPrice"]
+    pre_close - df["dividend"] / 10.0 + df["right_shares"] / 10.0 * df["right_price"]
   )
   # 分母：调整后的总股本比例
   denominator = (
-    1 + df["bonus"] / 10.0 + df["transfers"] / 10.0 + df["rightShare"] / 10.0
+    1 + df["transfer_shares"] / 10.0 + df["transfer_shares"] / 10.0 + df["right_shares"] / 10.0
   ) * pre_close
 
   # 计算每日变动系数 k
@@ -42,9 +42,8 @@ def generate_adjustment_factors(df: dict[str, np.ndarray]) -> dict[str, np.ndarr
   # 极端情况处理：如果没有发生除权行为，k 应该是 1.0
   k[
     (df["dividend"] == 0)
-    & (df["bonus"] == 0)
-    & (df["transfers"] == 0)
-    & (df["rightShare"] == 0)
+    & (df["transfer_shares"] == 0)
+    & (df["right_shares"] == 0)
   ] = 1.0
 
   # 4. 生成后复权因子 (Backward Factor)
@@ -74,10 +73,9 @@ def generate_adjustment_factors_all(
     data = {
       "close": df["close"][s:e],
       "dividend": df["dividend"][s:e],
-      "bonus": df["bonus"][s:e],
-      "transfers": df["transfers"][s:e],
-      "rightShare": df["rightShare"][s:e],
-      "rightPrice": df["rightPrice"][s:e],
+      "transfer_shares": df["transfer_shares"][s:e],
+      "right_shares": df["right_shares"][s:e],
+      "right_price": df["right_price"][s:e],
     }
     fw, bw = generate_adjustment_factors(data)
     fw_factors[s:e] = fw
@@ -111,17 +109,19 @@ def load_data(
 
   dfs = client.load(
     objs=symbols,
-    tables=["stock_kline_1d", "stock_dividend", "stock_shares"],
+    tables=["stock_kline_1d", "stock_dividend"],
     start=start,
     end=end,
     join={"stock_dividend": "zero", "*": "backward"},
   )
   logger.info(f"data loaded from msd, {len(dfs)} symbols")
 
-  data, symbols = client.concat(dfs, base=symbols[0], join="nan")
+  data, symbols = client.adaptor.concat(dfs, base=symbols[0], join="nan")
   logger.info("data concatenated")
-  if not data or "ts" not in data:
+  if data is None or "ts" not in data:
     return DataProvider({"ts": np.array([])}, symbols=[]), []
+
+  data = client.adaptor.to_numpy(data)
 
   dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
 

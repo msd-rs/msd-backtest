@@ -14,11 +14,10 @@ class RunnerContext(Context):
   - ts: timestamp
   - price: price of the stock
   Data optional internally are:
-    - "bonus": bonus per share in dividend
-    - "transfers": transfers per share in dividend
     - "dividend": dividend per share in dividend
-    - "rightShare": right share per share in dividend
-    - "rightPrice": right price per share in dividend
+    - "transfer_shares": transfer shares per share in dividend
+    - "right_shares": right share per share in dividend
+    - "right_price": right price per share in dividend
   Other data can be added by user for specific strategy
 
   The strategy can use the following methods to operate the account:

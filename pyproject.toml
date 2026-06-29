@@ -6,34 +6,26 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.4.2",
+    "orjson>=3.11.9",
 ]
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "pytest-benchmark>=5.2.3",
-]
-excel = [
-    "openpyxl>=3.1.5",
-]
+dev = ["pytest>=9.0.2", "pytest-benchmark>=5.2.3"]
+excel = ["openpyxl>=3.1.5"]
 
 [project.optional-dependencies]
-alpha = [
-  "py-alpha-lib>=0.2",
-]
-msd = [
-  "pymsd>=0.1",
-  "requests>=2.32",
-  "pandas>=3.0",
-]
-server = [
-  "fastapi[standard]>=0.135.1",
-]
+alpha = ["py-alpha-lib>=0.2"]
+msd = ["pymsd>=0.1", "requests>=2.32", "pandas>=3.0"]
+server = ["fastapi[standard]>=0.135.1"]
 
 [tool.pytest.ini_options]
-pythonpath = [ "." ]
+pythonpath = ["."]
 log_format = "%(asctime)s %(levelname)s %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
 log_cli_level = "INFO"
 log_cli = true
 addopts = "--benchmark-skip"
+
+[tool.uv.sources]
+py-alpha-lib = { path = "../alpha-lib-rs/py-binding", editable = true }
+pymsd = { path = "../msd-rs2/bindings/python", editable = true }

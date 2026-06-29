@@ -1,4 +1,5 @@
-from asyncio import coroutines
+import datetime
+from mbt.run.report import Report
 from mbt.run.report import build_report
 from mbt.run.report import build_json_report
 import logging
@@ -10,8 +11,9 @@ from mbt.run.msd import load_data
 import argparse
 from mbt.run.backend import RunRequest
 import pandas as pd
-import json
+import orjson
 import os
+import numpy as np
 
 logging.basicConfig(
   format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
@@ -44,6 +46,7 @@ def parse_args() -> Tuple[RunRequest, str, str]:
     help="Strategy to run, can be a JSON file or a Python file",
   )
   parser.add_argument("-s", "--symbols", nargs="+", default=[], help="Symbols to run")
+  parser.add_argument("-B", "--benchmark", type=str, default="SH000300", help="Benchmark symbol")
   parser.add_argument(
     "-b", "--begin", type=str, default="2020-01-01", help="Start date"
   )
@@ -88,6 +91,13 @@ def parse_args() -> Tuple[RunRequest, str, str]:
   if len(args.symbols) == 0:
     raise ValueError("No symbols provided")
 
+  try:
+    args.symbols.remove(args.benchmark)
+  except ValueError:
+    pass
+
+  args.symbols.insert(0, args.benchmark)
+
   return req, args.msd, args.output
 
 
@@ -97,29 +107,50 @@ def float_format(f: float) -> str:
     s = s.rstrip("0").rstrip(".")
   return s
 
+def json_default(self, o):
+  if isinstance(o, (np.ndarray, np.generic)):
+    return o.tolist()
+  elif isinstance(o, np.datetime64):
+    return np.datetime_as_string(o, 's').rstrip("T00:00:00")
+  elif isinstance(o, datetime.datetime):
+    return o.strftime("%Y-%m-%dT%X").rstrip("T00:00:00")
+  elif isinstance(o, float):
+    return round(o, 6)
+  return o
 
-def build_output(dp: DataProvider, symbols: list[str], df: pd.DataFrame, output: str):
+
+def build_output(reports: list[Report], output: str):
   ext = output.split(".")[-1].lower()
   logger.info(f"output kind: {ext}")
   if ext == "csv":
-    df.to_csv(output, index=False, float_format=float_format)  # type: ignore
+    for report in reports:
+      df = pd.DataFrame(report.detailed(with_symbol=True))
+      df.to_csv(output, index=False, float_format=float_format)  # type: ignore
   elif ext == "xlsx":
     with pd.ExcelWriter(output) as writer:
-      for i, symbol in enumerate(symbols):
-        df.iloc[i * dp.bars : (i + 1) * dp.bars].to_excel(
+      df_metrics = pd.DataFrame([r.metrics(True) for r in reports])
+      df_metrics.to_excel(writer, sheet_name="metrics", index=False)
+      for report in reports:
+        df = pd.DataFrame(report.detailed())
+        df.to_excel(
           writer,
-          sheet_name=symbol,
+          sheet_name=report.symbol,
           index=False,
           float_format="%.6f",
         )
   elif ext == "json":
-    data = build_json_report(dp, df)
+    data = build_json_report(reports)
     logger.info("build json")
-    with open(output, "w") as f:
-      json.dump(data, f, ensure_ascii=False)
+    with open(output, "wb") as f:
+      f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_OMIT_MICROSECONDS))
   else:
     raise ValueError(f"unsupported output format: {ext}")
   logger.info(f"output saved to: {output}")
+
+
+def echo_reports(reports: list[Report]):
+  df_metrics = pd.DataFrame([r.metrics(True) for r in reports])
+  print(df_metrics)
 
 
 def main():
@@ -135,12 +166,12 @@ def main():
   logger.info("runner created")
   runner.run(req.strategy)
   logger.info("strategy finished")
-  df = build_report(dp)
+  reports = build_report(dp)[1:]
   logger.info("report built")
   if len(output) > 0:
-    build_output(dp, symbols, df, output)
+    build_output(reports, output)
   else:
-    print(df)
+    echo_reports(reports)
 
 
 if __name__ == "__main__":

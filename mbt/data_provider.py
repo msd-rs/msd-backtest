@@ -41,6 +41,7 @@ class DataProvider:
     self.groups = len(self.symbols)
     self.bars = len(self.dates) // self.groups
 
+  @staticmethod
   def verify_data(symbols: list[str], data: dict[str, np.ndarray], ts_name: str):
     """verify the data
     1. ts_name must be in data
@@ -80,6 +81,40 @@ class DataProvider:
       return np.tile(self.data[kind][i * self.bars : (i + 1) * self.bars], self.groups)
     else:
       return self.data[kind]
+
+  def slice(self, kind: str, index: str | int) -> np.ndarray:
+    """
+    return the slice of the data of the kind
+    Args:
+      kind: kind of data
+      index: index of the slice, can be symbol name or index
+    Returns:
+      np.ndarray: slice of the data
+    Raise:
+      ValueError: if the kind is not in the data or index is out of range
+    """
+    if kind not in self.data:
+      raise ValueError(f"data '{kind}' not found")
+    if isinstance(index, str):
+      s, e = self.symbol_indices(index)
+      return self.data[kind][s : e]
+    else:
+      return self.data[kind][index * self.bars : (index + 1) * self.bars]
+
+  def symbol_indices(self, symbol: str) -> tuple[int, int]:
+    """
+    return the indices of the symbol
+    Args:
+      symbol: symbol of the data
+    Returns:
+      tuple[int, int]: indices of the symbol
+    Raise:
+      ValueError: if the symbol is not in the data
+    """
+    if symbol not in self.symbols:
+      raise ValueError(f"symbol '{symbol}' not found")
+    i = self.symbols.index(symbol)
+    return i * self.bars, (i + 1) * self.bars
 
   def __len__(self):
     return self.bars

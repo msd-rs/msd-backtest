@@ -69,7 +69,7 @@ class RunRequest:
 
   @staticmethod
   def from_json(
-    data: str | IO,
+    data: str | IO[str] | IO[bytes] | bytes,
     /,
     symbols: list[str] | None = None,
     start: str | None = None,
@@ -83,10 +83,8 @@ class RunRequest:
     else:
       content = data
 
-    if isinstance(content, bytes):
-      content = content.decode("utf-8")
+    config = json.loads(content) #type: ignore
 
-    config = json.loads(content)
 
     return RunRequest(
       config.get("strategy"),

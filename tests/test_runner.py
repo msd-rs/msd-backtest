@@ -28,6 +28,12 @@ def test_runner():
       "low": np.tile(np.array([1.0, 2.0, 3.0, 4.0, 5.0]), 2),
       "close": np.tile(np.array([1.0, 2.0, 3.0, 4.0, 5.0]), 2),
       "price": np.tile(np.array([1.0, 2.0, 3.0, 4.0, 5.0]), 2),
+      "bw_price": np.tile(np.array([1.0, 2.0, 3.0, 4.0, 5.0]), 2),
+      "fw_price": np.tile(np.array([1.0, 2.0, 3.0, 4.0, 5.0]), 2),
+      "dividend": np.zeros(10),
+      "transfer_shares": np.zeros(10),
+      "right_shares": np.zeros(10),
+      "right_price": np.zeros(10),
     },
     symbols=["a", "b"],
   )

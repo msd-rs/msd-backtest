@@ -14,13 +14,17 @@ import numpy as np
 def test_account_buy_sell():
   dp = DataProvider(
     {
-      "PRICE": np.array([1.0] * 20),
       "ts": np.arange(20),
+      "price": np.array([1.0] * 20),
+      "dividend": np.zeros(20),
+      "transfer_shares": np.zeros(20),
+      "right_shares": np.zeros(20),
+      "right_price": np.zeros(20),
     }
   )
   account = Account(1000.0, dp)
 
-  prices = dp.all("PRICE")
+  prices = dp.all("price")
 
   # Verify initial state
   assert account.cash == 1000.0

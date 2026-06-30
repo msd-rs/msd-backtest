@@ -1,5 +1,5 @@
 ---
-name: msd_strategy
+name: write_strategy
 description: guide user to write a strategy for msd backtest
 tags: [msd, strategy, backtest]
 version: 1.0
@@ -48,28 +48,182 @@ class Strategy(mbt.Strategy):
   - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.
-  - `limited` used to check whether the bar had limit up/down, 0 for no limit, 1 for limit up, -1 for limit down
-  - Financial basic fields (基本财务简表, updated quarterly):
-    - `eps_basic`: basic earnings per share, 基本每股收益, 单位 元
-    - `eps_diluted`: diluted earnings per share, 摊薄每股收益, 单位 元
-    - `eps_deduct`: adjusted earnings per share, 扣非每股收益, 单位 元
-    - `bps`: book value per share, 每股净资产, 单位 元
-    - `net_profit`: net profit, 净利润, 单位 元
-    - `np_parent_growth`: net profit growth, 净利润增长率, 单位 无
-    - `net_profit_deduct`: adjusted net profit, 扣非净利润, 单位 元
-    - `total_revenue`: total revenue, 营业总收入, 单位 元
-    - `revenue_growth`: revenue growth, 营业总收入增长率, 单位 无
-    - `ocfps`: operating cash flow per share, 每股经营现金流量, 单位 元
-    - `undist_profit_ps`: undistributed profit per share, 每股未分配利润, 单位 元
-    - `capital_reserve_ps`: capital reserve per share, 每股资本公积金, 单位 元
-    - `gross_margin`: gross margin, 销售毛利率, 单位 无
-    - `sales_cost_rate`: sales cost rate, 销售成本率, 单位 无
-    - `net_margin`: net margin, 销售净利率, 单位 无
-    - `op_margin`: operating margin, 营业利润率, 单位 无
-    - `roe_diluted`: return on equity, 摊薄净资产收益率, 单位 无
-    - `roe`: return on equity, 净资产收益率, 单位 无
-    - `debt_asset_ratio`: debt asset ratio, 资产负债率, 单位 无
-  - 
+  - `limited` used to check whether the bar had reached the daily limit.  0 for no limit, 1 for limit up, -1 for limit down
+  - Financial fields:
+    - Balance Sheet
+      - `f008`: Cash and Cash Equivalents
+      - `f009`: Trading Financial Assets
+      - `f010`: Notes Receivable
+      - `f011`: Accounts Receivable
+      - `f015`: Other Receivables
+      - `f016`: Contract Liabilities
+      - `f017`: Inventories
+      - `f021`: Total Current Assets
+      - `f025`: Long-term Equity Investments
+      - `f026`: Investment Properties
+      - `f027`: Property, Plant and Equipment (PP&E)
+      - `f028`: Construction in Progress (CIP)
+      - `f033`: Intangible Assets
+      - `f034`: Development Expenditures
+      - `f035`: Goodwill
+      - `f039`: Total Non-current Assets
+      - `f040`: Total Assets
+      - `f041`: Short-term Borrowings
+      - `f043`: Notes Payable
+      - `f044`: Accounts Payable
+      - `f045`: Advances from Customers
+      - `f051`: Amounts Due to Related Parties
+      - `f052`: Non-current Liabilities Due Within One Year
+      - `f054`: Total Current Liabilities
+      - `f055`: Long-term Borrowings
+      - `f056`: Bonds Payable
+      - `f059`: Provisions
+      - `f062`: Total Non-current Liabilities
+      - `f063`: Total Liabilities
+      - `f066`: Treasury Stock
+      - `f068`: Retained Earnings
+      - `f071`: Total Shareholders' Equity (Excluding Non-controlling Interests)
+      - `f073`: Total Shareholders' Equity (Including Non-controlling Interests)
+      - `f074`: Total Liabilities and Shareholders' Equity
+    - Income Statement
+      - `f075`: Revenue
+      - `f076`: Cost of Sales
+      - `f078`: Selling Expenses
+      - `f079`: Administrative Expenses
+      - `f080`: Research and Development (R&D) Expenses
+      - `f081`: Financial Expenses
+      - `f082`: Asset Impairment Losses
+      - `f084`: Investment Income
+      - `f085`: Including: Share of Profits of Associates and Joint Ventures
+      - `f087`: Operating Profit
+      - `f088`: Non-GAAP Operating Profit
+      - `f092`: Total Revenue
+      - `f093`: Profit Before Tax (PBT)
+      - `f095`: Total Operating Costs
+      - `f096`: Net Profit (Including Non-controlling Interests)
+      - `f097`: Net Profit Attributable to Shareholders of the Parent
+    - Cash Flow Statement
+      - `f099`: Cash Received from Sales of Goods and Rendering of Services
+      - `f102`: Cash Inflows from Operating Activities Subtotal
+      - `f103`: Cash Paid for Goods and Services
+      - `f104`: Cash Paid to and for Employees
+      - `f107`: Cash Outflows from Operating Activities Subtotal
+      - `f108`: Net Cash Flows from Operating Activities
+      - `f114`: Cash Inflows from Investing Activities Subtotal
+      - `f115`: Cash Paid for Acquisition of Fixed Assets, Intangible Assets and Other Long-term Assets
+      - `f116`: Cash Paid for Investments
+      - `f117`: Net Cash Paid for Acquisition of Subsidiaries and Other Business Units
+      - `f119`: Cash Outflows from Investing Activities Subtotal
+      - `f120`: Net Cash Flows from Investing Activities
+      - `f121`: Cash Received from Capital Contributions
+      - `f123`: Cash Received from Borrowings
+      - `f125`: Cash Inflows from Financing Activities Subtotal
+      - `f126`: Cash Paid for Debt Repayments
+      - `f127`: Cash Paid for Dividends, Profits Distribution or Interest Payments
+      - `f130`: Cash Outflows from Financing Activities Subtotal
+      - `f131`: Net Cash Flows from Financing Activities
+      - `f134`: Net Increase in Cash and Cash Equivalents
+      - `f136`: Ending Balance of Cash and Cash Equivalents
+      - `f137`: Net Profit
+      - `f138`: Provision for Asset Impairment
+      - `f139`: Depreciation of Fixed Assets, Depletion of Oil and Gas Assets, and Depreciation of Productive Biological Assets
+      - `f140`: Amortization of Intangible Assets
+      - `f149`: Decrease in Inventories
+      - `f150`: Decrease in Operating Receivables
+      - `f151`: Increase in Operating Payables
+      - `f156`: Ending Balance of Cash
+      - `f158`: Ending Balance of Cash Equivalents
+    - Per Share Indicators
+      - `f000`: Diluted Earnings Per Share (Diluted EPS)
+      - `f001`: Book Value per Share-based Return
+      - `f002`: Operating Cash Flow Per Share
+      - `f003`: Net Assets Per Share (BVPS)
+      - `f005`: Retained Earnings Per Share
+      - `f006`: Revenue Per Share
+      - `f007`: Non-GAAP EPS
+
+    - Profitability Analysis
+      - `f205`:Annualized Return on Equity (Annualized ROE)
+      - `f206`:Net Return on Total Assets
+      - `f207`:Return on Invested Capital (ROIC)
+      - `f208`:Cost and Expense Profit Margin
+      - `f209`:Operating Profit Margin
+      - `f210`:COGS-to-Revenue Ratio
+      - `f211`:Net Profit Margin
+      - `f212`:Return on Total Assets (ROA)
+      - `f213`:Gross Profit Margin
+      - `f214`:SG&A and Finance Expenses to Revenue Ratio
+      - `f215`:Selling Expense Ratio
+      - `f216`:Administrative Expense Ratio
+      - `f217`:Financial Expense Ratio
+      - `f218`:Non-operating Income to Total Profit Ratio
+      - `f219`:Operating Profit to Total Profit Ratio
+      - `f220`:EBITDA Per Share
+      - `f221`:EBIT Per Share
+      - `f222`:EBITDA Margin
+    - Solvency Analysis
+      - `f160`: Current Ratio
+      - `f161`: Quick Ratio
+      - `f162`: Cash Ratio
+      - `f163`: Debt-to-Equity Ratio (D/E)
+      - `f164`: Equity-to-Assets Ratio
+      - `f165`: Equity-to-Debt Ratio
+      - `f166`: Equity Multiplier
+      - `f167`: Long-term Debt to Working Capital Ratio
+      - `f168`: Long-term Debt Ratio
+      - `f169`: Times Interest Earned (TIE)
+      - `f172`: Debt to Tangible Net Worth Ratio
+      - `f174`: Debt Service Coverage Ratio (DSCR)
+      - `f175`: Operating Cash Flow to Current Liabilities Ratio
+      - `f177`: Working Capital Per Share
+      - `f178`: Total Debt-to-EBITDA Ratio
+    - Operating Efficiency Analysis
+      - `f179`:  Operating Cycle
+      - `f180`:  Days Inventory Outstanding (再生 DIO)
+      - `f181`:  Days Sales Outstanding (再生 DSO)
+      - `f182`:  Current Asset Turnover Days
+      - `f183`:  Total Asset Turnover Days
+      - `f184`:  Inventory Turnover Ratio
+      - `f185`:  Accounts Receivable Turnover Ratio
+      - `f186`:  Current Asset Turnover Ratio
+      - `f187`:  Fixed Asset Turnover Ratio
+      - `f188`:  Total Asset Turnover Ratio
+      - `f189`:  Net Asset Turnover Ratio
+      - `f190`:  Equity Turnover Ratio
+      - `f191`:  Working Capital Turnover Ratio
+      - `f192`:  Inventory Year-on-Year (YoY) Growth Rate
+      - `f193`:  Accounts Receivable Year-on-Year (YoY) Growth Rate
+    - Growth Ability Analysis
+      - `f194`: Revenue Growth Rate
+      - `f195`: Operating Profit Growth Rate
+      - `f196`: Total Profit Growth Rate
+      - `f199`: Current Assets Growth Rate
+      - `f200`: Fixed Assets Growth Rate
+      - `f201`: Total Assets Growth Rate
+      - `f202`: Diluted EPS Growth Rate
+      - `f203`: Net Assets Per Share Growth Rate
+      - `f204`: Operating Cash Flow Per Share Growth Rate
+    - Capital Structure Analysis
+      - `f223`: Asset-to-Liability Ratio
+      - `f224`: Equity-to-Assets Ratio
+      - `f225`: Long-term Debt Ratio
+      - `f226`: Equity-to-Fixed Assets Ratio
+      - `f227`: Debt-to-Equity Ratio
+      - `f228`: Non-current Assets to Long-term Capital Ratio
+      - `f229`: Capitalization Ratio
+      - `f231`: Fixed Assets to Total Assets Ratio
+    - Cash Flow Analysis
+      - `f232`:  Operating Cash Flow to Sales Ratio
+      - `f233`:  Cash Return on Assets
+      - `f234`:  Operating Cash Flow to Net Profit Ratio
+      - `f235`:  Operating Cash Flow to Total Debt Ratio
+      - `f236`:  Operating Cash Flow Per Share
+      - `f237`:  Net Operating Cash Flow Per Share
+      - `f238`:  Net Investing Cash Flow Per Share
+      - `f239`:  Net Financing Cash Flow Per Share
+      - `f240`:  Net Increase in Cash and Cash Equivalents Per Share
+      - `f241`:  Cash Flow Adequacy Ratio
+      - `f242`:  Cash Operating Index
 - `ctx.buy(signals: np.ndarray, percent: float = 1.0)`
   `ctx.sell(signals: np.ndarray, percent: float = 1.0)`
   buy/sell a position, `signals` is a boolean array of signals, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.

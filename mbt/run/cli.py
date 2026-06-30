@@ -1,15 +1,14 @@
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 import datetime
-from mbt.run.report import Report
-from mbt.run.report import build_report
-from mbt.run.report import build_json_report
+from mbt import Runner, Account, Fee
+from mbt.run import Report, build_report, build_json_report, RunRequest
+from mbt.run.msd import load_data
 import logging
 from typing import Tuple
-from mbt import DataProvider
-from mbt import Runner
-from mbt import Account
-from mbt.run.msd import load_data
 import argparse
-from mbt.run.backend import RunRequest
 import pandas as pd
 import orjson
 import os
@@ -39,27 +38,33 @@ def expand_symbols(symbols: list[str]) -> list[str]:
   return expanded
 
 
-def parse_args() -> Tuple[RunRequest, str, str]:
+def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   parser = argparse.ArgumentParser(description="Run a strategy")
   parser.add_argument(
     "strategy",
     help="Strategy to run, can be a JSON file or a Python file",
   )
   parser.add_argument("-s", "--symbols", nargs="+", default=[], help="Symbols to run")
-  parser.add_argument("-B", "--benchmark", type=str, default="SH000300", help="Benchmark symbol")
+  parser.add_argument("-B", "--benchmark", type=str, default=os.environ.get("MSD_BT_BENCHMARK", "SH000300"), help="Benchmark symbol, env $MSD_BT_BENCHMARK")
   parser.add_argument(
-    "-b", "--begin", type=str, default="2020-01-01", help="Start date"
+    "-b", "--begin", type=str, default=os.environ.get("MSD_BT_BEGIN", "2020-01-01"), help="Start date, env $MSD_BT_BEGIN"
   )
-  parser.add_argument("-e", "--end", type=str, default="2020-12-31", help="End date")
+  parser.add_argument("-e", "--end", type=str, default=os.environ.get("MSD_BT_END", "2020-12-31"), help="End date, env $MSD_BT_END")
   parser.add_argument("-a", "--args", nargs="*", help="Strategy arguments")
   parser.add_argument(
-    "-m", "--msd", type=str, default="http://localhost:50510", help="MSD host"
+    "-m", "--msd", type=str, default=os.environ.get("MSD_HOST", "http://localhost:50510"), help="MSD host, env $MSD_HOST"
   )
   parser.add_argument(
     "-o",
     "--output",
     default="",
-    help="output to, empty to stdout, or any supported file path, csv, excel",
+    help="output to, empty to stdout, or any supported file path, csv, json, excel",
+  )
+  parser.add_argument(
+    "-f",
+    "--fee_json",
+    default=os.environ.get("MSD_BT_FEE", ""),
+    help="fee config path, env $MSD_BT_FEE",
   )
   parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
@@ -67,11 +72,14 @@ def parse_args() -> Tuple[RunRequest, str, str]:
   if args.verbose:
     logging.getLogger().setLevel(logging.DEBUG)
 
+
+  args.symbols = expand_symbols(args.symbols)
+
   if args.strategy.endswith(".json"):
     with open(args.strategy, "r") as f:
       req = RunRequest.from_json(
         f,
-        symbols=expand_symbols(args.symbols),
+        symbols=args.symbols,
         start=args.begin,
         end=args.end,
         args=args.args,
@@ -98,7 +106,9 @@ def parse_args() -> Tuple[RunRequest, str, str]:
 
   args.symbols.insert(0, args.benchmark)
 
-  return req, args.msd, args.output
+  fee = Fee(args.fee_json) if len(args.fee_json) > 0 else Fee()
+
+  return req, args.msd, args.output, fee
 
 
 def float_format(f: float) -> str:
@@ -154,23 +164,23 @@ def build_output(reports: list[Report], output: str):
 
 def echo_reports(reports: list[Report]):
   df_metrics = pd.DataFrame([r.metrics(True) for r in reports])
-  print(df_metrics)
+  print(df_metrics.to_json(orient='records', indent=2))
 
 
 def main():
-  req, msd_host, output = parse_args()
+  req, msd_host, output, fee = parse_args()
   logger.info(f"load data from {msd_host}")
   dp, symbols = load_data(msd_host, req.symbols, req.start, req.end)
   logger.info(
     f"data loaded, symbols: {len(symbols)}, bars per symbol: {dp.bars}, total_bars: {dp.groups * dp.bars}"
   )
-  account = Account(10000.0, dp)
+  account = Account(10000.0, dp, fee=fee)
   logger.info("account created")
   runner = Runner(account)
   logger.info("runner created")
   runner.run(req.strategy)
   logger.info("strategy finished")
-  reports = build_report(dp)[1:]
+  reports = build_report(dp, runner.ctx.accounts)[1:]
   logger.info("report built")
   if len(output) > 0:
     build_output(reports, output)

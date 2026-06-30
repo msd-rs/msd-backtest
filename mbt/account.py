@@ -129,6 +129,9 @@ class FeeItem:
   transaction_fee_sell: float = 0.0
 
   def buy(self, value: float) -> float:
+    if value == 0:
+      return 0.0
+
     commission = value * self.commission_buy
     min_commission = self.min_commission_buy
     tax = value * self.tax_buy
@@ -136,6 +139,8 @@ class FeeItem:
     return max(commission, min_commission) + tax + transaction_fee
 
   def sell(self, value: float) -> float:
+    if value == 0:
+      return 0.0
     commission = value * self.commission_sell
     min_commission = self.min_commission_sell
     tax = value * self.tax_sell
@@ -247,16 +252,17 @@ class Account:
       initial_cash: initial cash of the account
       dp: data provider of the account, the data kinds will be used are:
         - "price": price of the stock, without dividend
-        - "bonus": bonus per share in dividend
-        - "transfers": transfers per share in dividend
+        - "transfer_shares": transfers per share in dividend
         - "dividend": dividend per share in dividend
-        - "rightShare": right share per share in dividend
-        - "rightPrice": right price per share in dividend
+        - "right_shares": right share per share in dividend
+        - "right_price": right price per share in dividend
       unit: trading unit, default is 100
       slippage: slippage of the buy and sell operations, for buy: deal_price = price * (1 + slippage), for sell: deal_price = price * (1 - slippage)
     """
 
+
     """initial cash of the account"""
+    self.initial_cash = initial_cash
     self.cash = initial_cash
     """data provider of the account"""
     self.dp = dp
@@ -279,6 +285,8 @@ class Account:
 
     s = self.group * dp.bars
     e = s + dp.bars
+    """dates of current group"""
+    self.dates = dp.dates[s:e].astype('datetime64[s]').astype(int)
     """history of assets for current group"""
     self.assets = dp.all("assets", create_if_not_exist=np.float64)[s:e]
     """history of rate of return for current group"""
@@ -290,11 +298,10 @@ class Account:
     self.action_shares = dp.all("action_shares", create_if_not_exist=np.float64)[s:e]
 
     """corporate actions"""
-    self.dividends = dp.all("dividend", create_if_not_exist=np.float64)[s:e]
-    self.bonuses = dp.all("bonus", create_if_not_exist=np.float64)[s:e]
-    self.transfers = dp.all("transfers", create_if_not_exist=np.float64)[s:e]
-    self.right_shares = dp.all("rightShare", create_if_not_exist=np.float64)[s:e]
-    self.right_prices = dp.all("rightPrice", create_if_not_exist=np.float64)[s:e]
+    self.dividends = dp.all("dividend")[s:e]
+    self.transfer_shares = dp.all("transfer_shares")[s:e]
+    self.right_shares = dp.all("right_shares")[s:e]
+    self.right_prices = dp.all("right_price")[s:e]
 
     self.assets.fill(initial_cash)
     self.ror.fill(0.0)
@@ -328,33 +335,31 @@ class Account:
     if operation.position is None:
       raise ValueError(f"invalid operation: {operation}")
 
+    fee = 0.0
     if self.position.shares > 0:
       dividend = self.dividends[ts]
-      bonus = self.bonuses[ts]
-      transfers = self.transfers[ts]
+      transfer_shares = self.transfer_shares[ts]
       right_share = self.right_shares[ts]
       right_price = self.right_prices[ts]
 
-      if dividend > 0 or bonus > 0 or transfers > 0 or right_share > 0:
-        self.cash += self.position.shares * (dividend / 10.0)
-        self.cash -= self.position.shares * (right_share / 10.0) * right_price
-        self.position.shares += self.position.shares * (
-          bonus / 10.0 + transfers / 10.0 + right_share / 10.0
-        )
+      if dividend > 0 or transfer_shares > 0 or right_share > 0:
+        self.cash += self.position.shares * dividend
+        self.cash -= self.position.shares * right_share * right_price
+        self.position.shares += self.position.shares * (transfer_shares + right_share)
 
     if operation.action == ACTION_BUY:
-      operation = self.do_buy(ts, operation.position)
+      operation, fee = self.do_buy(ts, operation.position)
     elif operation.action == ACTION_BUY_PERCENT:
-      operation = self.do_buy(
+      operation, fee = self.do_buy(
         ts,
         Position.from_cash(
           self.cash * operation.position.shares, operation.position.price, self.unit
         ),
       )
     elif operation.action == ACTION_SELL:
-      operation = self.do_sell(ts, operation.position)
+      operation, fee = self.do_sell(ts, operation.position)
     elif operation.action == ACTION_SELL_PERCENT:
-      operation = self.do_sell(
+      operation, fee = self.do_sell(
         ts,
         Position(
           self.position.shares * operation.position.shares,
@@ -370,7 +375,7 @@ class Account:
       (self.asset - self.per_assets) / self.per_assets if self.per_assets > 0 else 0.0
     )
     self.records.append(
-      Record(ts, operation, self.cash, hold_profit, self.position, self.deducted)
+      Record(ts, operation, self.cash, hold_profit, self.position, fee)
     )
     self.assets[ts] = self.asset
     self.ror[ts] = self.asset / self.assets[0] - 1
@@ -383,7 +388,7 @@ class Account:
       f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
     )
 
-  def do_buy(self, ts: int, position: Position) -> Operation:
+  def do_buy(self, ts: int, position: Position) -> tuple[Operation, float]:
     """
     perform buy operation
 
@@ -398,22 +403,23 @@ class Account:
     if self.cash == 0:
       return Operation.buy_no_cash(Position(0, 0))
 
-    fee_item = self.fee.get(ts)
+    fee_item = self.fee.get(self.dates[ts])
     fee = fee_item.buy(position.value)
     if position.value + fee > self.cash:
       position = Position.from_cash(self.cash - fee, position.price, self.unit)
 
     if position.shares == 0:
-      return Operation.buy_no_cash(Position(0, 0))
+      return Operation.buy_no_cash(Position(0, 0)), 0.0
 
     self.cash -= position.value + fee
     self.position += position
-    self.deducted = fee_item.buy(position.value)
+    fee = fee_item.buy(position.value)
+    self.deducted += fee
     if self.per_assets == 0:
       self.per_assets = self.asset
-    return Operation.buy(position)
+    return Operation.buy(position), fee
 
-  def do_sell(self, ts: int, position: Position) -> Operation:
+  def do_sell(self, ts: int, position: Position) -> tuple[Operation, float]:
     """
     perform sell operation
     Args:
@@ -428,12 +434,13 @@ class Account:
       position.shares = self.position.shares
 
     if position.shares == 0:
-      return Operation.sell_no_hold(Position(0, 0))
+      return Operation.sell_no_hold(Position(0, 0)), 0.0
 
-    fee_item = self.fee.get(ts)
-    self.cash += position.value - fee_item.sell(position.value)
+    fee_item = self.fee.get(self.dates[ts])
+    fee = fee_item.sell(position.value)
+    self.cash += position.value - fee
     self.position -= position
-    self.deducted = fee_item.sell(position.value)
+    self.deducted += fee
     if self.position.shares == 0:
       self.per_assets = 0.0
-    return Operation.sell(position)
+    return Operation.sell(position), fee

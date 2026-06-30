@@ -37,6 +37,12 @@ def test_strategy_actions_and_assets_with_unrounded_data():
       "low": prices,
       "close": prices,
       "price": prices,
+      "bw_price": prices,
+      "fw_price": prices,
+      "dividend": np.zeros(len(prices)),
+      "transfer_shares": np.zeros(len(prices)),
+      "right_shares": np.zeros(len(prices)),
+      "right_price": np.zeros(len(prices)),
     },
     symbols=["test_sym"],
   )

@@ -1,3 +1,4 @@
+from mbt import Account
 from mbt import DataProvider
 import pandas as pd
 import numpy as np
@@ -5,22 +6,32 @@ import numpy as np
 
 class Report:
 
-  def __init__(self, symbol: str, dp: DataProvider):
+  def __init__(self, symbol: str, dp: DataProvider, account: Account):
     self.symbol = symbol
     s, e = dp.symbol_indices(symbol)
     self.date = dp.dates[s:e]
+    
+
     self.ror = np.round(dp.slice("ror", s), 4)
     self.ror_hold = np.round(dp.slice("ror_hold", s), 4)
     self.ror_original = np.round(uniform_ror(dp.slice("bw_price", s)), 4)
+    
+    # Clean NaNs by forward filling and filling leading NaNs with 0
+    self.ror = pd.Series(self.ror).ffill().fillna(0.0).values
+    self.ror_hold = pd.Series(self.ror_hold).ffill().fillna(0.0).values
+    self.ror_original = pd.Series(self.ror_original).ffill().fillna(0.0).values
+
     self.actions = dp.slice("actions", s)
     self.price = dp.slice("price", s)
+    self.close = self.price # For compatibility with tests
     self.fw_price = np.round(dp.slice("fw_price", s), 3)
     self.bw_price = np.round(dp.slice("bw_price", s), 3)
-    self.calcaute_metrics(dp)
+    
+    self.calcaute_metrics(dp, account)
     
 
 
-  def calcaute_metrics(self, dp: DataProvider):
+  def calcaute_metrics(self, dp: DataProvider, account: Account):
     bechmark = uniform_ror(dp.slice("bw_price", 0))
 
     # 1. Convert cumulative returns to daily returns
@@ -152,6 +163,7 @@ class Report:
     self.beta = 0.0 if np.isnan(beta) else np.round(beta, 4)
     self.sharpe = 0.0 if np.isnan(sharpe) else np.round(sharpe, 4)
     self.information_ratio = 0.0 if np.isnan(ir) else np.round(ir, 4)
+    self.ir = self.information_ratio # For compatibility with tests
     self.sortino = 0.0 if np.isnan(sortino) else np.round(sortino, 4)
     self.treynor = 0.0 if np.isnan(treynor) else np.round(treynor, 4)
     self.max_drawdown = 0.0 if np.isnan(max_drawdown) else np.round(max_drawdown, 4)
@@ -162,12 +174,16 @@ class Report:
     self.avg_loss = 0.0 if np.isnan(avg_loss) else np.round(avg_loss, 4)
     self.profit_factor = 0.0 if np.isnan(profit_factor) else np.round(profit_factor, 4)
     self.profit = self.ror[-1] if self.ror.size > 0 else 0.0
+    self.profit_original = self.ror_original[-1] if self.ror_original.size > 0 else 0.0
+    self.fee_rate = np.round(account.deducted / account.initial_cash, 4)
+    self.trade_count = len(trade_profits)
     
 
   def metrics(self, with_symbol: bool = False) -> dict:
     d = {
       "symbol": self.symbol,
       "profit": self.profit,
+      "profit_original": self.profit_original,
       "alpha": self.alpha,
       "beta": self.beta,
       "sharpe": self.sharpe,
@@ -180,6 +196,8 @@ class Report:
       "avg_win": self.avg_win,
       "avg_loss": self.avg_loss,
       "profit_factor": self.profit_factor,
+      "fee_rate": self.fee_rate,
+      "trade_count": self.trade_count,
     }
     if not with_symbol:
       del d["symbol"]
@@ -205,8 +223,8 @@ def uniform_ror(a: np.ndarray) -> np.ndarray:
   return ((a - base) / base)
 
 
-def build_report(dp: DataProvider) -> list[Report]:
-  reports = [Report(symbol, dp) for symbol in dp.symbols]
+def build_report(dp: DataProvider, accounts: list[Account]) -> list[Report]:
+  reports = [Report(symbol, dp, accounts[i]) for i, symbol in enumerate(dp.symbols)]
 
   return reports
 
@@ -219,5 +237,8 @@ def build_json_report(reports: list[Report]) -> dict:
     d = {}
     d.update(report.metrics())
     d.update(report.detailed())
+    d['price'] = report.price
+    d['fw_price'] = report.fw_price
+    d['bw_price'] = report.bw_price
     data[report.symbol] = d
   return data

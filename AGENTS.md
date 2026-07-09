@@ -5,6 +5,7 @@ This project is a stock strategy backtest framework.
 - Use `uv` for dependency management and environment management.
 - The main module is `mbt` in the root directory.
 - Use 'pytest' for testing, the source code for tests is in 'tests' directory.
+- Use `uv python` to invoke the python interpreter, do not use `python` directly.
 
 
 # Project Structure
@@ -35,5 +36,5 @@ use `uv python -m mbt.run.server -h` to see the available options and arguments.
 
 # Dev Environment
 
-- The `msd` database server address is `http://localhost:50510`.
+- The `msd` database server address is `http://localhost:50511`.
 - The stock symbol is Chinese stock symbol, e.g. `SH600000`, `SZ000001`.

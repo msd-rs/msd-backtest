@@ -16,3 +16,4 @@ uv.lock
 dev
 
 .benchmarks
+optimize

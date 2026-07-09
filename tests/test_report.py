@@ -46,7 +46,7 @@ def test_report_initialization_and_metrics():
   assert np.array_equal(report.actions, np.array([0, 0, 0, 0, 0])) # Account had clear the actions
 
   # Calculate metrics
-  report.calcaute_metrics(dp, account)
+  report.calculate_metrics(dp, account)
 
   # Verify portfolio metrics are computed and are of correct float type
   assert isinstance(report.sharpe, float)
@@ -106,7 +106,7 @@ def test_report_edge_cases():
 
   account = Account(1000, dp)
   report = Report("a", dp, account)
-  report.calcaute_metrics(dp, account)
+  report.calculate_metrics(dp, account)
 
   # Check that metrics default to 0.0 under insufficient data conditions
   assert report.sharpe == 0.0

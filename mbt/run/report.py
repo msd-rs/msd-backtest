@@ -2,11 +2,43 @@ from mbt import Account
 from mbt import DataProvider
 import pandas as pd
 import numpy as np
+import dataclasses
 
 
+@dataclasses.dataclass
 class Report:
+  symbol: str
+  date: np.ndarray 
+  ror: np.ndarray
+  ror_hold: np.ndarray
+  ror_original: np.ndarray
+  actions: np.ndarray
+  price: np.ndarray
+  close: np.ndarray
+  fw_price: np.ndarray
+  bw_price: np.ndarray
+  alpha: float
+  beta: float
+  sharpe: float
+  information_ratio: float
+  ir: float
+  sortino: float
+  treynor: float
+  max_drawdown: float
+  calmar: float
+  win_rate: float
+  avg_win: float
+  avg_loss: float
+  profit_factor: float
+  profit: float
+  profit_original: float
+  fee_rate: float
+  trade_count: int
+  
 
-  def __init__(self, symbol: str, dp: DataProvider, account: Account):
+  def __init__(self, symbol: str, dp: DataProvider , account: Account ):
+    if len(symbol) == 0:
+      return
     self.symbol = symbol
     s, e = dp.symbol_indices(symbol)
     self.date = dp.dates[s:e]
@@ -27,16 +59,51 @@ class Report:
     self.fw_price = np.round(dp.slice("fw_price", s), 3)
     self.bw_price = np.round(dp.slice("bw_price", s), 3)
     
-    self.calcaute_metrics(dp, account)
+    self.calculate_metrics(dp, account)
+    
+
+  @staticmethod
+  def from_dict(symbol: str, d: dict) -> Report:
+    r = Report('', None, None) # type: ignore
+    r.symbol = symbol
+    r.date = d.get('date', np.array([], dtype='int64'))
+    r.ror = np.array(d.get('ror', []), dtype='float64')
+    r.ror_hold = np.array(d.get('ror_hold', []), dtype='float64')
+    r.ror_original = np.array(d.get('ror_original', []), dtype='float64')
+    r.actions = np.array(d.get('actions', []), dtype='int8')
+    r.price = np.array(d.get('price', []), dtype='float64')
+    r.close = r.price
+    r.fw_price = np.array(d.get('fw_price', []), dtype='float64')
+    r.bw_price = np.array(d.get('bw_price', []), dtype='float64')
+    
+    r.alpha = d.get('alpha', 0.0)
+    r.beta = d.get('beta', 0.0)
+    r.sharpe = d.get('sharpe', 0.0)
+    r.information_ratio = d.get('information_ratio', 0.0)
+    r.ir = d.get('ir', 0.0)
+    r.sortino = d.get('sortino', 0.0)
+    r.treynor = d.get('treynor', 0.0)
+    r.max_drawdown = d.get('max_drawdown', 0.0)
+    r.calmar = d.get('calmar', 0.0)
+    r.win_rate = d.get('win_rate', 0.0)
+    r.avg_win = d.get('avg_win', 0.0)
+    r.avg_loss = d.get('avg_loss', 0.0)
+    r.profit_factor = d.get('profit_factor', 0.0)
+    r.profit = d.get('profit', 0.0)
+    r.profit_original = d.get('profit_original', 0.0)
+    r.fee_rate = d.get('fee_rate', 0.0)
+    r.trade_count = d.get('trade_count', 0)
+
+    return r    
     
 
 
-  def calcaute_metrics(self, dp: DataProvider, account: Account):
-    bechmark = uniform_ror(dp.slice("bw_price", 0))
+  def calculate_metrics(self, dp: DataProvider, account: Account):
+    benchmark = uniform_ror(dp.slice("bw_price", 0))
 
     # 1. Convert cumulative returns to daily returns
     strategy_ratio = 1.0 + self.ror
-    benchmark_ratio = 1.0 + bechmark
+    benchmark_ratio = 1.0 + benchmark
 
     if len(strategy_ratio) > 1:
       strategy_daily = np.diff(strategy_ratio) / strategy_ratio[:-1]
@@ -237,8 +304,10 @@ def build_json_report(reports: list[Report]) -> dict:
     d = {}
     d.update(report.metrics())
     d.update(report.detailed())
-    d['price'] = report.price
-    d['fw_price'] = report.fw_price
-    d['bw_price'] = report.bw_price
     data[report.symbol] = d
   return data
+
+
+
+
+  

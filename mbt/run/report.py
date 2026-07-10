@@ -63,7 +63,7 @@ class Report:
     
 
   @staticmethod
-  def from_dict(symbol: str, d: dict) -> Report:
+  def from_dict(symbol: str, d: dict) -> "Report":
     r = Report('', None, None) # type: ignore
     r.symbol = symbol
     r.date = d.get('date', np.array([], dtype='int64'))

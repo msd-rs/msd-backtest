@@ -106,7 +106,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
 
   args.symbols.insert(0, args.benchmark)
 
-  fee = Fee(args.fee_json) if len(args.fee_json) > 0 else Fee()
+  fee = Fee(args.fee) if len(args.fee) > 0 else Fee()
 
   return req, args.msd, args.output, fee
 

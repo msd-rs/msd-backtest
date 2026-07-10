@@ -32,7 +32,7 @@ uv add "msd-backtest[server]" # 支持作为服务运行
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/msd-backtest.git
+git clone https://github.com/msd-rs/msd-backtest.git
 cd msd-backtest
 
 # 安装依赖
@@ -95,7 +95,7 @@ class MyStrategy(Strategy):
 
 ## 🧠 AI 辅助策略编写
 
-本项目深度集成 AI 辅助开发流程。利用 [msd_strategy](.agents/skills/write-strategy/SKILL.md) 技能，AI 可以根据用户描述自动生成符合规范的策略代码。
+本项目深度集成 AI 辅助开发流程。利用 [write_strategy](.agents/skills/write-strategy/SKILL.md) 技能，AI 可以根据用户描述自动生成符合规范的策略代码。
 
 ### 核心方法与目标
 - **目标：** 通过自然语言描述，由 AI 生成高效、可运行的 Python 策略类。
@@ -112,6 +112,21 @@ class MyStrategy(Strategy):
 - **逻辑算子：** `CROSS`, `LONGCROSS`, `BARSLAST` 等。
 
 AI 在编写策略时应优先使用这些向量化算子，以确保最佳性能。
+
+### 一个使用 Claude Code 编写的简单双均线策略示例
+
+1. 创建一个目录作为工作目录中
+2. 在该目录中运行 `uv init` 初始化项目
+3. 通过 `npx skills add msd-rs/msd-backtest --skill write_strategy` 添加write_strategy技能
+4. 通过 `uv add "msd-backtest[cli]"` 引入 msd-backtest
+5. 编写 `.env` 配置文件, 例如
+```env
+MSD_HOST=http://localhost:50510
+MSD_BT_FEE=/path/to/fee.json # 一个简单的 fee json 配置文件可以从本仓库复制一份
+```
+6. 运行 `claude` ，然后输入 `编写一个双均线策略`, 如果一切正常, `claude` 会使用 write_strategy 技能为你编写相应的策略并测试运行.
+
+如果未能正常运行, 可以编写 `CLAUDE.md` 来更加详细的描述如何处理Python环境.
 
 ## 📂 项目结构
 

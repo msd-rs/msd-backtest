@@ -12,7 +12,13 @@ This guide will help you to write a strategy for msd backtest.
 # Technical stack
 
 Programming language: Python 3.11+
-Libraries: numpy, py-alpha-lib
+
+
+# Preparation
+
+- Ensure `msd-backtest[cli]` be installed use project package manager.
+- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first.
+
 
 # Coding Specification
 
@@ -28,6 +34,10 @@ import alpha as al
 
 class Strategy(mbt.Strategy):
 
+  def __init__(self):
+    super().__init__()
+    # TODO: add your custom parameters to __init__ method if needed.
+
   def execute(self, ctx: mbt.Context):
     """
     execute the strategy, this method will be called for each bar.
@@ -38,6 +48,19 @@ class Strategy(mbt.Strategy):
     # TODO: implement strategy, building buy/sell signals then call ctx.buy/ctx.sell
     pass
 ```
+
+# Execution
+
+After writing a strategy, you can run it to verify it works as expected.
+
+## Test
+
+```shell
+[uv run] python -m mbt.run.cli <STRATEGY_PATH> -s SH600000 -b 2025-01-01 -e 2025-12-31
+```
+
+`uv run` can be omitted current workspace not using `uv` as package manager.
+
 
 # API reference
 

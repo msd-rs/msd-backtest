@@ -33,9 +33,9 @@ def load_data(
   dfs = client.load(
     objs=symbols,
     tables=["stock_kline_1d", "stock_dividend", "stock_financial"],
+    join={"stock_dividend": "zero", "*": "backward"},
     start=start,
     end=end,
-    join={"stock_dividend": "zero", "*": "backward"},
   )
   logger.info(f"data loaded from msd, {len(dfs)} symbols")
 

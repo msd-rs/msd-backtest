@@ -20,13 +20,23 @@
 
 推荐使用 `uv` 进行依赖管理：
 
+#### 普通用户
+
+```bash
+uv add "msd-backtest[cli]" # 仅cli
+# or
+uv add "msd-backtest[server]" # 支持作为服务运行
+```
+
+#### 开发者
+
 ```bash
 # 克隆仓库
 git clone https://github.com/your-repo/msd-backtest.git
 cd msd-backtest
 
 # 安装依赖
-uv sync
+uv sync --with cli
 
 # 如果需要运行回测服务器
 uv sync --with server
@@ -85,7 +95,7 @@ class MyStrategy(Strategy):
 
 ## 🧠 AI 辅助策略编写
 
-本项目深度集成 AI 辅助开发流程。利用 [msd_strategy](file:///.agents/skills/msd-strategy/SKILL.md) 技能，AI 可以根据用户描述自动生成符合规范的策略代码。
+本项目深度集成 AI 辅助开发流程。利用 [msd_strategy](.agents/skills/write-strategy/SKILL.md) 技能，AI 可以根据用户描述自动生成符合规范的策略代码。
 
 ### 核心方法与目标
 - **目标：** 通过自然语言描述，由 AI 生成高效、可运行的 Python 策略类。

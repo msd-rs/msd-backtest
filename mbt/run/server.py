@@ -1,12 +1,14 @@
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+from mbt import Runner, Account, Fee
+from mbt.run import Report, build_report, build_json_report, RunRequest
+from mbt.run.msd import load_data
 import logging
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import pandas as pd
-import numpy as np
-from mbt import Runner, Account, DataProvider
-from mbt.run.msd import load_data
-from mbt.run.backend import RunRequest
+import os
 
 # Configuration
 logging.basicConfig(
@@ -15,6 +17,8 @@ logging.basicConfig(
 logger = logging.getLogger("backtest-server")
 
 DEFAULT_MSD_HOST = "http://localhost:50510"
+
+DEFAULT_FEE = Fee()
 
 app = FastAPI(title="MSD Backtest Server")
 
@@ -27,29 +31,6 @@ class RunRequestModel(BaseModel):
   args: Optional[List] = None
 
 
-def build_json_report(dp: DataProvider) -> dict:
-  # Repeat logic from build_report in cli.py
-  syms = np.repeat(dp.symbols, dp.bars)
-  df = pd.DataFrame(
-    {
-      "symbol": syms,
-      "date": dp.dates,
-      "price": dp.all("price"),
-      "close": dp.all("close"),
-      "ror": dp.all("ror"),
-      "ror_hold": dp.all("ror_hold"),
-      "actions": dp.all("actions"),
-    }
-  )
-
-  data = {}
-  for i, symbol in enumerate(dp.symbols):
-    d = df.iloc[i * dp.bars : (i + 1) * dp.bars].to_dict(orient="list")  # type: ignore
-    del d["symbol"]
-    # Format dates as strings
-    d["date"] = [t.strftime("%Y-%m-%d %X").rstrip(" 00:00:00") for t in d["date"]]
-    data[symbol] = d
-  return data
 
 
 @app.post("/backtest")
@@ -76,7 +57,7 @@ async def run_backtest(req_model: RunRequestModel):
     logger.info("Data loaded successfully")
 
     # Initialize Account and Runner
-    account = Account(10000.0, dp)
+    account = Account(10000.0, dp, fee=DEFAULT_FEE)
     runner = Runner(account)
 
     # Load the strategy using backend logic
@@ -88,7 +69,8 @@ async def run_backtest(req_model: RunRequestModel):
     logger.info("Strategy run completed")
 
     # Build report
-    report = build_json_report(dp)
+    reports = build_report(dp, runner.ctx.accounts)[1:]
+    report = build_json_report(reports)
     return report
 
   except Exception as e:
@@ -104,9 +86,17 @@ if __name__ == "__main__":
   parser.add_argument("--host", default="0.0.0.0", help="Listen host")
   parser.add_argument("--port", type=int, default=8000, help="Listen port")
   parser.add_argument(
-    "--msd", default="http://localhost:50510", help="Default MSD host"
+    "--msd", default=os.getenv("MSD_HOST", DEFAULT_MSD_HOST), help="Default MSD host"
+  )
+  parser.add_argument(
+    "--fee",
+    default=os.environ.get("MSD_BT_FEE", ""),
+    help="fee config path, env $MSD_BT_FEE",
   )
   args = parser.parse_args()
+
+  if len(args.fee) > 0:
+    DEFAULT_FEE = Fee(args.fee)
 
   DEFAULT_MSD_HOST = args.msd
 

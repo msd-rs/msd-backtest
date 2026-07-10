@@ -62,7 +62,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   )
   parser.add_argument(
     "-f",
-    "--fee_json",
+    "--fee",
     default=os.environ.get("MSD_BT_FEE", ""),
     help="fee config path, env $MSD_BT_FEE",
   )

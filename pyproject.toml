@@ -29,6 +29,6 @@ log_cli_level = "INFO"
 log_cli = true
 addopts = "--benchmark-skip"
 
-[tool.uv.sources]
-py-alpha-lib = { path = "../alpha-lib-rs/py-binding", editable = true }
-pymsd = { path = "../msd-rs2/bindings/python", editable = true }
+# [tool.uv.sources]
+# py-alpha-lib = { path = "../alpha-lib-rs/py-binding", editable = true }
+# pymsd = { path = "../msd-rs2/bindings/python", editable = true }

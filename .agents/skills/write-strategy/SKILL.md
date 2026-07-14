@@ -72,6 +72,8 @@ After writing a strategy, you can run it to verify it works as expected.
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.
   - `limited` used to check whether the bar had reached the daily limit.  0 for no limit, 1 for limit up, -1 for limit down
+  - `total_shares`: total shares, total stock shares, use to calculate total market capitalization etc.
+  - `tradable_shares`: tradable shares, tradable stock shares, use to calculate tradable market capitalization, turnover etc.
   - Financial fields:
     - Balance Sheet
       - `f008`: Cash and Cash Equivalents

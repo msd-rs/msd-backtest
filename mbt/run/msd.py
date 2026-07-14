@@ -32,7 +32,7 @@ def load_data(
 
   dfs = client.load(
     objs=symbols,
-    tables=["stock_kline_1d", "stock_dividend", "stock_financial"],
+    tables=["stock_kline_1d", "stock_dividend", "stock_shares", "stock_financial"],
     join={"stock_dividend": "zero", "*": "backward"},
     start=start,
     end=end,

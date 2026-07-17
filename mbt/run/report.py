@@ -1,6 +1,6 @@
 from mbt import Account
 from mbt import DataProvider
-import pandas as pd
+import polars as pl
 import numpy as np
 import dataclasses
 
@@ -49,9 +49,9 @@ class Report:
     self.ror_original = np.round(uniform_ror(dp.slice("bw_price", s)), 4)
     
     # Clean NaNs by forward filling and filling leading NaNs with 0
-    self.ror = pd.Series(self.ror).ffill().fillna(0.0).values
-    self.ror_hold = pd.Series(self.ror_hold).ffill().fillna(0.0).values
-    self.ror_original = pd.Series(self.ror_original).ffill().fillna(0.0).values
+    self.ror = pl.Series("", self.ror).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+    self.ror_hold = pl.Series("", self.ror_hold).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+    self.ror_original = pl.Series("", self.ror_original).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy()
 
     self.actions = dp.slice("actions", s)
     self.price = dp.slice("price", s)

@@ -28,7 +28,7 @@ def load_data(
     DataProvider and symbols
   """
 
-  client = pymsd.create_msd_pandas(msd_host)
+  client = pymsd.create_msd_polars(msd_host)
 
   dfs = client.load(
     objs=symbols,
@@ -45,6 +45,9 @@ def load_data(
     return DataProvider({"ts": np.array([])}, symbols=[]), []
 
   data = client.adaptor.to_numpy(data)
+  for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
+    if col not in data:
+      data[col] = np.zeros_like(data["close"])
 
   dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
 

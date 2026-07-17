@@ -2,7 +2,7 @@ from mbt.run.report import Report
 import orjson
 import sys
 import argparse
-import pandas as pd
+import polars as pl
 
 
 
@@ -29,10 +29,17 @@ def parse_args():
 
 def do_stat(args):
   reports = load_reports(args.report)
-  df = pd.DataFrame([r.metrics(True) for r in reports.values()])
-  df.set_index("symbol", inplace=True)
+  df = pl.DataFrame([r.metrics(True) for r in reports.values()])
+  if "symbol" in df.columns:
+    df = df.drop("symbol")
   stat = df.describe()
-  print(stat.to_json())
+  stat_col = stat.columns[0]
+  stats = stat[stat_col].to_list()
+  res = {}
+  for col in stat.columns[1:]:
+    vals = stat[col].to_list()
+    res[col] = {s: v for s, v in zip(stats, vals) if s != "null_count" and v is not None}
+  print(orjson.dumps(res).decode())
 
 def do_detail(args):
   reports = load_reports(args.report)
@@ -44,12 +51,12 @@ def do_detail(args):
 
 def do_sort(args):
   reports = load_reports(args.report)
-  df = pd.DataFrame([{"symbol":r.symbol, args.metric: getattr(r, args.metric, 0)} for r in reports.values()])
-  df.set_index("symbol", inplace=True)
-  df = df.sort_values(by=args.metric, ascending=args.order == "asc")
+  records = [{"symbol": r.symbol, "val": getattr(r, args.metric, 0)} for r in reports.values()]
+  records.sort(key=lambda x: x["val"], reverse=args.order != "asc")
   if args.limit:
-    df = df.head(args.limit)
-  print(df.to_json(orient="columns"))
+    records = records[:args.limit]
+  res = {args.metric: {r["symbol"]: r["val"] for r in records}}
+  print(orjson.dumps(res).decode())
   
 def load_reports(report_path: str) -> dict[str, Report]:
   with open(report_path, "r") as f:

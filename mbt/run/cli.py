@@ -9,7 +9,7 @@ from mbt.run.msd import load_data
 import logging
 from typing import Tuple
 import argparse
-import pandas as pd
+import polars as pl
 import orjson
 import os
 import numpy as np
@@ -111,7 +111,9 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   return req, args.msd, args.output, fee
 
 
-def float_format(f: float) -> str:
+def float_format(f: float | None) -> str:
+  if f is None or (isinstance(f, float) and np.isnan(f)):
+    return ""
   s = f"{f:.6f}"
   if "." in s:
     s = s.rstrip("0").rstrip(".")
@@ -134,24 +136,26 @@ def build_output(reports: list[Report], output: str):
   logger.info(f"output kind: {ext}")
   if ext == "csv":
     for report in reports:
-      df = pd.DataFrame(report.detailed(with_symbol=True))
-      df.to_csv(output, index=False, float_format=float_format)  # type: ignore
+      df = pl.DataFrame(report.detailed(with_symbol=True))
+      float_cols = [col for col, dtype in zip(df.columns, df.dtypes) if dtype in (pl.Float32, pl.Float64)]
+      df = df.with_columns([
+        pl.col(col).map_elements(float_format, return_dtype=pl.String)
+        for col in float_cols
+      ])
+      df.write_csv(output)
   elif ext == "xlsx":
-    with pd.ExcelWriter(output) as writer:
-      df_metrics = pd.DataFrame([r.metrics(True) for r in reports])
-      df_metrics.to_excel(writer, sheet_name="metrics", index=False)
-      for report in reports:
-        data = report.detailed()
-        data['price'] = report.price
-        data['fw_price'] = report.fw_price
-        data['bw_price'] = report.bw_price
-        df = pd.DataFrame(data)
-        df.to_excel(
-          writer,
-          sheet_name=report.symbol,
-          index=False,
-          float_format="%.6f",
-        )
+    import xlsxwriter
+    wb = xlsxwriter.Workbook(output)
+    df_metrics = pl.DataFrame([r.metrics(True) for r in reports])
+    df_metrics.write_excel(workbook=wb, worksheet="metrics")
+    for report in reports:
+      data = report.detailed()
+      data['price'] = report.price
+      data['fw_price'] = report.fw_price
+      data['bw_price'] = report.bw_price
+      df = pl.DataFrame(data)
+      df.write_excel(workbook=wb, worksheet=report.symbol)
+    wb.close()
   elif ext == "json":
     data = build_json_report(reports)
     logger.info("build json")
@@ -163,8 +167,8 @@ def build_output(reports: list[Report], output: str):
 
 
 def echo_reports(reports: list[Report]):
-  df_metrics = pd.DataFrame([r.metrics(True) for r in reports])
-  print(df_metrics.to_json(orient='records', indent=2))
+  metrics_list = [r.metrics(True) for r in reports]
+  print(orjson.dumps(metrics_list, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY).decode())
 
 
 def main():

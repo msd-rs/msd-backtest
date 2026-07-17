@@ -1,4 +1,4 @@
-import pandas as pd
+from datetime import datetime, timedelta
 import polars as pl
 import numpy as np
 import mbt
@@ -19,8 +19,9 @@ class MockSelectorDataProvider(SelectorDataProvider):
 
 def test_growth_large_cap_ma15_selector():
   # Define dates
-  dates_fin = pd.to_datetime(["2023-12-31", "2024-12-31", "2025-12-31"])
-  dates_k = pd.date_range(end="2026-03-06", periods=20, freq="D")
+  dates_fin = [datetime(2023, 12, 31), datetime(2024, 12, 31), datetime(2025, 12, 31)]
+  end_date = datetime(2026, 3, 6)
+  dates_k = [end_date - timedelta(days=i) for i in range(19, -1, -1)]
 
   # 1. SZ000001: All filters pass
   # Net Profit: 100 -> 120 -> 150 (growing & positive)

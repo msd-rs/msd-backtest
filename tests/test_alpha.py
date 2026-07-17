@@ -22,7 +22,7 @@ def load_data_msd(
   msd_host: str, symbols: list[str], start: str, end: str
 ) -> tuple[DataProvider, list[str]]:
 
-  client = pymsd.create_msd_pandas(msd_host)
+  client = pymsd.create_msd_polars(msd_host)
 
   dfs = client.load(
     objs=symbols,

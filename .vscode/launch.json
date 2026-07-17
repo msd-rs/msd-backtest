@@ -6,7 +6,7 @@
     "configurations": [
         
         {
-            "name": "cli",
+            "name": "run",
             "type": "debugpy",
             "request": "launch",
             "module": "mbt.run.cli",
@@ -17,6 +17,19 @@
                 "SH600004",
                 "SZ000001",
                 "SZ000002"
+            ],
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "selector",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "mbt.select.msd",
+            "args": [
             ],
             "console": "integratedTerminal",
             "env": {

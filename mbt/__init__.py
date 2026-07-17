@@ -9,20 +9,23 @@ from .account import (
   ACTION_KEEP,
 )
 from .run.runner import Runner
+from .select import Selector, SelectorDataProvider
 
 
 __all__ = [
-  "Context",
-  "Strategy",
-  "Runner",
-  "Account",
-  "Fee",
-  "DataProvider",
-  "Operation",
-  "Position",
   "ACTION_BUY",
   "ACTION_BUY_NO_CASH",
+  "ACTION_KEEP",
   "ACTION_SELL",
   "ACTION_SELL_NO_HOLD",
-  "ACTION_KEEP",
+  "Account",
+  "Context",
+  "DataProvider",
+  "Fee",
+  "Operation",
+  "Position",
+  "Runner",
+  "Selector", 
+  "SelectorDataProvider",
+  "Strategy",
 ]

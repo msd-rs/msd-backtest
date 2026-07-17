@@ -29,7 +29,7 @@ You should create a subclass named `Selector` of `mbt.Selector`.
 import mbt
 import numpy as np
 import alpha as al
-import pandas as pd
+import polars as pd
 from mbt.select import A_STOCKS_EXCLUDE_ST
 
 
@@ -45,17 +45,17 @@ class MySelector(mbt.Selector):
     # TODO: write select logic here
 ```
 
-- You will build a pandas DataFrame named 'factors' to select stocks as class member. It have `symbol` column, other columns in `factor` is according to the user's requirements.
-- You write several `stepXX` methods according to the user's requirements to gradually narrow down the result set, and update the `factors`. The `stepXX` methods are executed in order, and each method will be called with the result of the previous method as input. You should carefully design each step, there are some rules:
+- You will build a polars DataFrame named 'factors' to select stocks as class member. It have `symbol` column, other columns in `factor` is according to the user's requirements.
+- You write several `stepXX` methods according to the user's requirements to gradually narrow down the result set, and upl.te the `factors`. The `stepXX` methods are executed in order, and each method will be called with the result of the previous method as input. You should carefully design each step, there are some rules:
   - Usually, first, filter by financial data, then obtain the K-line to calculate technical indicators for further filtering.
   - Keep the number of stocks in each step as small as possible.
-  - Add comments to each step expd.in what you do.
+  - Add comments to each step expl.in what you do.
   - You should use caching to avoid fetching data multiple times.
 - For `step00`, when incoming `stocks` is empty and user not specifies any initial symbol rules, you should use `A_STOCKS_EXCLUDE_ST` as the initial set of stocks. There are some other initial stocks can be use depending on the user's requirements.
   - `A_STOCKS`: all A-share stocks
   - `A_STOCKS_EXCLUDE_ST`: all A-share stocks except ST and *ST stocks
   - `FOUNDS`: all funds
-  - `ALL_STOCKS`: is a pandas DataFrame that hold all stocks and can be used to select stocks by some it's columns.
+  - `ALL_STOCKS`: is a polars DataFrame that hold all stocks and can be used to select stocks by some it's columns.
     - `symbol`: stock symbol, prefix with market 'SH' | 'SZ', then stock code
     - `name`: stock name
     - `kind`: stock kind
@@ -84,28 +84,28 @@ After writing a strategy, you can run it to verify it works as expected.
 
 ## SelectorDataProvider.load_kline
 
-`load_kline(self, stocks: list[str], lastN: int = 100) -> dict[str, pd.DataFrame]`
+`load_kline(self, stocks: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]`
   load `lastN` kline bars for `stocks`
 
 Returns:
-  A dict of [symbol] -> pd.DataFrame of lastN kline bars
+  A dict of [symbol] -> pl.DataFrame of lastN kline bars
   DataFrame must have columns 
     ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'total_shares', 'tradable_shares']
-  All prices had been forward-adjusted (spd.t, bonus, etc. already reflected).
+  All prices had been forward-adjusted (spl.t, bonus, etc. already reflected).
 
 ## SelectorDataProvider.load_financial
 
-`snapshot_last(self, dfs: list[dict[str, pd.DataFrame]]) -> pd.DataFrame`
+`snapshot_last(self, dfs: list[dict[str, pl.DataFrame]]) -> pl.DataFrame`
   given `dfs` a list of dict of symbol->DataFrame,  take the last row of each DataFrame for each symbol
   then build a DataFrame. It's index will be symbols, columns are the merge of all input DataFrames.
 
-`load_financial(self, stocks: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pd.DataFrame]`
+`load_financial(self, stocks: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]`
   load `lastN` financial data for `symbols`
   Financial data is provided on a quarterly basis, with dates of 03-30, 06-30, 09-30, and 12-31. 
   When the only_year parameter is set to true, only the annual data (12-31) is selected.
 
 Returns:
-  A dict of [symbol] -> pd.DataFrame of lastN financial data
+  A dict of [symbol] -> pl.DataFrame of lastN financial data
   DataFrame columns ['ts', *fields] 
   `ts` is the date of the financial data
 
@@ -121,7 +121,7 @@ Returns:
       - `f021`: Total Current Assets
       - `f025`: Long-term Equity Investments
       - `f026`: Investment Properties
-      - `f027`: Property, pd.nt and Equipment (PP&E)
+      - `f027`: Property, pl.nt and Equipment (PP&E)
       - `f028`: Construction in Progress (CIP)
       - `f033`: Intangible Assets
       - `f034`: Development Expenditures
@@ -166,7 +166,7 @@ Returns:
       - `f099`: Cash Received from Sales of Goods and Rendering of Services
       - `f102`: Cash Inflows from Operating Activities Subtotal
       - `f103`: Cash Paid for Goods and Services
-      - `f104`: Cash Paid to and for Empd.yees
+      - `f104`: Cash Paid to and for Empl.yees
       - `f107`: Cash Outflows from Operating Activities Subtotal
       - `f108`: Net Cash Flows from Operating Activities
       - `f114`: Cash Inflows from Investing Activities Subtotal
@@ -186,7 +186,7 @@ Returns:
       - `f136`: Ending Balance of Cash and Cash Equivalents
       - `f137`: Net Profit
       - `f138`: Provision for Asset Impairment
-      - `f139`: Depreciation of Fixed Assets, Depd.tion of Oil and Gas Assets, and Depreciation of Productive Biological Assets
+      - `f139`: Depreciation of Fixed Assets, Depl.tion of Oil and Gas Assets, and Depreciation of Productive Biological Assets
       - `f140`: Amortization of Intangible Assets
       - `f149`: Decrease in Inventories
       - `f150`: Decrease in Operating Receivables
@@ -228,7 +228,7 @@ Returns:
       - `f163`: Debt-to-Equity Ratio (D/E)
       - `f164`: Equity-to-Assets Ratio
       - `f165`: Equity-to-Debt Ratio
-      - `f166`: Equity Multipd.er
+      - `f166`: Equity Multipl.er
       - `f167`: Long-term Debt to Working Capital Ratio
       - `f168`: Long-term Debt Ratio
       - `f169`: Times Interest Earned (TIE)
@@ -315,25 +315,25 @@ the `np.ndarray` is `ndarray` type in `numpy` package
 - HHV(input: np.ndarray[float], periods: int): Find highest value in a preceding `periods` window
 - HHVBARS(input: np.ndarray[float], periods: int): The number of periods that have passed since the array reached its `periods` period high
 - INTERCEPT(input: np.ndarray[float], periods: int): Linear Regression Intercept  Calculates the intercept of the linear regression line for a moving window.
-- KURTOSIS(input: np.ndarray[float], periods: int): Calculate rolling sampd. excess Kurtosis over a moving window  Uses adjusted Fisher formula (matches pandas): kurt = n(n+1)/((n-1)(n-2)(n-3)) * sum(((x-mean)/std)^4) - 3(n-1)^2/((n-2)(n-3)) Requires at least 4 valid values.
+- KURTOSIS(input: np.ndarray[float], periods: int): Calculate rolling sampl. excess Kurtosis over a moving window  Uses adjusted Fisher formula (matches polars): kurt = n(n+1)/((n-1)(n-2)(n-3)) * sum(((x-mean)/std)^4) - 3(n-1)^2/((n-2)(n-3)) Requires at least 4 valid values.
 - LLV(input: np.ndarray[float], periods: int): Find lowest value in a preceding `periods` window
 - LLVBARS(input: np.ndarray[float], periods: int): The number of periods that have passed since the array reached its periods period low
 - LONGCROSS(a: np.ndarray[float], b: np.ndarray[float], n: int): For 2 arrays A and B, return true if previous N periods A < B, Current A >= B
 - LWMA(input: np.ndarray[float], periods: int): Linear Weighted Moving Average  LWMA = SUM(Price * Weight) / SUM(Weight)
-- MA(input: np.ndarray[float], periods: int): Simpd. Moving Average, also known as arithmetic moving average
+- MA(input: np.ndarray[float], periods: int): Simpl. Moving Average, also known as arithmetic moving average
 - MIN_MAX_DIFF(input: np.ndarray[float], periods: int): Calculate rolling min-max difference (range) over a moving window  TS_MIN_MAX_DIFF = TS_MAX(x, d) - TS_MIN(x, d) Single-pass using two monotonic deques for efficiency.
-- MOMENT(input: np.ndarray[float], periods: int, k: int): Calculate rolling k-th central moment over a moving window  MOMENT(x, d, k) = mean((x - mean)^k) over window of d periods. This is the raw (non-adjusted) sampd. moment. k=2 gives variance (population), k=3 gives raw third moment, etc.
+- MOMENT(input: np.ndarray[float], periods: int, k: int): Calculate rolling k-th central moment over a moving window  MOMENT(x, d, k) = mean((x - mean)^k) over window of d periods. This is the raw (non-adjusted) sampl. moment. k=2 gives variance (population), k=3 gives raw third moment, etc.
 - NEUTRALIZE(category: np.ndarray[float], input: np.ndarray[float]): Neutralize the effect of a categorical variable on a numeric variable
 - PRODUCT(input: np.ndarray[float], periods: int): Calculate product of values in preceding `periods` window  If periods is 0, it calculates the cumulative product from the first valid value.
-- RANK(input: np.ndarray[float], periods: int): Calculate rank in a sliding window with size `periods`  Uses min-rank method for ties (same as pandas rankdata method='min'). NaN values are treated as larger than all non-NaN values.
+- RANK(input: np.ndarray[float], periods: int): Calculate rank in a sliding window with size `periods`  Uses min-rank method for ties (same as polars rankdata method='min'). NaN values are treated as larger than all non-NaN values.
 - RCROSS(a: np.ndarray[float], b: np.ndarray[float]): For 2 arrays A and B, return true if A[i-1] > B[i-1] and A[i] <= B[i] alias: death_cross, cross_le
 - REF(input: np.ndarray[float], periods: int): Right shift input array by `periods`, r[i] = input[i - periods]
 - REGBETA(y: np.ndarray[float], x: np.ndarray[float], periods: int): Calculate Regression Coefficient (Beta) of Y on X over a moving window  Beta = Cov(X, Y) / Var(X)
 - REGRESI(y: np.ndarray[float], x: np.ndarray[float], periods: int): Calculate Regression Residual of Y on X over a moving window  Returns the residual of the last point: epsilon = Y - (alpha + beta * X)
 - RLONGCROSS(a: np.ndarray[float], b: np.ndarray[float], n: int): For 2 arrays A and B, return true if previous N periods A > B, Current A <= B
 - SCAN_ADD(input: np.ndarray[float], condition: np.ndarray[bool]): Conditional cumulative add: r[t] = r[t-1] + (cond[t] ? input[t] : 0)  Used for SELF-referencing alpha expressions with additive accumulation. Serial within each stock, parallel across stocks via rayon.
-- SCAN_MUL(input: np.ndarray[float], condition: np.ndarray[bool]): Conditional cumulative multipd.: r[t] = r[t-1] * (cond[t] ? input[t] : 1)  Used for SELF-referencing alpha expressions like GTJA #143. Serial within each stock, parallel across stocks via rayon.
-- SKEWNESS(input: np.ndarray[float], periods: int): Calculate rolling sampd. Skewness over a moving window  Uses adjusted Fisher-Pearson formula (matches pandas): skew = n / ((n-1)(n-2)) * sum(((x-mean)/std)^3) Requires at least 3 valid values.
+- SCAN_MUL(input: np.ndarray[float], condition: np.ndarray[bool]): Conditional cumulative multipl.: r[t] = r[t-1] * (cond[t] ? input[t] : 1)  Used for SELF-referencing alpha expressions like GTJA #143. Serial within each stock, parallel across stocks via rayon.
+- SKEWNESS(input: np.ndarray[float], periods: int): Calculate rolling sampl. Skewness over a moving window  Uses adjusted Fisher-Pearson formula (matches polars): skew = n / ((n-1)(n-2)) * sum(((x-mean)/std)^3) Requires at least 3 valid values.
 - SLOPE(input: np.ndarray[float], periods: int): Linear Regression Slope  Calculates the slope of the linear regression line for a moving window.
 - SMA(input: np.ndarray[float], n: int, m: int): Exponential Moving Average (variant of well-known EMA) weight = m / n
 - STDDEV(input: np.ndarray[float], periods: int): Calculate Standard Deviation over a moving window
@@ -341,7 +341,7 @@ the `np.ndarray` is `ndarray` type in `numpy` package
 - SUMBARS(input: np.ndarray[float], amount: float): Calculate number of periods (bars) backwards until the sum of values is greater than or equal to `amount`
 - SUMIF(input: np.ndarray[float], condition: np.ndarray[bool], periods: int): Calculate sum of values in preceding `periods` window where `condition` is true
 - VAR(input: np.ndarray[float], periods: int): Calculate Variance over a moving window  Variance = (SumSq - (Sum^2)/N) / (N - 1)
-- WEIGHTED_DELAY(input: np.ndarray[float], periods: int): Calculate weighted delay (exponentially weighted lag)  WEIGHTED_DELAY(x, k) = (k * x[t-1] + (k-1) * x[t-2] + ... + 1 * x[t-k]) / (k*(k+1)/2) This is essentially LWMA appd.ed to the lagged (shifted by 1) series over k periods.
-- ZSCORE(input: np.ndarray[float], periods: int): Calculate rolling Z-Score over a moving window  Z-Score = (x - mean) / stddev, computed over a rolling window of `periods`. Uses sampd. stddev (ddof=1) to match pandas.
+- WEIGHTED_DELAY(input: np.ndarray[float], periods: int): Calculate weighted delay (exponentially weighted lag)  WEIGHTED_DELAY(x, k) = (k * x[t-1] + (k-1) * x[t-2] + ... + 1 * x[t-k]) / (k*(k+1)/2) This is essentially LWMA appl.ed to the lagged (shifted by 1) series over k periods.
+- ZSCORE(input: np.ndarray[float], periods: int): Calculate rolling Z-Score over a moving window  Z-Score = (x - mean) / stddev, computed over a rolling window of `periods`. Uses sampl. stddev (ddof=1) to match polars.
   
   

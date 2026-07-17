@@ -1,5 +1,5 @@
 import mbt
-import pandas as pd
+import polars as pl
 import numpy as np
 import alpha as al
 from mbt.select import A_STOCKS_EXCLUDE_ST
@@ -16,7 +16,7 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
     super().__init__()
     self.large_cap_percentile = large_cap_percentile
     self.break_days = break_days
-    self.factors = pd.DataFrame()
+    self.factors = pl.DataFrame()
 
   def step00(self, stocks: list[str]) -> list[str]:
     """
@@ -38,11 +38,11 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
         continue
 
       # 按时间升序排序
-      df = df.sort_values("ts")
-      profits = df["f137"].values[-3:]
+      df = df.sort("ts")
+      profits = df["f137"].tail(3).to_list()
 
-      # 排除含有 NaN 的记录
-      if np.isnan(profits).any():
+      # 排除含有 None 或 NaN 的记录
+      if any(p is None or np.isnan(p) for p in profits):
         continue
 
       # 盈利持续增长且为正 (P1 > 0 且 P2 > P1 且 P3 > P2)
@@ -56,7 +56,7 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
         })
 
     # 初始化 factors 成员
-    self.factors = pd.DataFrame(profit_records)
+    self.factors = pl.DataFrame(profit_records)
     return selected_stocks
 
   def step01(self, stocks: list[str]) -> list[str]:
@@ -73,26 +73,35 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
     all_caps = {}
     for sym, df in all_klines.items():
       if len(df) > 0:
-        row = df.iloc[-1]
-        all_caps[sym] = row["close"] * row["total_shares"]
+        close = df["close"][-1]
+        total_shares = df["total_shares"][-1]
+        if close is not None and total_shares is not None:
+          all_caps[sym] = close * total_shares
 
     if not all_caps:
       return []
 
-    # 剔除 NaN 后的市值 Series
-    cap_series = pd.Series(all_caps).dropna()
+    # 剔除 None/NaN 后的市值 Series
+    cap_values = [v for v in all_caps.values() if v is not None and (not isinstance(v, float) or not np.isnan(v))]
+    if not cap_values:
+      return []
+    cap_series = pl.Series("market_cap", cap_values)
     threshold = cap_series.quantile(1.0 - self.large_cap_percentile)
 
     # 过滤当前的股票集合
     selected_stocks = []
     for sym in stocks:
-      if sym in all_caps and not np.isnan(all_caps[sym]) and all_caps[sym] >= threshold:
-        selected_stocks.append(sym)
+      if sym in all_caps:
+        val = all_caps[sym]
+        if val is not None and (not isinstance(val, float) or not np.isnan(val)) and val >= threshold:
+          selected_stocks.append(sym)
 
     # 更新 factors DataFrame
-    if not self.factors.empty:
-      self.factors = self.factors[self.factors["symbol"].isin(selected_stocks)].copy()
-      self.factors["market_cap"] = self.factors["symbol"].map(all_caps)
+    if not self.factors.is_empty():
+      self.factors = self.factors.filter(pl.col("symbol").is_in(selected_stocks))
+      self.factors = self.factors.with_columns(
+        pl.col("symbol").map_elements(lambda x: all_caps.get(x), return_dtype=pl.Float64).alias("market_cap")
+      )
 
     return selected_stocks
 
@@ -133,9 +142,11 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
         last_ma15s[sym] = ma15[-1]
 
     # 更新 factors DataFrame
-    if not self.factors.empty:
-      self.factors = self.factors[self.factors["symbol"].isin(selected_stocks)].copy()
-      self.factors["close"] = self.factors["symbol"].map(last_closes)
-      self.factors["ma15"] = self.factors["symbol"].map(last_ma15s)
+    if not self.factors.is_empty():
+      self.factors = self.factors.filter(pl.col("symbol").is_in(selected_stocks))
+      self.factors = self.factors.with_columns([
+        pl.col("symbol").map_elements(lambda x: last_closes.get(x), return_dtype=pl.Float64).alias("close"),
+        pl.col("symbol").map_elements(lambda x: last_ma15s.get(x), return_dtype=pl.Float64).alias("ma15"),
+      ])
 
     return selected_stocks

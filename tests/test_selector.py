@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 import numpy as np
 import mbt
 from mbt.select import SelectorDataProvider
@@ -10,10 +11,10 @@ class MockSelectorDataProvider(SelectorDataProvider):
     self.kline_data = kline_data
     self.financial_data = financial_data
 
-  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pd.DataFrame]:
+  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
     return {sym: self.kline_data[sym] for sym in symbols if sym in self.kline_data}
 
-  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pd.DataFrame]:
+  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]:
     return {sym: self.financial_data[sym] for sym in symbols if sym in self.financial_data}
 
 def test_growth_large_cap_ma15_selector():
@@ -23,12 +24,12 @@ def test_growth_large_cap_ma15_selector():
 
   # 1. SZ000001: All filters pass
   # Net Profit: 100 -> 120 -> 150 (growing & positive)
-  df_fin_1 = pd.DataFrame({"ts": dates_fin, "f137": [100.0, 120.0, 150.0]})
+  df_fin_1 = pl.DataFrame({"ts": dates_fin, "f137": [100.0, 120.0, 150.0]})
   # Close price drops below MA15 on the last day
   close_1 = np.ones(20) * 12.0
   close_1[-2] = 13.0
   close_1[-1] = 8.0
-  df_k_1 = pd.DataFrame({
+  df_k_1 = pl.DataFrame({
     "ts": dates_k,
     "open": close_1,
     "high": close_1,
@@ -41,18 +42,18 @@ def test_growth_large_cap_ma15_selector():
   })
 
   # 2. SZ000002: Fails financial growth (150 -> 120 -> 100)
-  df_fin_2 = pd.DataFrame({"ts": dates_fin, "f137": [150.0, 120.0, 100.0]})
-  df_k_2 = df_k_1.copy()
+  df_fin_2 = pl.DataFrame({"ts": dates_fin, "f137": [150.0, 120.0, 100.0]})
+  df_k_2 = df_k_1.clone()
 
   # 3. SZ000003: Fails large cap (market cap is small)
-  df_fin_3 = df_fin_1.copy()
-  df_k_3 = df_k_1.copy()
-  df_k_3["total_shares"] = 10.0
+  df_fin_3 = df_fin_1.clone()
+  df_k_3 = df_k_1.clone()
+  df_k_3 = df_k_3.with_columns(pl.lit(10.0).alias("total_shares"))
 
   # 4. SZ000004: Fails MA15 breakdown (stays at 12.0, close is never below MA15)
-  df_fin_4 = df_fin_1.copy()
+  df_fin_4 = df_fin_1.clone()
   close_4 = np.ones(20) * 12.0
-  df_k_4 = pd.DataFrame({
+  df_k_4 = pl.DataFrame({
     "ts": dates_k,
     "open": close_4,
     "high": close_4,
@@ -90,7 +91,7 @@ def test_growth_large_cap_ma15_selector():
   # Check factors
   factors = selector.factors
   assert len(factors) == 1
-  assert factors.iloc[0]["symbol"] == "SZ000001"
-  assert factors.iloc[0]["net_profit_y3"] == 150.0
-  assert factors.iloc[0]["market_cap"] == 8000.0
-  assert factors.iloc[0]["close"] == 8.0
+  assert factors[0, "symbol"] == "SZ000001"
+  assert factors[0, "net_profit_y3"] == 150.0
+  assert factors[0, "market_cap"] == 8000.0
+  assert factors[0, "close"] == 8.0

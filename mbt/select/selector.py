@@ -1,5 +1,5 @@
 from uvicorn import logging
-import pandas as pd
+import polars as pl
 import logging
 import time
 
@@ -11,7 +11,7 @@ class SelectorDataProvider:
   Provide data to Selector
   """
 
-  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pd.DataFrame]:
+  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
     """
     load `lastN` kline bars for `symbols`
 
@@ -23,7 +23,7 @@ class SelectorDataProvider:
       """
     pass
 
-  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pd.DataFrame]:
+  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]:
     """
     load `lastN` financial data for `symbols`
     Financial data is provided on a quarterly basis, with dates of 03-30, 06-30, 09-30, and 12-31. 
@@ -36,7 +36,7 @@ class SelectorDataProvider:
     """
     pass
 
-  def snapshot_last(self, dfs: list[dict[str, pd.DataFrame]]) -> pd.DataFrame:
+  def snapshot_last(self, dfs: list[dict[str, pl.DataFrame]]) -> pl.DataFrame:
     """
     given `dfs` a list of dict of symbol->DataFrame,  take the last row of each DataFrame for each symbol
     then build a DataFrame. It's index will be symbols, columns are the merge of all input DataFrames.
@@ -44,13 +44,13 @@ class SelectorDataProvider:
     records = {}
     for data in dfs:
       for symbol, df in data.items():
-        last = df.iloc[-1:].drop(columns=["ts"]).set_index(pd.Index([symbol], name="obj"))
+        last = df.tail(1)
         if symbol in records:
-          records[symbol] = records[symbol].merge(last, left_index=True, right_index=True)
+          records[symbol] = pl.concat([records[symbol], last], how="horizontal")
         else:
-          records[symbol] = last
+          records[symbol] = pl.concat([pl.DataFrame({'obj': [symbol]}), last])
 
-    return pd.concat(records.values()).sort_index()
+    return pl.concat(list(records.values())).sort("symbol")
 
 
 class Selector:

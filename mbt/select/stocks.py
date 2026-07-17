@@ -1,5 +1,5 @@
 import orjson
-import pandas as pd
+import polars as pl
 import os
 
 
@@ -31,13 +31,21 @@ def parse_obj_status(name: str) -> int:
   return 0
 
 
-def load_all_stocks(path: str) -> pd.DataFrame:
+def load_all_stocks(path: str) -> pl.DataFrame:
   with open(path) as fp:
     content = orjson.loads(fp.read())
-    df = pd.DataFrame.from_records(list(content.values())).drop(columns=['prev_close'])
+    df = pl.DataFrame(list(content.values()), schema={
+      'symbol': pl.String,
+      'name': pl.String,
+      "volume_unit": pl.UInt8,
+      "price_decimal": pl.String,
+      'kind': pl.String,
+    })
 
-  df['kind'] = df['kind'].map(parse_obj_kind)
-  df['status'] = df['name'].map(parse_obj_status)
+  df = df.with_columns([
+    pl.col('kind').map_elements(parse_obj_kind, return_dtype=pl.Int8),
+    pl.col('name').map_elements(parse_obj_status, return_dtype=pl.Int8).alias("status"),
+  ])
   return df
 
 
@@ -48,13 +56,12 @@ def where_clause(symbols: list[str], col: str = 'obj') -> str:
   return sql
 
 ALL_STOCKS = load_all_stocks(os.environ.get("MSD_STOCKS_FILE", 'etc/stocks.json'))
-A_STOCKS = ALL_STOCKS.loc[ALL_STOCKS['kind'] == KIND_STOCK, 'symbol'].tolist()
-A_STOCKS_EXCLUDE_ST = ALL_STOCKS.loc[
-  (ALL_STOCKS['kind'] == KIND_STOCK) &
-  (ALL_STOCKS['status'] == STATUS_NORMAL),
-  'symbol'
-].tolist()
-FOUNDS = ALL_STOCKS.loc[ALL_STOCKS['kind'] == KIND_FUND, 'symbol'].tolist()
+A_STOCKS = ALL_STOCKS.filter(pl.col("kind") == KIND_STOCK).get_column("symbol").to_list()
+A_STOCKS_EXCLUDE_ST = ALL_STOCKS.filter(
+  (pl.col("kind") == KIND_STOCK) &
+  (pl.col("status") == STATUS_NORMAL)
+).get_column("symbol").to_list()
+FOUNDS = ALL_STOCKS.filter(pl.col("kind") == KIND_FUND).get_column("symbol").to_list()
 
 
 if __name__ == "__main__":
@@ -63,4 +70,6 @@ if __name__ == "__main__":
   print(len(FOUNDS))
   print(len(A_STOCKS_EXCLUDE_ST))
 
-  
+  with open("a.txt", "w") as fp:
+    for symbol in A_STOCKS_EXCLUDE_ST:
+      fp.write(f"{symbol}\n")

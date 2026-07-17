@@ -1,4 +1,9 @@
+from uvicorn import logging
 import pandas as pd
+import logging
+import time
+
+logger = logging.getLogger("selector")
 
 
 class SelectorDataProvider:
@@ -63,7 +68,12 @@ class Selector:
       fn = getattr(self, fn_name, None)
       if fn is None:
         break
+      t1 = time.time()
+      logger.info(f"start {fn_name} with {len(stocks)} stocks")
+      if len(fn.__doc__.strip()) > 0:
+        logger.info(fn.__doc__.strip())
       stocks = fn(stocks)
+      logger.info(f"done {fn_name}, used {time.time() - t1:0.3f}s, remain {len(stocks)}")
     return stocks
 
     

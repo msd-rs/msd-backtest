@@ -4,6 +4,9 @@ from .selector import SelectorDataProvider
 import pandas as pd
 import alpha as al
 import pymsd
+import logging
+
+logger = logging.getLogger("selector")
 
 
 class MsdSelectorDataProvider(SelectorDataProvider):
@@ -15,8 +18,14 @@ class MsdSelectorDataProvider(SelectorDataProvider):
 
 
   def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pd.DataFrame]:
-    dividend_lastN = max(lastN//20, 5)
-    shares_lastN = max(lastN//10, 5)
+    if lastN == 1:
+      dividend_lastN = 1
+      shares_lastN = 1
+    else:
+      dividend_lastN = max(lastN//20, 5)
+      shares_lastN = max(lastN//10, 5)
+
+    logger.debug(f"start load kline for {len(symbols)} symbols, lastN={lastN}")
     dfs = self._client.load(
       objs=symbols,
       tables=["stock_kline_1d", "stock_dividend", "stock_shares"],
@@ -24,6 +33,7 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       start=[lastN, dividend_lastN, shares_lastN],
       end=None,
     )
+    logger.debug(f"finish load kline for {len(symbols)} symbols")
 
     
     # Apply forward adjustment factor to price related columns
@@ -43,6 +53,8 @@ class MsdSelectorDataProvider(SelectorDataProvider):
   def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> dict[str, pd.DataFrame]:
     if only_year:
       lastN = (lastN + 1) * 4
+    
+    logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
     dfs = self._client.load(
       objs=symbols,
       tables=["stock_financial"],
@@ -50,6 +62,7 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       end=None,
       fields=fields,
     )
+    logger.debug(f"finish load financial for {len(symbols)} symbols")
 
     data = {}
     for symbol, v in dfs.items():

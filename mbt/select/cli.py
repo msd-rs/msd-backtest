@@ -1,3 +1,4 @@
+import logging
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -16,7 +17,8 @@ logging.basicConfig(
   format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
 )
 
-logger = logging.getLogger("select")
+logger = logging.getLogger("selector")
+logger.setLevel(logging.DEBUG)
 
 
 def expand_symbols(symbols: list[str]) -> list[str]:

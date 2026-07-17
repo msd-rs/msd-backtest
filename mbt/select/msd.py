@@ -37,6 +37,9 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     # Apply forward adjustment factor to price related columns
     al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN)
     for symbol, data in dfs.items():
+      if len(data["ts"]) == 1:
+        # Skip if there is only one day of data
+        continue
       dividends = data["dividend"].to_numpy()
       transfer_shares = data["transfer_shares"].to_numpy()
       right_shares = data["right_shares"].to_numpy()

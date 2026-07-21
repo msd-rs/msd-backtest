@@ -17,6 +17,40 @@ class MockSelectorDataProvider(SelectorDataProvider):
   def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]:
     return {sym: self.financial_data[sym] for sym in symbols if sym in self.financial_data}
 
+  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True, snapshot_date: str = '') -> pl.DataFrame:
+    rows = []
+    for sym in symbols:
+      if sym not in self.kline_data:
+        continue
+      k_df = self.kline_data[sym]
+      fin_df = self.financial_data.get(sym)
+      
+      close = k_df["close"][-1]
+      total_shares = k_df["total_shares"][-1]
+      row_dict = {
+        "obj": sym,
+        "close": close,
+        "total_shares": total_shares,
+      }
+      if fin_df is not None and len(fin_df) > 0:
+        fin_last = fin_df.tail(1)
+        for f in fin_fields:
+          if f in fin_last.columns:
+            row_dict[f] = fin_last[f][0]
+      rows.append(row_dict)
+    
+    if not rows:
+      schema = {
+        "obj": pl.String,
+        "close": pl.Float64,
+        "total_shares": pl.Float64,
+      }
+      for f in fin_fields:
+        schema[f] = pl.Float64
+      return pl.DataFrame([], schema=schema)
+      
+    return pl.DataFrame(rows)
+
 def test_growth_large_cap_ma15_selector():
   # Define dates
   dates_fin = [datetime(2023, 12, 31), datetime(2024, 12, 31), datetime(2025, 12, 31)]
@@ -66,11 +100,17 @@ def test_growth_large_cap_ma15_selector():
     "tradable_shares": np.ones(20) * 1000,
   })
 
+  # 5. SZ000005: Fails PE filter (PE is too high, cap=40000, net_profit=150, PE=266.67)
+  df_fin_5 = df_fin_1.clone()
+  df_k_5 = df_k_1.clone()
+  df_k_5 = df_k_5.with_columns(pl.lit(5000.0).alias("total_shares"))
+
   financial_data = {
     "SZ000001": df_fin_1,
     "SZ000002": df_fin_2,
     "SZ000003": df_fin_3,
     "SZ000004": df_fin_4,
+    "SZ000005": df_fin_5,
   }
 
   kline_data = {
@@ -78,6 +118,7 @@ def test_growth_large_cap_ma15_selector():
     "SZ000002": df_k_2,
     "SZ000003": df_k_3,
     "SZ000004": df_k_4,
+    "SZ000005": df_k_5,
   }
 
   dp = MockSelectorDataProvider(kline_data, financial_data)
@@ -85,7 +126,7 @@ def test_growth_large_cap_ma15_selector():
   # Use top 50% percentile
   selector = GrowthLargeCapMA15Selector(large_cap_percentile=0.5, break_days=3)
   
-  selected = selector.execute(dp, ["SZ000001", "SZ000002", "SZ000003", "SZ000004"])
+  selected = selector.execute(dp, ["SZ000001", "SZ000002", "SZ000003", "SZ000004", "SZ000005"])
   
   assert selected == ["SZ000001"]
   
@@ -95,4 +136,5 @@ def test_growth_large_cap_ma15_selector():
   assert factors[0, "symbol"] == "SZ000001"
   assert factors[0, "net_profit_y3"] == 150.0
   assert factors[0, "market_cap"] == 8000.0
+  assert factors[0, "pe"] == 8000.0 / 150.0
   assert factors[0, "close"] == 8.0

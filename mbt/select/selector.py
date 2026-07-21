@@ -7,6 +7,9 @@ logger = logging.getLogger("selector")
 
 
 class SelectorDataProvider:
+
+  date: str|None = None
+
   """
   Provide data to Selector
   """
@@ -32,25 +35,26 @@ class SelectorDataProvider:
     Returns:
       A dict of [symbol] -> pl.DataFrame of lastN financial data
       DataFrame columns ['ts', *fields] 
-      `ts` is the date of the financial data
     """
     pass
 
-  def snapshot_last(self, dfs: list[dict[str, pl.DataFrame]]) -> pl.DataFrame:
+  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
     """
-    given `dfs` a list of dict of symbol->DataFrame,  take the last row of each DataFrame for each symbol
-    then build a DataFrame. It's index will be symbols, columns are the merge of all input DataFrames.
-    """
-    records = {}
-    for data in dfs:
-      for symbol, df in data.items():
-        last = df.tail(1)
-        if symbol in records:
-          records[symbol] = pl.concat([records[symbol], last], how="horizontal")
-        else:
-          records[symbol] = pl.concat([pl.DataFrame({'obj': [symbol]}), last])
+    Take a snapshot for the given symbols at 'snapshot_date', this is more faster than 
+    load_kline and load_financial separately.
 
-    return pl.concat(list(records.values())).sort("symbol")
+    User usually use this function to get the latest data for symbols.
+
+    Args:
+      symbols: symbols to snapshot
+      fin_fields: fields to snapshot from financial data
+      fin_only_year: whether to only snapshot annual financial data
+
+    Returns:
+      A DataFrame of snapshot for the given symbols, with columns combined from 
+      `load_kline` and `load_financial` except the financial data's 'ts` column will be renamed to 'f_ts'
+    """
+    pass
 
 
 class Selector:
@@ -63,6 +67,8 @@ class Selector:
   def execute(self, dp: SelectorDataProvider, init_stocks: list[str]) -> list[str]:
     self.dp = dp
     stocks = init_stocks
+    t0 = time.time()
+    logger.info(f"start execute selector, {self.__class__.__name__}")
     for i in range(100):
       fn_name = f'step{i:02d}'
       fn = getattr(self, fn_name, None)
@@ -74,6 +80,7 @@ class Selector:
         logger.info(fn.__doc__.strip())
       stocks = fn(stocks)
       logger.info(f"done {fn_name}, used {time.time() - t1:0.3f}s, remain {len(stocks)}")
+    logger.info(f"done execute selector {self.__class__.__name__}, used {time.time() - t0:0.3f}s, remain {len(stocks)}")
     return stocks
 
     

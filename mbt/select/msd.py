@@ -1,3 +1,4 @@
+import pymsd
 from .selector import SelectorDataProvider
 import polars as pl
 import alpha as al
@@ -29,7 +30,7 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       tables=["stock_kline_1d", "stock_dividend", "stock_shares"],
       join={"stock_dividend": "zero", "*": "backward"},
       start=[lastN, dividend_lastN, shares_lastN],
-      end=None,
+      end=self.date,
     )
     logger.debug(f"finish load kline for {len(symbols)} symbols")
 
@@ -55,14 +56,14 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     
   def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> dict[str, pl.DataFrame]:
     if only_year:
-      lastN = (lastN + 1) * 4
+      lastN = lastN * 4 + 1
     
     logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
     dfs = self._client.load(
       objs=symbols,
       tables=["stock_financial"],
       start=lastN,
-      end=None,
+      end=self.date,
       fields=fields,
     )
     logger.debug(f"finish load financial for {len(symbols)} symbols")
@@ -70,23 +71,54 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     data = {}
     for symbol, v in dfs.items():
       df = v['stock_financial']
+      # df = df.with_columns(
+      #   pl.col("ts").map_elements(lambda d: int(d.year), return_dtype=pl.Int32).alias("f_year"),
+      #   pl.col("ts").map_elements(lambda d: int(d.month/3), return_dtype=pl.Int32).alias("f_quarter")
+      # )
       if only_year:
         data[symbol] = df.filter(pl.col('ts').dt.month() == 12)
       else:
         data[symbol] = df
     return data
-    
+
+  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
+
+    dfs = self._client.load(
+      objs=symbols,
+      tables=["stock_kline_1d", "stock_shares"],
+      join={"stock_shares": "backward"},
+      start=1,
+      end=self.date
+    )
+
+    if len(fin_fields) > 0:
+      for obj, fin_df in self.load_financial(symbols, fin_fields, fin_only_year, 1).items():
+        if obj in dfs:
+          if len(fin_df) > 1:
+            fin_df = fin_df.tail(1)
+          dfs[obj] = pl.concat([dfs[obj], fin_df.rename({"ts": "f_ts"})], how='horizontal_extend')
+
+    return pl.concat([
+      df.with_columns(
+        pl.lit(obj).alias('obj')
+      ) for obj, df in dfs.items()
+    ])
+
 
 if __name__ == "__main__":
   import os
   import logging
-  logging.basicConfig(level=logging.DEBUG)
+  from .stocks import A_STOCKS_EXCLUDE_ST
+  logging.basicConfig(level=logging.INFO)
   msd_host = os.environ.get("MSD_HOST", "http://localhost:50511") 
   if not msd_host:
     raise Exception("MSD_HOST is not set")
   dp = MsdSelectorDataProvider(msd_host)
   klines = dp.load_kline(["SH600000"], 200)
-  financial = dp.load_financial(["SH600000"], ["f001", "f007"], 12)
+  financial = dp.load_financial(["SH600000"], ["f001", "f007"], False, 12)
   #print(klines)
   print(financial)
-  print(dp.snapshot_last([klines, financial]))
+
+  snap = dp.load_snapshot(A_STOCKS_EXCLUDE_ST, ["f137"])
+  snap.write_csv("dev/snap.csv")
+  

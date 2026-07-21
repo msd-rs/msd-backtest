@@ -47,9 +47,9 @@ class MySelector(mbt.Selector):
 
 - You will build a polars DataFrame named 'factors' to select stocks as class member. It have `symbol` column, other columns in `factor` is according to the user's requirements.
 - You write several `stepXX` methods according to the user's requirements to gradually narrow down the result set, and upl.te the `factors`. The `stepXX` methods are executed in order, and each method will be called with the result of the previous method as input. You should carefully design each step, there are some rules:
-  - Usually, first, filter by financial data, then obtain the K-line to calculate technical indicators for further filtering.
+  - Usually, it's a good idea to first by snapshot by `load_snapshot`, then other deep analyze that need more data.
   - Keep the number of stocks in each step as small as possible.
-  - Add comments to each step expl.in what you do.
+  - Add comments to each step explain what you do.
   - You should use caching to avoid fetching data multiple times.
 - For `step00`, when incoming `stocks` is empty and user not specifies any initial symbol rules, you should use `A_STOCKS_EXCLUDE_ST` as the initial set of stocks. There are some other initial stocks can be use depending on the user's requirements.
   - `A_STOCKS`: all A-share stocks
@@ -60,7 +60,7 @@ class MySelector(mbt.Selector):
     - `name`: stock name
     - `kind`: stock kind
     - `status`: stock status
-- You can use `Selector.dp` (which is instance of `SelectorDataProvider`) to get data, only use it public API
+- You can use `Selector.dp` (which is instance of `SelectorDataProvider`) to get data, only use it public API. The `SelectorDataProvider.date` is the date to perform selection, default to last, but usually your not need to use it explicitly, 
 - Use `alpha-lib` library do calculating factor.
 
 
@@ -93,12 +93,23 @@ Returns:
     ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'total_shares', 'tradable_shares']
   All prices had been forward-adjusted (spl.t, bonus, etc. already reflected).
 
+## SelectorDataProvider.load_snapshot
+`load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame`
+  Take a snapshot for the given symbols at 'snapshot_date', this is more faster than 
+  load_kline and load_financial separately.
+
+  User usually use this function to get the latest data for symbols.
+
+  Args:
+    symbols: symbols to snapshot
+    fin_fields: fields to snapshot from financial data
+    fin_only_year: whether to only snapshot annual financial data
+
+  Returns:
+    A DataFrame of snapshot for the given symbols, with columns combined from 
+    `load_kline` and `load_financial` except the financial data's 'ts` column will be renamed to 'f_ts'
+
 ## SelectorDataProvider.load_financial
-
-`snapshot_last(self, dfs: list[dict[str, pl.DataFrame]]) -> pl.DataFrame`
-  given `dfs` a list of dict of symbol->DataFrame,  take the last row of each DataFrame for each symbol
-  then build a DataFrame. It's index will be symbols, columns are the merge of all input DataFrames.
-
 `load_financial(self, stocks: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]`
   load `lastN` financial data for `symbols`
   Financial data is provided on a quarterly basis, with dates of 03-30, 06-30, 09-30, and 12-31. 
@@ -284,9 +295,6 @@ Returns:
       - `f240`:  Net Increase in Cash and Cash Equivalents Per Share
       - `f241`:  Cash Flow Adequacy Ratio
       - `f242`:  Cash Operating Index
-- `ctx.buy(signals: np.ndarray, percent: float = 1.0)`
-  `ctx.sell(signals: np.ndarray, percent: float = 1.0)`
-  buy/sell a position, `signals` is a boolean array of signals, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.
 
 ## alpha-lib
 

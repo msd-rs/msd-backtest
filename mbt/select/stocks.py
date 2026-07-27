@@ -32,7 +32,7 @@ def parse_obj_status(name: str) -> int:
 
 
 def load_all_stocks(path: str) -> pl.DataFrame:
-  with open(path) as fp:
+  with open(path, encoding='utf-8') as fp:
     content = orjson.loads(fp.read())
     df = pl.DataFrame(list(content.values()), schema={
       'symbol': pl.String,

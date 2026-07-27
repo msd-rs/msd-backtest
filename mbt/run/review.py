@@ -59,7 +59,7 @@ def do_sort(args):
   print(orjson.dumps(res).decode())
   
 def load_reports(report_path: str) -> dict[str, Report]:
-  with open(report_path, "r") as f:
+  with open(report_path, "r", encoding='utf-8') as f:
     data = orjson.loads(f.read())
   return {symbol: Report.from_dict(symbol, data[symbol]) for symbol in data}
 

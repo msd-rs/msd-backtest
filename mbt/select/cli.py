@@ -26,7 +26,7 @@ def expand_symbols(symbols: list[str]) -> list[str]:
   expanded = set()
   for s in symbols:
     if os.path.isfile(s):
-      with open(s, "r") as f:
+      with open(s, "r", encoding='utf-8') as f:
         lines = filter(
           lambda x: len(x) > 0 and not x.startswith("#"),
           map(lambda x: x.strip(), f.readlines()),

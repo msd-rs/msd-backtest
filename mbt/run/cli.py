@@ -26,7 +26,7 @@ def expand_symbols(symbols: list[str]) -> list[str]:
   expanded = []
   for s in symbols:
     if os.path.isfile(s):
-      with open(s, "r") as f:
+      with open(s, "r", encoding='utf-8') as f:
         lines = filter(
           lambda x: len(x) > 0 and not x.startswith("#"),
           map(lambda x: x.strip(), f.readlines()),
@@ -76,7 +76,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   args.symbols = expand_symbols(args.symbols)
 
   if args.strategy.endswith(".json"):
-    with open(args.strategy, "r") as f:
+    with open(args.strategy, "r", encoding='utf-8') as f:
       req = RunRequest.from_json(
         f,
         symbols=args.symbols,
@@ -85,7 +85,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
         args=args.args,
       )
   elif args.strategy.endswith(".py"):
-    with open(args.strategy, "r") as f:
+    with open(args.strategy, "r", encoding='utf-8') as f:
       req = RunRequest(
         f,
         args.symbols,
@@ -145,7 +145,9 @@ def build_output(reports: list[Report], output: str):
       df.write_csv(output)
   elif ext == "xlsx":
     import xlsxwriter
-    wb = xlsxwriter.Workbook(output)
+    wb = xlsxwriter.Workbook(output, options={
+      "nan_inf_to_errors": True,
+    })
     df_metrics = pl.DataFrame([r.metrics(True) for r in reports])
     df_metrics.write_excel(workbook=wb, worksheet="metrics")
     for report in reports:
@@ -159,7 +161,7 @@ def build_output(reports: list[Report], output: str):
   elif ext == "json":
     data = build_json_report(reports)
     logger.info("build json")
-    with open(output, "wb") as f:
+    with open(output, "wb", encoding='utf-8') as f:
       f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_OMIT_MICROSECONDS))
   else:
     raise ValueError(f"unsupported output format: {ext}")

@@ -1,3 +1,4 @@
+import argparse
 import logging
 from dotenv import load_dotenv
 
@@ -12,6 +13,7 @@ import argparse
 import os
 import sys
 import importlib.util
+import polars as pl
 
 logging.basicConfig(
   format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
@@ -122,6 +124,7 @@ def main():
     "-m", "--msd", type=str, default=os.environ.get("MSD_HOST", "http://localhost:50510"), help="MSD host, env $MSD_HOST"
   )
   parser.add_argument("-s", "--symbols", nargs="+", default=[], help="Symbols to run")
+  parser.add_argument("-f", "--factors", action='store_true', help="show factors if possible")
   args = parser.parse_args()
   kwargs = parse_args(args.arg)
   selector = load_selector(args.selector, **kwargs)
@@ -133,10 +136,12 @@ def main():
   init_symbols = expand_symbols(args.symbols)
 
   stocks = selector.execute(dp, init_symbols)
+  stocks.sort()
   logger.info("selector finished")
   factors = getattr(selector, 'factors', None)
-  if factors is not None:
-    print(factors)
+  if args.factors and factors is not None and isinstance(factors, pl.DataFrame):
+    with pl.Config(tbl_rows=-1, tbl_cols=-1):
+      print(factors.sort("obj"))
   else:
     for stock in stocks:
       print(stock)

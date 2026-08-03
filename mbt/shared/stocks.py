@@ -36,7 +36,7 @@ def build_limit_ratio(row: dict[str, str]) -> float:
   name = row['name']
   if name.startswith("ST") or name.startswith("*ST"):
     return 0.05
-  elif symbol.startswith("SZ300") or symbol.startswith("SH688"): #科创板和创业板
+  elif symbol.startswith("SZ30") or symbol.startswith("SH68"): #科创板和创业板
     return 0.2
   return 0.1
 

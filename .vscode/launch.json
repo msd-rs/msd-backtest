@@ -30,6 +30,7 @@
             "request": "launch",
             "module": "mbt.select.msd",
             "args": [
+                "/home/jia/temp/mbt_test/strategy/limit_up.py"
             ],
             "console": "integratedTerminal",
             "env": {

@@ -5,7 +5,7 @@ load_dotenv(override=True)
 
 from typing import Any
 from mbt.select import Selector, SelectorDataProvider, MsdSelectorDataProvider
-import mbt.select.stocks 
+import mbt.shared.stocks 
 import logging
 from typing import Tuple
 import argparse

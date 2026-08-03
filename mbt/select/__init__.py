@@ -1,18 +1,16 @@
 from .selector import Selector, SelectorDataProvider
 from .msd import MsdSelectorDataProvider
-from .stocks import ALL_STOCKS, A_STOCKS, A_STOCKS_EXCLUDE_ST, FOUNDS, KIND_INDEX, KIND_FUND, KIND_STOCK, STATUS_NORMAL, STATUS_ST, STATUS_STAR_ST
+from mbt.shared import stocks
+from mbt.shared.stocks import ALL_STOCKS, A_STOCKS, A_STOCKS_EXCLUDE_ST, FOUNDS
 
 __all__ = [
+  'Selector',
+  'SelectorDataProvider',
+  'MsdSelectorDataProvider',
+  'stocks',
   'ALL_STOCKS',
   'A_STOCKS',
   'A_STOCKS_EXCLUDE_ST',
   'FOUNDS',
-  'KIND_INDEX',
-  'KIND_FUND',
-  'STATUS_NORMAL',
-  'STATUS_ST',
-  'STATUS_STAR_ST',
-  'Selector',
-  'SelectorDataProvider',
-  'MsdSelectorDataProvider',
 ]
+

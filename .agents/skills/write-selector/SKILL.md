@@ -90,8 +90,9 @@ After writing a strategy, you can run it to verify it works as expected.
 Returns:
   A dict of [symbol] -> pl.DataFrame of lastN kline bars
   DataFrame must have columns 
-    ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'total_shares', 'tradable_shares']
+    ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'limited' 'total_shares', 'tradable_shares']
   All prices had been forward-adjusted (spl.t, bonus, etc. already reflected).
+  limited is the status of reach price limit of each bar, 0 for normal, -1 for limit down, 1 for limit up
 
 ## SelectorDataProvider.load_snapshot
 `load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame`

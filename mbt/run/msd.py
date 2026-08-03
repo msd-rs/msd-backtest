@@ -1,3 +1,4 @@
+from mbt.shared import get_limit_ratio
 import pymsd
 from mbt import DataProvider
 import alpha as al
@@ -11,6 +12,8 @@ logger = logging.getLogger("msd_loader")
 def next_hook_al(i: int, groups: int, bars: int):
   al.set_ctx(end=i + 1)
 
+
+  
 
 def load_data(
   msd_host: str, symbols: list[str], start: str, end: str
@@ -49,7 +52,10 @@ def load_data(
     if col not in data:
       data[col] = np.zeros_like(data["close"])
 
+
   dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
+
+  data["limit_ratio"] = get_limit_ratio(symbols, repeat=dp.bars)
 
   # keep original as price
   data["price"] = data["close"].copy()
@@ -66,8 +72,8 @@ def load_data(
   data["close"] = data["fw_price"]
   data["vwap"] = data["amount"] / data["volume"]
   # check if it is limited: 
-  is_limit_up = (data["close"] == data["high"]) & (data["open"] == data["high"]) & (data["close"] > al.REF(data["close"], 1)) 
-  is_limit_down = (data["close"] == data["low"]) & (data["open"] == data["low"]) & (data["close"] < al.REF(data["close"], 1))
+  is_limit_up = (data["close"] == data["high"]) & (data["close"] >= al.REF(data["close"], 1) * (1 + data["limit_ratio"])) 
+  is_limit_down = (data["close"] == data["low"]) & (data["close"] <= al.REF(data["close"], 1) * (1 - data["limit_ratio"]))
   data["limited"] = np.where(is_limit_up, 1, np.where(is_limit_down, -1, 0))
   logger.info("adjustment factors applied")
 

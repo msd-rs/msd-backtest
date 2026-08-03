@@ -1,9 +1,11 @@
+from mbt.shared import get_limit_ratio
 import pymsd
 from .selector import SelectorDataProvider
 import polars as pl
 import alpha as al
 import pymsd
 import logging
+import numpy as np
 
 logger = logging.getLogger("selector")
 
@@ -16,20 +18,30 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     self._client = pymsd.create_msd_polars(msd_host)
 
 
-  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
-    if lastN == 1:
-      dividend_lastN = 1
-      shares_lastN = 1
+  def load_kline(self, symbols: list[str], lastN: int | list[int] = 100) -> dict[str, pl.DataFrame]:
+
+    start : list[int] = []
+    if isinstance(lastN, int):
+      if lastN == 1:
+        dividend_lastN = 1
+        shares_lastN = 1
+      else:
+        dividend_lastN = max(lastN//20, 5)
+        shares_lastN = max(lastN//10, 5)
+      start = [lastN, dividend_lastN, shares_lastN]
     else:
-      dividend_lastN = max(lastN//20, 5)
-      shares_lastN = max(lastN//10, 5)
+      if not isinstance(lastN, list) or len(lastN) != 3:
+        raise ValueError("lastN must be a list of 3 integers")
+      start = lastN
+    
 
     logger.debug(f"start load kline for {len(symbols)} symbols, lastN={lastN}")
+    # pyrefly: ignore [no-matching-overload]
     dfs = self._client.load(
       objs=symbols,
       tables=["stock_kline_1d", "stock_dividend", "stock_shares"],
       join={"stock_dividend": "zero", "*": "backward"},
-      start=[lastN, dividend_lastN, shares_lastN],
+      start=start,
       end=self.date,
     )
     logger.debug(f"finish load kline for {len(symbols)} symbols")
@@ -45,11 +57,20 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       transfer_shares = data["transfer_shares"].to_numpy()
       right_shares = data["right_shares"].to_numpy()
       right_price = data["right_price"].to_numpy()
+      close = al.FW_SPLIT(data["close"].to_numpy(), dividends, transfer_shares, right_shares, right_price)
+
+      last_close = np.nan_to_num(al.REF(close, 1), False)
+      limit_ratio = get_limit_ratio([symbol], 1)
+      limited = np.where(
+        (close >= last_close * (1 + limit_ratio)), 1, np.where(
+          (close <= last_close * (1 - limit_ratio)), -1, 0))
+
       dfs[symbol] = data.with_columns(
-        close=al.FW_SPLIT(data["close"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
+        close=close,
         open=al.FW_SPLIT(data["open"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
         high=al.FW_SPLIT(data["high"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
-        low=al.FW_SPLIT(data["low"].to_numpy(), dividends, transfer_shares, right_shares, right_price)
+        low=al.FW_SPLIT(data["low"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
+        limited = limited
       )
 
     return dfs
@@ -81,44 +102,43 @@ class MsdSelectorDataProvider(SelectorDataProvider):
         data[symbol] = df
     return data
 
+
   def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
 
-    dfs = self._client.load(
-      objs=symbols,
-      tables=["stock_kline_1d", "stock_shares"],
-      join={"stock_shares": "backward"},
-      start=1,
-      end=self.date
-    )
+    dfs = self.load_kline(symbols, [2, 1, 1])
+
 
     if len(fin_fields) > 0:
       for obj, fin_df in self.load_financial(symbols, fin_fields, fin_only_year, 1).items():
         if obj in dfs:
           if len(fin_df) > 1:
             fin_df = fin_df.tail(1)
-          dfs[obj] = pl.concat([dfs[obj], fin_df.rename({"ts": "f_ts"})], how='horizontal_extend')
+          dfs[obj] = pl.concat([dfs[obj].tail(1), fin_df.rename({"ts": "f_ts"})], how='horizontal_extend')
 
-    return pl.concat([
+
+    rows = [
       df.with_columns(
         pl.lit(obj).alias('obj')
       ) for obj, df in dfs.items()
-    ])
+    ]
+
+    return pl.concat(rows)
 
 
 if __name__ == "__main__":
   import os
   import logging
-  from .stocks import A_STOCKS_EXCLUDE_ST
+  from mbt.shared import A_STOCKS_EXCLUDE_ST
   logging.basicConfig(level=logging.INFO)
   msd_host = os.environ.get("MSD_HOST", "http://localhost:50511") 
   if not msd_host:
     raise Exception("MSD_HOST is not set")
   dp = MsdSelectorDataProvider(msd_host)
-  klines = dp.load_kline(["SH600000"], 200)
-  financial = dp.load_financial(["SH600000"], ["f001", "f007"], False, 12)
-  #print(klines)
-  print(financial)
+  # klines = dp.load_kline(["SH600000"], 200)
+  # financial = dp.load_financial(["SH600000"], ["f001", "f007"], False, 12)
+  # #print(klines)
+  # print(financial)
 
-  snap = dp.load_snapshot(A_STOCKS_EXCLUDE_ST, ["f137"])
-  snap.write_csv("dev/snap.csv")
+  snap = dp.load_snapshot(["SZ300001", "SH600000"], ["f007"])
+  print(snap)
   

@@ -101,6 +101,8 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
       self.factors = self.factors.filter(pl.col("symbol").is_in(selected_stocks))
       self.factors = self.factors.with_columns(
         pl.col("symbol").map_elements(lambda x: all_caps.get(x), return_dtype=pl.Float64).alias("market_cap")
+      ).with_columns(
+        (pl.col("market_cap") / pl.col("net_profit_y3")).alias("pe")
       )
 
     return selected_stocks

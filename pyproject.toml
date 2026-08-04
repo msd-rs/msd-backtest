@@ -34,5 +34,5 @@ addopts = "--benchmark-skip"
 include = ["mbt*"]
 
 [tool.uv.sources]
-py-alpha-lib = { path = "../alpha-lib-rs/py-binding", editable = true }
-pymsd = { path = "../msd-rs2/bindings/python", editable = true }
+#py-alpha-lib = { path = "../alpha-lib-rs/py-binding", editable = true }
+#pymsd = { path = "../msd-rs2/bindings/python", editable = true }

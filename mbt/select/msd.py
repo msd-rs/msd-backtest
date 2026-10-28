@@ -1,3 +1,5 @@
+import time
+
 from mbt.shared import get_limit_ratio
 import pymsd
 from .selector import SelectorDataProvider
@@ -10,12 +12,22 @@ import numpy as np
 logger = logging.getLogger("selector")
 
 
+
+def symbols_where(symbols: list[str]) -> str:
+  return ",".join( map(lambda o: f'"{o}"', symbols) )
+
+def db_fields(fields: list[str]) -> str:
+  return ",".join(fields)
+
+def to_pl(table: pymsd.Table) -> pl.DataFrame:
+  return pl.DataFrame(table.to_dict())
+
 class MsdSelectorDataProvider(SelectorDataProvider):
 
   def __init__(self, msd_host: str):
     super().__init__()
     self._msd_host = msd_host
-    self._client = pymsd.create_msd_polars(msd_host)
+    self._client = pymsd.MsdConnection(msd_host)
 
 
   def load_kline(self, symbols: list[str], lastN: int | list[int] = 100) -> dict[str, pl.DataFrame]:
@@ -34,28 +46,19 @@ class MsdSelectorDataProvider(SelectorDataProvider):
         raise ValueError("lastN must be a list of 3 integers")
       start = lastN
     
+    logger.debug(f"start load_concat kline for {len(symbols)} symbols, lastN={lastN}")
+    t1 = time.time()
+    where_ = symbols_where(symbols)
+    sql = f"""
+SELECT * FROM stock_kline_1d WHERE obj in ({where_}) limit -{start[0]};
+SELECT * FROM stock_dividend WHERE obj in ({where_}) limit -{start[1]};
+SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
+"""
+    table, symbols, bars = self._client.query_join(sql, 'stock_kline_1d', {"stock_dividend": "zero", "stock_shares": "backward"}, symbols[0])
 
-    logger.debug(f"start load kline for {len(symbols)} symbols, lastN={lastN}")
-    # pyrefly: ignore [no-matching-overload]
-    dfs = self._client.load(
-      objs=symbols,
-      tables=["stock_kline_1d", "stock_dividend", "stock_shares"],
-      join={"stock_dividend": "zero", "*": "backward"},
-      start=start,
-      end=self.date,
-    )
-    logger.debug(f"finish load kline for {len(symbols)} symbols")
+    data = dict((k, v) for k, v in table.to_list())
 
-
-    data, symbols = self._client.adaptor.concat(dfs, base=symbols[0], join="backward")
-    logger.info("data concatenated")
-    if data is None or "ts" not in data:
-      return {} 
-
-    data = self._client.adaptor.to_numpy(data)
-    for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
-      if col not in data:
-        data[col] = np.zeros_like(data["close"])
+    logger.info(f"raw data build, {time.time() - t1:.3f}s")
 
     
     # Apply forward adjustment factor to price related columns
@@ -72,31 +75,6 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       (data["close"] >= np.round(last_close * (1 + limit_ratio), 2)), 1, np.where(
       (data["close"] <= np.round(last_close * (1 - limit_ratio), 2)), -1, 0))
 
-    # for symbol, data in dfs.items():
-    #   if len(data["ts"]) == 1:
-    #     # Skip if there is only one day of data
-    #     continue
-    #   dividends = data["dividend"].to_numpy()
-    #   transfer_shares = data["transfer_shares"].to_numpy()
-    #   right_shares = data["right_shares"].to_numpy()
-    #   right_price = data["right_price"].to_numpy()
-    #   close = al.FW_SPLIT(data["close"].to_numpy(), dividends, transfer_shares, right_shares, right_price)
-
-    #   last_close = np.nan_to_num(al.REF(close, 1), False)
-    #   limit_ratio = get_limit_ratio([symbol], 1)
-    #   limited = np.where(
-    #     (close >= np.round(last_close * (1 + limit_ratio), 2)), 1, np.where(
-    #       (close <= np.round(last_close * (1 - limit_ratio), 2)), -1, 0))
-
-    #   dfs[symbol] = data.with_columns(
-    #     close=close,
-    #     open=al.FW_SPLIT(data["open"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
-    #     high=al.FW_SPLIT(data["high"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
-    #     low=al.FW_SPLIT(data["low"].to_numpy(), dividends, transfer_shares, right_shares, right_price),
-    #     limited = limited
-    #   )
-    # logger.debug(f"finish build kline for {len(symbols)} symbols")
-
     dfs = {}
     bars = len(data["close"]) // len(symbols)
     full_df = pl.DataFrame(data)
@@ -109,22 +87,13 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       lastN = lastN * 4 + 1
     
     logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
-    dfs = self._client.load(
-      objs=symbols,
-      tables=["stock_financial"],
-      start=lastN,
-      end=self.date,
-      fields=fields,
-    )
+    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) limit -{lastN}"
+    dfs = self._client.query(sql)
     logger.debug(f"finish load financial for {len(symbols)} symbols")
 
     data = {}
     for symbol, v in dfs.items():
-      df = v['stock_financial']
-      # df = df.with_columns(
-      #   pl.col("ts").map_elements(lambda d: int(d.year), return_dtype=pl.Int32).alias("f_year"),
-      #   pl.col("ts").map_elements(lambda d: int(d.month/3), return_dtype=pl.Int32).alias("f_quarter")
-      # )
+      df = pl.DataFrame( to_pl(v['stock_financial']) )
       if only_year:
         data[symbol] = df.filter(pl.col('ts').dt.month() == 12)
       else:
@@ -134,25 +103,28 @@ class MsdSelectorDataProvider(SelectorDataProvider):
 
   def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
 
-    dfs = self.load_kline(symbols, [2, 1, 1])
+    table = self._client.snapshot([
+      "stock_kline_1d",
+      "stock_shares",
+    ], symbols)
 
-    dfs = {k: df.tail(1) for k, df in dfs.items()}
+    df = to_pl(table)
 
     if len(fin_fields) > 0:
+
+      rows = []
+      objs = []
       for obj, fin_df in self.load_financial(symbols, fin_fields, fin_only_year, 1).items():
-        if obj in dfs:
-          if len(fin_df) > 1:
-            fin_df = fin_df.tail(1)
-          dfs[obj] = pl.concat([dfs[obj], fin_df.rename({"ts": "f_ts"})], how='horizontal_extend')
+        if len(fin_df) > 1:
+          fin_df = fin_df.tail(1)
+        fin_df = fin_df.rename({"ts": "f_ts"})
+        rows.append(fin_df)
+        objs.append(obj)
+      fin_df = pl.concat(rows).insert_column(0, pl.Series("obj", objs))
+      return pl.concat([df, fin_df],  how='align_left')
 
+    return df
 
-    rows = [
-      df.with_columns(
-        pl.lit(obj).alias('obj')
-      ) for obj, df in dfs.items()
-    ]
-
-    return pl.concat(rows)
 
 
 if __name__ == "__main__":
@@ -164,11 +136,11 @@ if __name__ == "__main__":
   if not msd_host:
     raise Exception("MSD_HOST is not set")
   dp = MsdSelectorDataProvider(msd_host)
-  # klines = dp.load_kline(["SH600000"], 200)
-  # financial = dp.load_financial(["SH600000"], ["f001", "f007"], False, 12)
-  # #print(klines)
-  # print(financial)
+  klines = dp.load_kline(["SH600000"], 200)
+  financial = dp.load_financial(["SH600000"], ["f001", "f007"], False, 12)
+  print(klines)
+  print(financial)
 
-  snap = dp.load_snapshot(["SH600000", "SZ002828"])
+  snap = dp.load_snapshot(["SH600000", "SZ002828"], ["f001", "f007"])
   print(snap)
   

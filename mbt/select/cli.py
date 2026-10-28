@@ -88,11 +88,6 @@ def parse_args(args: list[str]) -> dict[str, Any]:
     except ValueError:
       return 0, False
 
-  def try_float(s: str) -> Tuple[float, bool]:
-    try:
-      return float(s), True
-    except ValueError:
-      return 0.0, False
     
   def try_float(s: str) -> Tuple[float, bool]:
     try:

@@ -1,5 +1,5 @@
 ---
-name: optimize_strategy
+name: optimize-strategy
 description: guide user to optimize a strategy for msd backtest
 tags: [msd, strategy, backtest, optimize]
 version: 1.0

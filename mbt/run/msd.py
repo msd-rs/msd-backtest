@@ -1,19 +1,21 @@
-from mbt.shared import get_limit_ratio
+import time
+import logging
+import numpy as np
+import alpha as al
 import pymsd
 from mbt import DataProvider
-import alpha as al
-import numpy as np
-import logging
+from mbt.shared import get_limit_ratio
 
 logger = logging.getLogger("msd_loader")
 
+
+def symbols_where(symbols: list[str]) -> str:
+  return ",".join(map(lambda o: f'"{o}"', symbols))
 
 
 def next_hook_al(i: int, groups: int, bars: int):
   al.set_ctx(end=i + 1)
 
-
-  
 
 def load_data(
   msd_host: str, symbols: list[str], start: str, end: str
@@ -30,28 +32,59 @@ def load_data(
   Returns:
     DataProvider and symbols
   """
-
-  client = pymsd.create_msd_polars(msd_host)
-
-  dfs = client.load(
-    objs=symbols,
-    tables=["stock_kline_1d", "stock_dividend", "stock_shares", "stock_financial"],
-    join={"stock_dividend": "zero", "*": "backward"},
-    start=start,
-    end=end,
-  )
-  logger.info(f"data loaded from msd, {len(dfs)} symbols")
-
-  data, symbols = client.adaptor.concat(dfs, base=symbols[0], join="nan")
-  logger.info("data concatenated")
-  if data is None or "ts" not in data:
+  if not symbols:
     return DataProvider({"ts": np.array([])}, symbols=[]), []
 
-  data = client.adaptor.to_numpy(data)
+  client = pymsd.MsdConnection(msd_host)
+
+  ts_where = []
+  limit = ""
+  if isinstance(start, int):
+    limit = f"limit -{start}"
+  elif start:
+    ts_where.append(f"ts >= '{start}'")
+
+  if end:
+    if str(end).startswith("="):
+      ts_where.append(f"ts <= '{str(end)[1:]}'")
+    else:
+      ts_where.append(f"ts < '{end}'")
+
+  ts_cond = f"and {' and '.join(ts_where)}" if ts_where else ""
+  limit_cond = f" {limit}" if limit else ""
+
+  where_ = symbols_where(symbols)
+  sql = f"""
+SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {ts_cond}{limit_cond};
+SELECT * FROM stock_dividend WHERE obj in ({where_}) {ts_cond}{limit_cond};
+SELECT * FROM stock_shares WHERE obj in ({where_}) {ts_cond}{limit_cond};
+SELECT * FROM stock_financial WHERE obj in ({where_}) {ts_cond}{limit_cond};
+"""
+  logger.debug(f"start load data for {len(symbols)} symbols")
+  t1 = time.time()
+  try:
+    table, symbols, bars = client.query_join(
+      sql,
+      "stock_kline_1d",
+      {"stock_dividend": "zero", "*": "backward"},
+      symbols[0],
+    )
+  except Exception as e:
+    logger.warning(f"failed to query_join from msd: {e}")
+    return DataProvider({"ts": np.array([])}, symbols=[]), []
+
+  if bars == 0 or table.rows == 0:
+    return DataProvider({"ts": np.array([])}, symbols=[]), []
+
+  data = dict((k, v) for k, v in table.to_list())
+  logger.info(f"raw data build from msd, {len(symbols)} symbols, {bars} bars, {time.time() - t1:.3f}s")
+
+  if data is None or "ts" not in data or len(data["ts"]) == 0:
+    return DataProvider({"ts": np.array([])}, symbols=[]), []
+
   for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
     if col not in data:
       data[col] = np.zeros_like(data["close"])
-
 
   dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
 

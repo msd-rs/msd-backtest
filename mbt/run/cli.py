@@ -161,7 +161,7 @@ def build_output(reports: list[Report], output: str):
   elif ext == "json":
     data = build_json_report(reports)
     logger.info("build json")
-    with open(output, "wb", encoding='utf-8') as f:
+    with open(output, "wb") as f:
       f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_OMIT_MICROSECONDS))
   else:
     raise ValueError(f"unsupported output format: {ext}")

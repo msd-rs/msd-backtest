@@ -39,7 +39,7 @@ class DataProvider:
     self.dates = data[ts_name]
     self.next_hook = next_hook
     self.groups = len(self.symbols)
-    self.bars = len(self.dates) // self.groups
+    self.bars = len(self.dates) // self.groups if self.groups > 0 else 0
 
   @staticmethod
   def verify_data(symbols: list[str], data: dict[str, np.ndarray], ts_name: str):

@@ -68,7 +68,7 @@ def where_clause(symbols: list[str], col: str = 'obj') -> str:
 
 
 def get_limit_ratio(symbols: list[str], repeat: int = 1) -> np.ndarray | float:
-  if len(symbols) <= 1 and repeat <= 1:
+  if len(symbols) == 1 and repeat <= 1:
     # fast path
     return ALL_STOCKS.filter(pl.col("symbol") == symbols[0]).get_column("limit_ratio").item()
   df = pl.DataFrame({"symbol": symbols}, schema={"symbol": pl.String})

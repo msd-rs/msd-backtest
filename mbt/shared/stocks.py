@@ -1,8 +1,10 @@
+from io import StringIO
+
 import orjson
 import polars as pl
 import os
 import numpy as np
-
+import pymsd
 
 
 KIND_STOCK = 1
@@ -12,6 +14,14 @@ KIND_INDEX = 3
 STATUS_NORMAL = 0
 STATUS_ST = 1
 STATUS_STAR_ST = 2
+
+JSON_SCHEMA = {
+      'symbol': pl.String,
+      'name': pl.String,
+      "volume_unit": pl.UInt8,
+      "price_decimal": pl.String,
+      'kind': pl.String,
+    }
 
 def parse_obj_kind(kind: str) -> int:
   match kind.lower():
@@ -40,17 +50,30 @@ def build_limit_ratio(row: dict[str, str]) -> float:
     return 0.2
   return 0.1
 
+def load_stocks_from_db() -> pl.DataFrame | None:
+  base_url = os.environ.get("MSD_HOST", "")
+  if base_url == "":
+    return None
+  conn = pymsd.MsdConnection(base_url)
+  df = None
+  def handler(t: pymsd.Table):
+    nonlocal df
+    m : dict[str, dict] = orjson.loads(t[0, 1])
+    df = pl.from_records(list(m.values()), schema=JSON_SCHEMA, orient='row')
+  try:
+    conn.query_map("select * from stock_infos where obj='stocks'", handler)
+  except Exception as e:
+    print(e)
+  return df
 
 def load_all_stocks(path: str) -> pl.DataFrame:
-  with open(path, encoding='utf-8') as fp:
-    content = orjson.loads(fp.read())
-    df = pl.DataFrame(list(content.values()), schema={
-      'symbol': pl.String,
-      'name': pl.String,
-      "volume_unit": pl.UInt8,
-      "price_decimal": pl.String,
-      'kind': pl.String,
-    })
+
+  df = load_stocks_from_db()
+
+  if df == None:
+    with open(path, encoding='utf-8') as fp:
+      content = orjson.loads(fp.read())
+      df = pl.DataFrame(list(content.values()), schema=JSON_SCHEMA)
 
   df = df.with_columns([
     pl.col('kind').map_elements(parse_obj_kind, return_dtype=pl.Int8),
@@ -90,6 +113,12 @@ FOUNDS = ALL_STOCKS.filter(pl.col("kind") == KIND_FUND).get_column("symbol").to_
 
 
 if __name__ == "__main__":
+  import dotenv
+
+  dotenv.load_dotenv()
+
+  #df = load_stocks_from_db()
+  #print(df)
   print(ALL_STOCKS)
   print(len(A_STOCKS))
   print(len(FOUNDS))

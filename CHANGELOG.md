@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.7] - 2026-10-30
+
+### Add
+
+- Support loading stock list dynamically from MSD database (`stock_infos`) with local JSON fallback.
+- Unit tests for MSD data loading (`tests/test_run_msd.py`).
+- Dedicated reference documentation for strategy algorithms and financial indicators.
+
+### Changed
+
+- Switch to native `pymsd.MsdConnection` and SQL `query_join` in selector and strategy runner data providers for improved performance.
+- Optimize snapshot queries with native `pymsd.MsdConnection.snapshot()`.
+- Filter full-year financial data directly in SQL query (`AND ts.month=12`).
+- Modularize AI skills and decouple reference materials.
+
+### Fix
+
+- Fix invalid `encoding` parameter when opening binary JSON report in CLI.
+- Handle empty symbols and zero bars safely in `DataProvider` and `load_data`.
+- Fix single symbol condition check in `get_limit_ratio`.
+
+
 ## [0.1.6] - 2026-08-04
 
 ### Improve

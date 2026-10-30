@@ -83,21 +83,17 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
     return dfs
     
   def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> dict[str, pl.DataFrame]:
-    if only_year:
-      lastN = lastN * 4 + 1
     
     logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
-    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) limit -{lastN}"
+    year_where = "AND ts.month=12" if only_year else ""
+    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) {year_where} limit -{lastN}"
     dfs = self._client.query(sql)
     logger.debug(f"finish load financial for {len(symbols)} symbols")
 
     data = {}
     for symbol, v in dfs.items():
       df = pl.DataFrame( to_pl(v['stock_financial']) )
-      if only_year:
-        data[symbol] = df.filter(pl.col('ts').dt.month() == 12)
-      else:
-        data[symbol] = df
+      data[symbol] = df
     return data
 
 

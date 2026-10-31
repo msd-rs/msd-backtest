@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-10-31
+
+### Add
+
+- `Panel` 2D view (`mbt.select.Panel`) for kline/factor data:
+  - 2D views (`column`, `last`, `offset`, `timeline`) with bound `symbols` metadata.
+  - Automatic `alpha.set_ctx` integration, `panel.ctx()` context manager, and `panel.compute()`.
+  - Factor table assembly via `cross_section()` and long-table conversion via `to_frame()`.
+  - Full backward compatibility with `(data, symbols, bars)` triple unpacking.
+- Automatic time-axis alignment via `baseline` parameter in `load_kline` (e.g. `SH000001`), with baseline excluded from the result.
+- Detailed layout contract and column semantics documentation in `SelectorDataProvider`.
+
+### Changed
+
+- `MsdSelectorDataProvider.load_kline` returns a `Panel` instance.
+- Deduplicate and sort requested symbols in `load_kline` for deterministic ordering.
+- Widen table display (`tbl_width_chars=240`) when printing factors in selector CLI.
+
+### Fix
+
+- Fix `-a/--arg` key-value parsing bug in selector CLI (`arg.split('=', 1)`).
+- Align `groups` and `limit_ratio` in `load_kline` to the returned symbol block order.
+- Remove accidental `uvicorn` dependency in `mbt/select/selector.py`.
+- Allow missing docstrings on selector `stepXX` methods without raising errors.
+- Support both `obj` and `symbol` column names for factor sorting in selector CLI.
+- Normalize `kind` string and generate `status`/`limit_ratio` columns in `normalize_stocks`.
+
+
 ## [0.1.8] - 2026-10-31
 
 ### Add

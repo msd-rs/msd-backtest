@@ -13,7 +13,7 @@ excel = ["openpyxl>=3.1.5"]
 [project.optional-dependencies]
 alpha = ["py-alpha-lib>=0.2"]
 msd = ["pymsd>=0.1", "requests>=2.32", "polars>=1.0.0", "xlsxwriter>=3.2.9"]
-server = ["fastapi[standard]>=0.135.1", "msd-backtest[cli]"]
+server = ["fastapi[standard]>=0.135.1", "uvicorn>=0.54", "msd-backtest[cli]"]
 cli = [
     "orjson>=3.11.9",
     "msd-backtest[alpha,msd]",

@@ -17,7 +17,25 @@ Programming language: Python 3.11+
 # Preparation
 
 - Ensure `msd-backtest[cli]` be installed use project package manager.
-- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first.
+- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first. When user can't provide it, you can ask and install it by [the guide](./references/msd.md).
+- There should have a `./etc/fee.json` used calculate each trade fee, default can be 
+
+```json
+[
+  {
+    "ts": 4102416000,
+    "commission_buy": 0.0015,
+    "min_commission_buy": 5.0,
+    "tax_buy": 0.001,
+    "transaction_fee_buy": 0.0001,
+    "commission_sell": 0.0015,
+    "min_commission_sell": 5.0,
+    "tax_sell": 0.0,
+    "transaction_fee_sell": 0.0
+  }
+]
+```
+more less ts item, can be more reality.
 
 
 # Coding Specification

@@ -1,11 +1,9 @@
 import argparse
 import logging
-from dotenv import load_dotenv
 
-load_dotenv(override=True)
 
 from typing import Any
-from mbt.select import Selector, SelectorDataProvider, MsdSelectorDataProvider
+from mbt.select import Selector , MsdSelectorDataProvider
 import mbt.shared.stocks 
 import logging
 from typing import Tuple
@@ -112,6 +110,7 @@ def parse_args(args: list[str]) -> dict[str, Any]:
   return kwargs
 
 def main():
+  print("msd", os.environ.get("MSD_HOST", ""))
   parser = argparse.ArgumentParser(description="Run a selector")
   parser.add_argument("selector", help="Selector Python file")
   parser.add_argument("-a", "--arg", nargs='*', help="any init arguments with format key=value")

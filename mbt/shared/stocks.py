@@ -1,10 +1,12 @@
-from io import StringIO
 
 import orjson
 import polars as pl
 import os
 import numpy as np
 import pymsd
+
+from dotenv import load_dotenv
+load_dotenv(override=True)
 
 
 KIND_STOCK = 1
@@ -50,37 +52,37 @@ def build_limit_ratio(row: dict[str, str]) -> float:
     return 0.2
   return 0.1
 
-def load_stocks_from_db() -> pl.DataFrame | None:
+def load_stocks_from_db() -> pl.DataFrame:
   base_url = os.environ.get("MSD_HOST", "")
   if base_url == "":
-    return None
+    raise Exception("MSD_HOST env is empty, please set it")
   conn = pymsd.MsdConnection(base_url)
   df = None
   def handler(t: pymsd.Table):
     nonlocal df
     m : dict[str, dict] = orjson.loads(t[0, 1])
     df = pl.from_records(list(m.values()), schema=JSON_SCHEMA, orient='row')
-  try:
-    conn.query_map("select * from stock_infos where obj='stocks'", handler)
-  except Exception as e:
-    print(e)
+
+  conn.query_map("select * from stock_infos where obj='stocks'", handler)
+  if df is None or len(df) == 0:
+    raise Exception("stocks load failed")
   return df
 
-def load_all_stocks(path: str) -> pl.DataFrame:
+# def load_all_stocks(path: str) -> pl.DataFrame:
 
-  df = load_stocks_from_db()
+#   df = load_stocks_from_db()
 
-  if df == None:
-    with open(path, encoding='utf-8') as fp:
-      content = orjson.loads(fp.read())
-      df = pl.DataFrame(list(content.values()), schema=JSON_SCHEMA)
+#   if df is None:
+#     with open(path, encoding='utf-8') as fp:
+#       content = orjson.loads(fp.read())
+#       df = pl.DataFrame(list(content.values()), schema=JSON_SCHEMA)
 
-  df = df.with_columns([
-    pl.col('kind').map_elements(parse_obj_kind, return_dtype=pl.Int8),
-    pl.col('name').map_elements(parse_obj_status, return_dtype=pl.Int8).alias("status"),
-    pl.struct([pl.col("symbol"), pl.col("name")]).map_elements(build_limit_ratio, return_dtype=pl.Float64).alias("limit_ratio")
-  ])
-  return df
+#   df = df.with_columns([
+#     pl.col('kind').map_elements(parse_obj_kind, return_dtype=pl.Int8),
+#     pl.col('name').map_elements(parse_obj_status, return_dtype=pl.Int8).alias("status"),
+#     pl.struct([pl.col("symbol"), pl.col("name")]).map_elements(build_limit_ratio, return_dtype=pl.Float64).alias("limit_ratio")
+#   ])
+#   return df
 
 
 
@@ -103,7 +105,7 @@ def get_limit_ratio(symbols: list[str], repeat: int = 1) -> np.ndarray | float:
 
   
 
-ALL_STOCKS = load_all_stocks(os.environ.get("MSD_STOCKS_FILE", 'etc/stocks.json'))
+ALL_STOCKS = load_stocks_from_db()
 A_STOCKS = ALL_STOCKS.filter(pl.col("kind") == KIND_STOCK).get_column("symbol").to_list()
 A_STOCKS_EXCLUDE_ST = ALL_STOCKS.filter(
   (pl.col("kind") == KIND_STOCK) &
@@ -113,9 +115,6 @@ FOUNDS = ALL_STOCKS.filter(pl.col("kind") == KIND_FUND).get_column("symbol").to_
 
 
 if __name__ == "__main__":
-  import dotenv
-
-  dotenv.load_dotenv()
 
   #df = load_stocks_from_db()
   #print(df)

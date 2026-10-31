@@ -17,7 +17,7 @@ Programming language: Python 3.11+
 # Preparation
 
 - Ensure `msd-backtest[cli]` be installed use project package manager.
-- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first.
+- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first. When user can't provide it, you can ask and install it by [the guide](./references/msd.md).
 
 
 # Coding Specification
@@ -60,9 +60,9 @@ class MySelector(mbt.Selector):
     - `name`: stock name
     - `kind`: stock kind
     - `status`: stock status
-- You can use `Selector.dp` (which is instance of `SelectorDataProvider`) to get data, only use it public API. The `SelectorDataProvider.date` is the date to perform selection, default to last, but usually your not need to use it explicitly, 
+- You can use `Selector.dp` (which is instance of `mbt.select.SelectorDataProvider`) to get data, only use it public API. The `SelectorDataProvider.date` is the date to perform selection, default to last, but usually your not need to use it explicitly. All `SelectorDataProvider` method is well documented with Python docstring, View it to learn how to use it get data. 
 - Use `alpha-lib` library do calculating factor.
-
+- Financial fields are named like `f001` can be referred to [financial](./references/financial.md)
 
 
 # Execution
@@ -80,48 +80,6 @@ After writing a strategy, you can run it to verify it works as expected.
 `uv run` can be omitted current workspace not using `uv` as package manager.
 
 
-# API reference
-
-## SelectorDataProvider.load_kline
-
-`load_kline(self, stocks: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]`
-  load `lastN` kline bars for `stocks`
-
-Returns:
-  A dict of [symbol] -> pl.DataFrame of lastN kline bars
-  DataFrame must have columns 
-    ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'limited' 'total_shares', 'tradable_shares']
-  All prices had been forward-adjusted (spl.t, bonus, etc. already reflected).
-  limited is the status of reach price limit of each bar, 0 for normal, -1 for limit down, 1 for limit up
-
-## SelectorDataProvider.load_snapshot
-`load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame`
-  Take a snapshot for the given symbols at 'snapshot_date', this is more faster than 
-  load_kline and load_financial separately.
-
-  User usually use this function to get the latest data for symbols.
-
-  Args:
-    symbols: symbols to snapshot
-    fin_fields: fields to snapshot from financial data
-    fin_only_year: whether to only snapshot annual financial data
-
-  Returns:
-    A DataFrame of snapshot for the given symbols, with columns combined from 
-    `load_kline` and `load_financial` except the financial data's 'ts` column will be renamed to 'f_ts'
-
-## SelectorDataProvider.load_financial
-`load_financial(self, stocks: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]`
-  load `lastN` financial data for `symbols`
-  Financial data is provided on a quarterly basis, with dates of 03-30, 06-30, 09-30, and 12-31. 
-  When the only_year parameter is set to true, only the annual data (12-31) is selected.
-
-Returns:
-  A dict of [symbol] -> pl.DataFrame of lastN financial data
-  DataFrame columns ['ts', *fields] 
-  `ts` is the date of the financial data
-
-  Financial fields are named like `f001` can be referred to [financial](./references/financial.md)
 
 ## alpha-lib
 

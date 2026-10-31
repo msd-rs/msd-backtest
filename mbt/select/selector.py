@@ -1,3 +1,5 @@
+from typing import Tuple
+
 from uvicorn import logging
 import polars as pl
 import logging
@@ -14,15 +16,37 @@ class SelectorDataProvider:
   Provide data to Selector
   """
 
-  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
+  def load_kline(self, symbols: list[str], lastN: int = 100, fin_fields: list[str] = [], fin_only_year: bool = True) -> Tuple[pl.DataFrame, list[str], int]:
     """
-    load `lastN` kline bars for `symbols`
+    load `lastN` kline bars for `symbols`, can also with asof joined some `fin_fields`, 
+
+    Args:
+      symbols: the list of symbols, the first symbol will be use as baseline of asof join
+      lastN: last N bars to take
+      fin_fields: a list of fin field to take, will be joined to kline backward
+      fin_only_year:  only the annual data (12-31) is selected when it True
+
 
     Returns:
-      A dict of [symbol] -> pl.DataFrame of lastN kline bars
-      DataFrame must have columns 
-        ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'total_shares', 'tradable_shares']
-      All prices had been forward-adjusted (split, bonus, etc. already reflected).
+      data: pl.DataFrame, A asof joined result, DataFrame must have columns 
+        ['ts', 'open', 'high', 'low', 'close', 'amount', 'volume', 'total_shares', 'tradable_shares', *fin_fields]
+        All prices had been forward-adjusted (split, bonus, etc. already reflected).
+      symbols: list[str], the existed list of result symbols
+      bars: int, bars of each symbols
+
+    Notes:
+      The returned data has already undergone an ASOF JOIN based on the baseline symbol's timestamps. 
+      If a given symbol is suspended from trading on a certain day at the baseline time, 
+      its corresponding data will remain row-aligned, but the values will be set to NaN. 
+      This makes the result a contiguous data block suitable for parallel processing.
+
+      So for the return values, the len(data) == bars * len(symbols), it's layout can be explained as
+      ```python
+      for i, symbol in enumerate(symbols):
+        df = data[i*bars:(i+1)*bars]
+        # the df is the data of symbol
+      ```
+      For performance, use py-alpha-lib to handle the is recommended, Please try to avoid performing calculations through code loops in Python.
       """
     pass
 

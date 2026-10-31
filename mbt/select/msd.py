@@ -1,8 +1,9 @@
 import time
+from typing import Tuple
 
 from mbt.shared import get_limit_ratio
 import pymsd
-from .selector import SelectorDataProvider
+from mbt.select.selector import SelectorDataProvider
 import polars as pl
 import alpha as al
 import pymsd
@@ -30,7 +31,7 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     self._client = pymsd.MsdConnection(msd_host)
 
 
-  def load_kline(self, symbols: list[str], lastN: int | list[int] = 100) -> dict[str, pl.DataFrame]:
+  def load_kline(self, symbols: list[str], lastN: int | list[int] = 100, fin_fields: list[str] = [], fin_only_year: bool = True) -> Tuple[pl.DataFrame, list[str], int]:
 
     start : list[int] = []
     if isinstance(lastN, int):
@@ -38,8 +39,8 @@ class MsdSelectorDataProvider(SelectorDataProvider):
         dividend_lastN = 1
         shares_lastN = 1
       else:
-        dividend_lastN = max(lastN//20, 5)
-        shares_lastN = max(lastN//10, 5)
+        dividend_lastN = max(lastN//50, 2)
+        shares_lastN = max(lastN//50, 2)
       start = [lastN, dividend_lastN, shares_lastN]
     else:
       if not isinstance(lastN, list) or len(lastN) != 3:
@@ -54,9 +55,18 @@ SELECT * FROM stock_kline_1d WHERE obj in ({where_}) limit -{start[0]};
 SELECT * FROM stock_dividend WHERE obj in ({where_}) limit -{start[1]};
 SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
 """
-    table, symbols, bars = self._client.query_join(sql, 'stock_kline_1d', {"stock_dividend": "zero", "stock_shares": "backward"}, symbols[0])
+    if len(fin_fields) > 0:
+      ts_year_where = "AND ts.month=12" if fin_only_year else ""
+      n = max(start[0] // 100, 1) if fin_only_year else max(start[0]//50, 4)
+      sql += f"SELECT {','.join(fin_fields)} FROM stock_financial WHERE obj in ({where_}) {ts_year_where} LIMIT  -{n};\n"
+    table, symbols, bars = self._client.query_join(
+      sql, 
+      'stock_kline_1d', 
+      {"stock_dividend": "zero", "stock_shares": "backward", "stock_financial": "backward"},
+      symbols[0]
+    )
 
-    data = dict((k, v) for k, v in table.to_list())
+    data = table.to_dict()
 
     logger.info(f"raw data build, {time.time() - t1:.3f}s")
 
@@ -75,12 +85,8 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
       (data["close"] >= np.round(last_close * (1 + limit_ratio), 2)), 1, np.where(
       (data["close"] <= np.round(last_close * (1 - limit_ratio), 2)), -1, 0))
 
-    dfs = {}
-    bars = len(data["close"]) // len(symbols)
     full_df = pl.DataFrame(data)
-    for i, symbol in enumerate(symbols):
-      dfs[symbol] = full_df[i*bars: (i+1)*bars]
-    return dfs
+    return full_df, symbols, bars
     
   def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> dict[str, pl.DataFrame]:
     
@@ -132,11 +138,11 @@ if __name__ == "__main__":
   if not msd_host:
     raise Exception("MSD_HOST is not set")
   dp = MsdSelectorDataProvider(msd_host)
-  klines = dp.load_kline(["SH600000"], 200)
+  klines, symbols, bars = dp.load_kline(["SH600000", "SH6000001"], 200, ["f001", "f007"])
   financial = dp.load_financial(["SH600000"], ["f001", "f007"], False, 12)
   print(klines)
-  print(financial)
+  #print(financial)
 
   snap = dp.load_snapshot(["SH600000", "SZ002828"], ["f001", "f007"])
-  print(snap)
+  #print(snap)
   

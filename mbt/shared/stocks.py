@@ -66,7 +66,30 @@ def load_stocks_from_db() -> pl.DataFrame:
   conn.query_map("select * from stock_infos where obj='stocks'", handler)
   if df is None or len(df) == 0:
     raise Exception("stocks load failed")
-  return df
+  return normalize_stocks(df)
+
+
+def normalize_stocks(df: pl.DataFrame) -> pl.DataFrame:
+  """把原始股票信息规整为带类型的列: kind(int), status(int), limit_ratio(float)
+
+  stock_infos 里的 kind 是字符串("Stock"/"Fund"/"Index"), 而下游常量是整数,
+  直接比较会抛 ComputeError; 同时 limit_ratio 列必须在此生成,
+  否则 get_limit_ratio 会因缺列而失败。
+  """
+  kind = pl.col("kind")
+  if df.schema["kind"] == pl.String:
+    kind = kind.str.to_lowercase().replace_strict(
+      {"stock": KIND_STOCK, "fund": KIND_FUND, "index": KIND_INDEX},
+      default=0, return_dtype=pl.Int8,
+    )
+  else:
+    kind = kind.cast(pl.Int8)
+  return df.with_columns([
+    kind.alias("kind"),
+    pl.col("name").map_elements(parse_obj_status, return_dtype=pl.Int8).alias("status"),
+    pl.struct([pl.col("symbol"), pl.col("name")])
+      .map_elements(build_limit_ratio, return_dtype=pl.Float64).alias("limit_ratio"),
+  ])
 
 # def load_all_stocks(path: str) -> pl.DataFrame:
 

@@ -101,7 +101,7 @@ def parse_args(args: list[str]) -> dict[str, Any]:
     return s
 
   for arg in args:
-    kv = arg.split(arg, 1)
+    kv = arg.split('=', 1)
     if len(kv) != 2:
       logger.warning(f'invalid arg "{arg}"')
       continue
@@ -110,7 +110,7 @@ def parse_args(args: list[str]) -> dict[str, Any]:
   return kwargs
 
 def main():
-  print("msd", os.environ.get("MSD_HOST", ""))
+  logger.debug(f"msd {os.environ.get('MSD_HOST', '')}")
   parser = argparse.ArgumentParser(description="Run a selector")
   parser.add_argument("selector", help="Selector Python file")
   parser.add_argument("-a", "--arg", nargs='*', help="any init arguments with format key=value")
@@ -134,8 +134,16 @@ def main():
   logger.info("selector finished")
   factors = getattr(selector, 'factors', None)
   if args.factors and factors is not None and isinstance(factors, pl.DataFrame):
-    with pl.Config(tbl_rows=-1, tbl_cols=-1):
-      print(factors.sort("obj"))
+    # 因子表的股票代码列名历史上为 obj, 部分文档写作 symbol, 两者都兼容
+    for key in ("obj", "symbol"):
+      if key in factors.columns:
+        try:
+          factors = factors.sort(key)
+        except Exception:
+          pass
+        break
+    with pl.Config(tbl_rows=-1, tbl_cols=-1, tbl_width_chars=240):
+      print(factors)
   else:
     for stock in stocks:
       print(stock)

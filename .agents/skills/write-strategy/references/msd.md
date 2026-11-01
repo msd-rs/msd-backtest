@@ -48,13 +48,37 @@
 
 ## 启动服务
 
-- 开启日志: 在 ${MSD_WORKDIR}/.env 中, 添加 `RUST_LOG=msd=info` 以开启info日志, 默认的日志等级是 warn
-- 启动服务: `./msd --log-dir ./logs server -p msd.pid`, 这将
-  - 将日志写入  ${MSD_WORKDIR}/.logs 目录中, 每日轮换, 保持最近的7天, 日志名形如 `msd.log.2026-10-24`
-  - 将进程ID 写入 `msd.pid` 中, 便于随后的管理
-  - 启动后, 默认监听 '127.0.0.1:50510' 作为服务地址, 添加 `http://` 即客户端所需的 ${MSD_HOST}, 如 `http://127.0.0.1:50510`
-  - 通过 `http://${MSDN_HOST}/health` 检查服务状态, 如 http://127.0.0.1:50510/health
+- 开启日志(可选): 在 ${MSD_WORKDIR}/.env 中写入 `RUST_LOG=msd=info`, 服务启动时读取该文件, 默认日志等级是 warn
+
+- **最重要: `msd server` 是常驻前台进程, 不会自行转后台.**
+  直接运行 `./msd --log-dir ./logs server -p msd.pid` 会一直占用当前 shell/会话, 因此写在它后面的命令(探活、建表、导入)一行都不会执行;
+  在"一次调用只执行一条命令并等待其结束"的自动化/agent 环境中, 表现为"命令长时间不返回、没有任何输出"。
+  这不是启动失败, 而是被前台进程阻塞, **必须后台启动**. 可直接复制:
+
+```bash
+cd ${MSD_WORKDIR}
+nohup ./msd --log-dir ./logs server -p msd.pid > /tmp/msd.out 2>&1 &
+disown
+# 有界轮询探活, 不要用固定 sleep 盲等
+for i in $(seq 1 30); do
+  curl -sf --max-time 1 http://127.0.0.1:50510/health > /dev/null && echo ready && break
+  sleep 1
+done
+```
+
+- 启动后的行为:
+  - 日志写入 `--log-dir` 指定的目录(上例为 `./logs`), 每日轮换, 保留最近 7 天, 日志名形如 `msd.log.2026-10-24`
+  - **进程的 stdout/stderr 通常没有任何输出**, 上例的 `/tmp/msd.out` 一般是 0 字节. 不要用"重定向文件 + tail"来判断启动是否成功, 那里永远是空的; 版本、数据库路径、监听地址、报错都在 `logs/msd.log.*` 中
+  - 进程 ID 写入 `msd.pid`, 便于随后的管理
+  - 默认监听 `127.0.0.1:50510`, 添加 `http://` 即客户端所需的 ${MSD_HOST}, 如 `http://127.0.0.1:50510`
+  - 就绪判断: `curl -s http://127.0.0.1:50510/health`(返回 200 且内容为 `OK`). 根路径 `/` 返回 404 属正常, 不能用作探活; 也可用 `./msd shell ".tables"` 验证客户端连通
   - 运行 `./msd server --help` 查看选项
+
+- 启动前检查与排障:
+  - 先确认是否已在运行: `msd.pid` 存在且 `ps -p $(cat msd.pid)` 有输出, 或 `/health` 可访问
+  - 端口被占用、或数据目录被上一个实例锁定(例如上次以前台方式启动后被 kill, 进程未完全退出)时, 服务会启动失败并退出而不是静默复用, 原因见 `logs/msd.log.*`
+  - 停止: `kill $(cat msd.pid)`; 重启: 停止后按上面的后台方式重新启动
+  - 判断"卡住"的经验规则: 若一条命令很久没有输出也没有报错, 先怀疑**前台常驻进程**. 取消后用 `nohup ... &` + 轮询重试, 不要重复执行原来那条命令
 
 
 ## 启动客户端CLI
@@ -113,6 +137,16 @@ done
 可每日定时更新, 月内停更, 再次更新后会补足相应的数据.
 多次更新是允许的, 会以最新的更新修改之前的数据, 所以当数据有误时, 再次更新即可.
 
+### 导入常见问题
+
+- `.import <URL> <table>` 的分工: **客户端(`msd shell`)负责下载 URL**, 再按 `PUT /table/{table}` 把数据流式推给服务端; **服务端负责解压、解析与入库**。`Import successful` 里的 `time_used_ms` / `rows_per_sec` 只是服务端入库耗时, **不含客户端下载时间**(实测 137MB 的 `stock_kline_1d` 总包: 服务端报 1.8~2.1s, 整体墙钟约 2.2s, 其中约 0.4s 是客户端下载; 服务端消耗约 5s CPU, 客户端几乎不耗 CPU)。由此:
+  - URL 下载失败(超时、证书、代理)要在**运行 `msd shell` 的机器**上排查网络/代理, 而不是 server 侧
+  - 解析或入库失败(表不存在、字段不匹配、磁盘满)要在**运行 server 的机器**上查 `logs/msd.log.*`, 服务端有 `msd::server::handlers::import: updater completed` 之类的记录
+  - 大文件导入整体耗时数秒属正常, 不要因为"服务端耗时很短"就以为没有真正写入, 可用 `select ... limit -1` 校验
+- 必须先执行建表 SQL 再导入, 否则 `.import` 会因表不存在而失败
+- 官方更新脚本里的 `tables` 列表可按需裁剪; 本地导入 `stock_kline_1d`(约 1000 万行)只需数秒, 不必因为体量大而跳过
+- 校验导入结果: `./msd shell "select ts from stock_kline_1d where obj='SH000001' limit -1"` 看最后交易日, `./msd shell ".tables"` 看表; 导入过程与错误都记在 `logs/msd.log.*`
+
 
 # MSD 简介
 
@@ -150,7 +184,4 @@ MSD的设计理念是 **既然SQL无法表达所有的计算, 那么就不要让
     - 默认流式返回 NDJSON 格式的若干Table, 在做排查时可以使用. 但此格式对于大量数据效率较低, `pymsd.MsdConnect` 使用二进制协议, 更加高效.
     - 亦可使用 `msd shell` 直接执行SQL, 比使用 `curl` 更加方便
   - '/table/{table_name}': 用于给指定名称的表更新数据, 使用 'PUT' 方法, 发送的内容可以是 CSV或Tbl, 推荐使用 ``pymsd.MsdConnect` 或 `msd shell` 的 `.import` 来调用, 它们基于此API提供了更加易用的使用方法.
-
-
-
 

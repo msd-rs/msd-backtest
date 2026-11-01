@@ -27,8 +27,9 @@ def to_pl(table: pymsd.Table) -> pl.DataFrame:
 
 class MsdSelectorDataProvider(SelectorDataProvider):
 
-  def __init__(self, msd_host: str):
+  def __init__(self, msd_host: str, date: str | None = None):
     super().__init__()
+    self.date = date
     self._msd_host = msd_host
     self._client = pymsd.MsdConnection(msd_host)
 
@@ -57,15 +58,16 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     baseline_sym = baseline if baseline is not None else request[0]
 
     where_ = symbols_where(request)
+    date_where = f'AND ts <= "{self.date}"' if self.date else ""
     sql = f"""
-SELECT * FROM stock_kline_1d WHERE obj in ({where_}) limit -{start[0]};
-SELECT * FROM stock_dividend WHERE obj in ({where_}) limit -{start[1]};
-SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
+SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {date_where} limit -{start[0]};
+SELECT * FROM stock_dividend WHERE obj in ({where_}) {date_where} limit -{start[1]};
+SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]};
 """
     if len(fin_fields) > 0:
       ts_year_where = "AND ts.month=12" if fin_only_year else ""
       n = max(start[0] // 100, 1) if fin_only_year else max(start[0] // 50, 4)
-      sql += f"SELECT {','.join(fin_fields)} FROM stock_financial WHERE obj in ({where_}) {ts_year_where} LIMIT  -{n};\n"
+      sql += f"SELECT {','.join(fin_fields)} FROM stock_financial WHERE obj in ({where_}) {date_where} {ts_year_where} LIMIT  -{n};\n"
 
     t1 = time.time()
     table, loaded, bars = self._client.query_join(
@@ -111,8 +113,9 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
   def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> dict[str, pl.DataFrame]:
     """见 SelectorDataProvider.load_financial"""
     logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
+    date_where = f'AND ts <= "{self.date}"' if self.date else ""
     year_where = "AND ts.month=12" if only_year else ""
-    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) {year_where} limit -{lastN}"
+    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) {date_where} {year_where} limit -{lastN}"
     dfs = self._client.query(sql)
     logger.debug(f"finish load financial for {len(symbols)} symbols")
 
@@ -127,7 +130,7 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) limit -{start[2]};
     table = self._client.snapshot([
       "stock_kline_1d",
       "stock_shares",
-    ], symbols)
+    ], symbols, self.date)
 
     df = to_pl(table)
 

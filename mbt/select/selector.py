@@ -19,12 +19,7 @@ class SelectorDataProvider:
   """
 
   date: str | None = None
-  """选股日期(YYYY-MM-DD), None 表示最新交易日。
-
-  注意: 当前 MsdSelectorDataProvider 未实现历史时点选股, 该字段对所有实现都
-  不应被当成"已支持历史复现"的信号; 用它做截面对比前请先确认实现是否真的
-  按该日期截断行情与财务数据。
-  """
+  """选股日期(YYYY-MM-DD), None 表示最新交易日。 """
 
   def load_kline(self, symbols: list[str], lastN: int | list[int] = 100,
                  fin_fields: list[str] = [], fin_only_year: bool = True,

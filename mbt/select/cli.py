@@ -1,6 +1,7 @@
 import argparse
 import logging
-
+from dotenv import load_dotenv
+load_dotenv(override=True)
 
 from typing import Any
 from mbt.select import Selector , MsdSelectorDataProvider
@@ -119,12 +120,14 @@ def main():
   )
   parser.add_argument("-s", "--symbols", nargs="+", default=[], help="Symbols to run")
   parser.add_argument("-f", "--factors", action='store_true', help="show factors if possible")
+  parser.add_argument("-d", "--date", type=str, default=None, help="run selector at date (YYYY-MM-DD), default to last day")
+  
   args = parser.parse_args()
   kwargs = parse_args(args.arg)
   selector = load_selector(args.selector, **kwargs)
   logger.info(f"selector loaded: {selector}")
 
-  dp = MsdSelectorDataProvider(args.msd)
+  dp = MsdSelectorDataProvider(args.msd, args.date)
   logger.info("data provider created")
 
   init_symbols = expand_symbols(args.symbols)

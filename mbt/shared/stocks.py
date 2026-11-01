@@ -1,12 +1,18 @@
 
+from typing import TYPE_CHECKING
 import orjson
 import polars as pl
 import os
 import numpy as np
 import pymsd
 
-from dotenv import load_dotenv
-load_dotenv(override=True)
+
+
+if TYPE_CHECKING:
+  ALL_STOCKS: pl.DataFrame
+  A_STOCKS: list[str]
+  A_STOCKS_EXCLUDE_ST: list[str]
+  FOUNDS: list[str]
 
 
 KIND_STOCK = 1
@@ -91,22 +97,6 @@ def normalize_stocks(df: pl.DataFrame) -> pl.DataFrame:
       .map_elements(build_limit_ratio, return_dtype=pl.Float64).alias("limit_ratio"),
   ])
 
-# def load_all_stocks(path: str) -> pl.DataFrame:
-
-#   df = load_stocks_from_db()
-
-#   if df is None:
-#     with open(path, encoding='utf-8') as fp:
-#       content = orjson.loads(fp.read())
-#       df = pl.DataFrame(list(content.values()), schema=JSON_SCHEMA)
-
-#   df = df.with_columns([
-#     pl.col('kind').map_elements(parse_obj_kind, return_dtype=pl.Int8),
-#     pl.col('name').map_elements(parse_obj_status, return_dtype=pl.Int8).alias("status"),
-#     pl.struct([pl.col("symbol"), pl.col("name")]).map_elements(build_limit_ratio, return_dtype=pl.Float64).alias("limit_ratio")
-#   ])
-#   return df
-
 
 
 def where_clause(symbols: list[str], col: str = 'obj') -> str:
@@ -116,6 +106,7 @@ def where_clause(symbols: list[str], col: str = 'obj') -> str:
 
 
 def get_limit_ratio(symbols: list[str], repeat: int = 1) -> np.ndarray | float:
+  _ensure_stocks_loaded()
   if len(symbols) == 1 and repeat <= 1:
     # fast path
     return ALL_STOCKS.filter(pl.col("symbol") == symbols[0]).get_column("limit_ratio").item()
@@ -126,19 +117,31 @@ def get_limit_ratio(symbols: list[str], repeat: int = 1) -> np.ndarray | float:
     return df.join(ALL_STOCKS, on="symbol", how="left").get_column("limit_ratio").to_numpy().repeat(repeat)
 
 
-  
+_LAZY_VARS = ("ALL_STOCKS", "A_STOCKS", "A_STOCKS_EXCLUDE_ST", "FOUNDS")
 
-ALL_STOCKS = load_stocks_from_db()
-A_STOCKS = ALL_STOCKS.filter(pl.col("kind") == KIND_STOCK).get_column("symbol").to_list()
-A_STOCKS_EXCLUDE_ST = ALL_STOCKS.filter(
-  (pl.col("kind") == KIND_STOCK) &
-  (pl.col("status") == STATUS_NORMAL)
-).get_column("symbol").to_list()
-FOUNDS = ALL_STOCKS.filter(pl.col("kind") == KIND_FUND).get_column("symbol").to_list()
+
+def _ensure_stocks_loaded():
+  g = globals()
+  if "ALL_STOCKS" not in g:
+    all_stocks = load_stocks_from_db()
+    g["ALL_STOCKS"] = all_stocks
+    g["A_STOCKS"] = all_stocks.filter(pl.col("kind") == KIND_STOCK).get_column("symbol").to_list()
+    g["A_STOCKS_EXCLUDE_ST"] = all_stocks.filter(
+      (pl.col("kind") == KIND_STOCK) &
+      (pl.col("status") == STATUS_NORMAL)
+    ).get_column("symbol").to_list()
+    g["FOUNDS"] = all_stocks.filter(pl.col("kind") == KIND_FUND).get_column("symbol").to_list()
+
+
+def __getattr__(name: str):
+  if name in _LAZY_VARS:
+    _ensure_stocks_loaded()
+    return globals()[name]
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 if __name__ == "__main__":
-
+  _ensure_stocks_loaded()
   #df = load_stocks_from_db()
   #print(df)
   print(ALL_STOCKS)

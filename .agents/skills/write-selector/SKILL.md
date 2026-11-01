@@ -104,6 +104,27 @@ Avoid per-symbol Python loops; compute over the entire panel at once:
     cross = al.RCROSS(close, ma15)  # shape: (n_symbols, bars)
   ```
 
+### Multi-Period Resampling (`panel.resample`)
+Convert daily K-line panels into weekly, monthly, quarterly, or yearly panels directly:
+- `monthly_panel = panel.resample("1M")` (supports `"1W"`/`"W"`, `"1M"`/`"M"`, `"1Q"`/`"Q"`, `"1Y"`/`"Y"`, or Polars `dt.truncate` syntax like `"1w"`, `"1mo"`).
+- Returns a standard `Panel` object with shape `(n_symbols, new_bars)` and the exact same column schema.
+- **OHLCV Aggregation**:
+  - `open`: first valid open in period
+  - `close`: last valid close in period
+  - `high`: maximum high in period
+  - `low`: minimum low in period
+  - `volume`, `amount`, `dividend`, `transfer_shares`: summed over the period
+  - other columns (such as `total_shares`): carried forward as the last valid value in period
+  - `ts`: labeled as the last trading day of each period
+- **Example Usage** (e.g. Monthly 3 consecutive Yang bars):
+  ```python
+  # Resample to monthly Panel and check 3 consecutive Yang bars
+  m_panel = panel.resample("1M")
+  m_open = m_panel.column("open")[:, -3:]
+  m_close = m_panel.column("close")[:, -3:]
+  is_yang_3m = (m_close > m_open).all(axis=1)
+  ```
+
 ### Cross-Section Assembly & Debugging
 - `panel.cross_section(**columns) -> pl.DataFrame`: packs multiple `(n_symbols,)` 1D arrays into an `n_symbols`-row `pl.DataFrame` with `"obj"` (`panel.symbols`) as the first column. Ideal for building `self.factors` and filtering stocks:
   ```python

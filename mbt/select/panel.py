@@ -133,6 +133,113 @@ class Panel:
 
   # ---------------------------------------------------------------- 截面与导出
 
+  def resample(self, freq: str = "1M") -> Panel:
+    """多周期重采样: 将日K线面板聚合为周K线、月K线、季K线或年K线面板
+
+    返回一个完整的 Panel 对象 (n_symbols, new_bars), 保留底层所有列, 包含正确的
+    OHLCV 聚合与状态列继承。
+
+    Args:
+      freq: 重采样周期。支持:
+        - "W" / "1W" / "week" / "weekly": 周线 (周一至周日为一个周期)
+        - "M" / "1M" / "month" / "monthly": 月线 (自然月)
+        - "Q" / "1Q" / "quarter" / "quarterly": 季线 (自然季)
+        - "Y" / "1Y" / "year" / "yearly": 年线 (自然年)
+        - 或其他 Polars dt.truncate 支持的字符串 (如 "1w", "1mo", "1q", "1y")
+
+    Returns:
+      新的 Panel 对象, 每只股票包含 new_bars 根重采样后的 K 线。
+    """
+    if "ts" not in self.frame.columns:
+      raise ValueError("cannot resample Panel without 'ts' column")
+
+    freq_norm = freq.strip().lower()
+    mapping = {
+      "w": "1w",
+      "1w": "1w",
+      "week": "1w",
+      "weekly": "1w",
+      "m": "1mo",
+      "1m": "1mo",
+      "month": "1mo",
+      "monthly": "1mo",
+      "q": "1q",
+      "1q": "1q",
+      "quarter": "1q",
+      "quarterly": "1q",
+      "y": "1y",
+      "1y": "1y",
+      "year": "1y",
+      "yearly": "1y",
+    }
+    rule = mapping.get(freq_norm, freq_norm)
+
+    tl_series = pl.Series("ts", self.timeline())
+    try:
+      truncated = tl_series.dt.truncate(rule).to_numpy()
+    except Exception as e:
+      raise ValueError(f"invalid resampling frequency '{freq}': {e}") from e
+
+    _, first_indices = np.unique(truncated, return_index=True)
+    starts = np.sort(first_indices)
+    ends = np.append(starts[1:], len(truncated))
+    m_bars = len(starts)
+    n_sym = self.n_symbols
+
+    # 重采样面板的时间轴取每个周期的最后一个交易日
+    timeline_arr = np.array([self.timeline()[e - 1] for e in ends])
+    new_cols: dict[str, pl.Series] = {
+      "ts": pl.Series("ts", np.tile(timeline_arr, n_sym))
+    }
+
+    sum_cols = {"volume", "amount", "dividend", "transfer_shares", "right_shares"}
+
+    for name in self.frame.columns:
+      if name == "ts":
+        continue
+      col_series = self.frame.get_column(name)
+      dtype = col_series.dtype
+
+      arr_2d = self.column(name)
+      res_2d = np.empty((n_sym, m_bars), dtype=arr_2d.dtype)
+      is_float = np.issubdtype(arr_2d.dtype, np.floating)
+
+      for k, (s, e) in enumerate(zip(starts, ends)):
+        sub = arr_2d[:, s:e]
+        valid = ~np.isnan(sub) if is_float else np.ones(sub.shape, dtype=bool)
+        has_valid = valid.any(axis=1)
+
+        if name == "open":
+          idx = np.where(has_valid, valid.argmax(axis=1), 0)
+          res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
+        elif name == "close":
+          idx = (e - s) - 1 - np.where(has_valid, valid[:, ::-1].argmax(axis=1), 0)
+          res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
+        elif name == "high":
+          if is_float:
+            res_2d[:, k] = np.where(has_valid, np.nanmax(np.where(valid, sub, -np.inf), axis=1), np.nan)
+          else:
+            res_2d[:, k] = np.max(sub, axis=1)
+        elif name == "low":
+          if is_float:
+            res_2d[:, k] = np.where(has_valid, np.nanmin(np.where(valid, sub, np.inf), axis=1), np.nan)
+          else:
+            res_2d[:, k] = np.min(sub, axis=1)
+        elif name in sum_cols:
+          if is_float:
+            res_2d[:, k] = np.where(has_valid, np.nansum(sub, axis=1), 0.0)
+          else:
+            res_2d[:, k] = np.sum(sub, axis=1)
+        else:
+          # 其他列(如股本、财务状态等)默认继承该周期最后一个有效值
+          idx = (e - s) - 1 - np.where(has_valid, valid[:, ::-1].argmax(axis=1), 0)
+          res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
+
+      new_cols[name] = pl.Series(name, res_2d.ravel(), dtype=dtype)
+
+    new_frame = pl.DataFrame(new_cols)
+    return Panel(new_frame, self.symbols, m_bars)
+
   def cross_section(self, **columns) -> pl.DataFrame:
     """把若干 (n_symbols,) 因子装配成 n 行截面表 —— 选股器真正需要的形态
 

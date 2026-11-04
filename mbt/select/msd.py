@@ -110,20 +110,30 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
 
     return Panel(full_df, loaded, bars)
 
-  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> dict[str, pl.DataFrame]:
+  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> pl.DataFrame:
     """见 SelectorDataProvider.load_financial"""
+    if not symbols:
+      return pl.DataFrame()
+
     logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
     date_where = f'AND ts <= "{self.date}"' if self.date else ""
     year_where = "AND ts.month=12" if only_year else ""
     sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) {date_where} {year_where} limit -{lastN}"
-    dfs = self._client.query(sql)
+    res = self._client.query_concat(sql)
     logger.debug(f"finish load financial for {len(symbols)} symbols")
 
-    data = {}
-    for symbol, v in dfs.items():
-      df = pl.DataFrame(to_pl(v['stock_financial']))
-      data[symbol] = df
-    return data
+    if "stock_financial" not in res:
+      return pl.DataFrame()
+
+    table, ranges = res["stock_financial"]
+    total_rows = table.rows
+    d = table.to_dict()
+    if total_rows > 0:
+      objs = np.repeat([r[0] for r in ranges], [r[2] - r[1] for r in ranges])
+    else:
+      objs = np.array([], dtype=str)
+    d = {"obj": objs, **d}
+    return pl.DataFrame(d)
 
   def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
     """见 SelectorDataProvider.load_snapshot: 每只股票一行, 直接可做截面筛选"""
@@ -135,17 +145,13 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     df = to_pl(table)
 
     if len(fin_fields) > 0:
-
-      rows = []
-      objs = []
-      for obj, fin_df in self.load_financial(symbols, fin_fields, fin_only_year, 1).items():
+      fin_df = self.load_financial(symbols, fin_fields, fin_only_year, 1)
+      if len(fin_df) > 0:
         if len(fin_df) > 1:
-          fin_df = fin_df.tail(1)
-        fin_df = fin_df.rename({"ts": "f_ts"})
-        rows.append(fin_df)
-        objs.append(obj)
-      fin_df = pl.concat(rows).insert_column(0, pl.Series("obj", objs))
-      return pl.concat([df, fin_df], how='align_left')
+          fin_df = fin_df.group_by("obj", maintain_order=True).last()
+        if "ts" in fin_df.columns:
+          fin_df = fin_df.rename({"ts": "f_ts"})
+        return pl.concat([df, fin_df], how='align_left')
 
     return df
 

@@ -90,7 +90,7 @@ class SelectorDataProvider:
     pass
 
   def load_financial(self, symbols: list[str], fields: list[str],
-                     only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]:
+                     only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
     """
     load `lastN` financial data for `symbols`
 
@@ -100,8 +100,8 @@ class SelectorDataProvider:
     percent (e.g. f205 ROE, f223 debt-to-asset).
 
     Returns:
-      A dict of [symbol] -> pl.DataFrame of lastN financial data,
-      DataFrame columns ['ts', *fields]; missing symbols are absent from the dict.
+      A pl.DataFrame of lastN financial data,
+      DataFrame columns ['obj', 'ts', *fields]; missing symbols are absent.
     """
     pass
 

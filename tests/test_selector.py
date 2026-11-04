@@ -14,8 +14,12 @@ class MockSelectorDataProvider(SelectorDataProvider):
   def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
     return {sym: self.kline_data[sym] for sym in symbols if sym in self.kline_data}
 
-  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> dict[str, pl.DataFrame]:
-    return {sym: self.financial_data[sym] for sym in symbols if sym in self.financial_data}
+  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
+    rows = []
+    for sym in symbols:
+      if sym in self.financial_data and len(self.financial_data[sym]) > 0:
+        rows.append(self.financial_data[sym].with_columns(pl.lit(sym).alias("obj")))
+    return pl.concat(rows) if rows else pl.DataFrame()
 
   def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True, snapshot_date: str = '') -> pl.DataFrame:
     rows = []

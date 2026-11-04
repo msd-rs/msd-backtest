@@ -2,7 +2,7 @@ import mbt
 import polars as pl
 import numpy as np
 import alpha as al
-from mbt.select import A_STOCKS_EXCLUDE_ST
+from mbt.select import A_STOCKS_EXCLUDE_ST, Panel
 
 class GrowthLargeCapMA15Selector(mbt.Selector):
   """
@@ -26,37 +26,67 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
     if not stocks:
       stocks = A_STOCKS_EXCLUDE_ST
 
-    # 加载近 3 年的年度财务数据
+    # 加载近 3 年的年度财务数据（返回包含 ['obj', 'ts', 'f137'] 的长 DataFrame）
     fin_data = self.dp.load_financial(stocks, fields=["f137"], only_year=True, lastN=3)
 
-    selected_stocks = []
-    profit_records = []
+    if isinstance(fin_data, dict):
+      rows = []
+      for sym, df in fin_data.items():
+        if df is not None and not df.is_empty():
+          rows.append(df.with_columns(pl.lit(sym).alias("obj")))
+      fin_data = pl.concat(rows) if rows else pl.DataFrame()
 
-    for sym in stocks:
-      df = fin_data.get(sym)
-      if df is None or len(df) < 3:
-        continue
+    if fin_data.is_empty():
+      self.factors = pl.DataFrame(schema={
+        "symbol": pl.String,
+        "net_profit_y1": pl.Float64,
+        "net_profit_y2": pl.Float64,
+        "net_profit_y3": pl.Float64,
+      })
+      return []
 
-      # 按时间升序排序
-      df = df.sort("ts")
-      profits = df["f137"].tail(3).to_list()
+    sym_col = "obj" if "obj" in fin_data.columns else "symbol"
+    fin_grouped = (
+      fin_data.filter(pl.col(sym_col).is_in(stocks))
+      .sort("ts")
+      .group_by(sym_col, maintain_order=True)
+      .agg([
+        pl.col("f137").tail(3).alias("profits"),
+        pl.len().alias("count"),
+      ])
+      .filter(pl.col("count") >= 3)
+      .filter(
+        pl.col("profits").list.get(0).is_not_null() & ~pl.col("profits").list.get(0).is_nan() &
+        pl.col("profits").list.get(1).is_not_null() & ~pl.col("profits").list.get(1).is_nan() &
+        pl.col("profits").list.get(2).is_not_null() & ~pl.col("profits").list.get(2).is_nan()
+      )
+      .filter(
+        (pl.col("profits").list.get(0) > 0) &
+        (pl.col("profits").list.get(1) > pl.col("profits").list.get(0)) &
+        (pl.col("profits").list.get(2) > pl.col("profits").list.get(1))
+      )
+      .with_columns([
+        pl.col(sym_col).alias("symbol"),
+        pl.col("profits").list.get(0).alias("net_profit_y1"),
+        pl.col("profits").list.get(1).alias("net_profit_y2"),
+        pl.col("profits").list.get(2).alias("net_profit_y3"),
+      ])
+      .select(["symbol", "net_profit_y1", "net_profit_y2", "net_profit_y3"])
+    )
 
-      # 排除含有 None 或 NaN 的记录
-      if any(p is None or np.isnan(p) for p in profits):
-        continue
+    valid_map = {row["symbol"]: row for row in fin_grouped.iter_rows(named=True)}
+    selected_stocks = [s for s in stocks if s in valid_map]
 
-      # 盈利持续增长且为正 (P1 > 0 且 P2 > P1 且 P3 > P2)
-      if profits[0] > 0 and profits[1] > profits[0] and profits[2] > profits[1]:
-        selected_stocks.append(sym)
-        profit_records.append({
-          "symbol": sym,
-          "net_profit_y1": profits[0],
-          "net_profit_y2": profits[1],
-          "net_profit_y3": profits[2],
-        })
+    if selected_stocks:
+      self.factors = pl.DataFrame([valid_map[s] for s in selected_stocks])
+    else:
+      self.factors = pl.DataFrame(schema={
+        "symbol": pl.String,
+        "net_profit_y1": pl.Float64,
+        "net_profit_y2": pl.Float64,
+        "net_profit_y3": pl.Float64,
+      })
 
-    # 初始化 factors 成员
-    self.factors = pl.DataFrame(profit_records)
     return selected_stocks
 
   def step01(self, stocks: list[str]) -> list[str]:
@@ -71,12 +101,19 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
     all_klines = self.dp.load_kline(A_STOCKS_EXCLUDE_ST, lastN=1)
     
     all_caps = {}
-    for sym, df in all_klines.items():
-      if len(df) > 0:
-        close = df["close"][-1]
-        total_shares = df["total_shares"][-1]
-        if close is not None and total_shares is not None:
-          all_caps[sym] = close * total_shares
+    if isinstance(all_klines, Panel):
+      close = all_klines.last("close")
+      total_shares = all_klines.last("total_shares")
+      for sym, c, s in zip(all_klines.symbols, close, total_shares):
+        if c is not None and s is not None and not np.isnan(c) and not np.isnan(s):
+          all_caps[sym] = float(c * s)
+    elif isinstance(all_klines, dict):
+      for sym, df in all_klines.items():
+        if len(df) > 0:
+          close = df["close"][-1]
+          total_shares = df["total_shares"][-1]
+          if close is not None and total_shares is not None:
+            all_caps[sym] = close * total_shares
 
     if not all_caps:
       return []
@@ -122,26 +159,44 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
     last_closes = {}
     last_ma15s = {}
 
-    # 设置 alpha 库单序列计算上下文
-    al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN)
+    if isinstance(klines, Panel):
+      if klines.bars < 15:
+        return []
 
-    for sym in stocks:
-      df = klines.get(sym)
-      if df is None or len(df) < 15:
-        continue
+      ma15_2d = klines.compute(al.MA, "close", 15)
+      with klines.ctx():
+        death_cross_2d = al.RCROSS(klines.buffer("close"), ma15_2d.ravel()).reshape(klines.n_symbols, klines.bars)
 
-      close = df["close"].to_numpy()
-      ma15 = al.MA(close, 15)
+      lookback = min(self.break_days, klines.bars)
+      has_break = (death_cross_2d[:, -lookback:] > 0).any(axis=1)
 
-      # 跌破信号：前一日收盘 >= 均线，今日收盘 < 均线
-      death_cross = al.RCROSS(close, ma15)
+      for i, sym in enumerate(klines.symbols):
+        if sym in stocks and has_break[i]:
+          selected_stocks.append(sym)
+          last_closes[sym] = float(klines.last("close")[i])
+          last_ma15s[sym] = float(ma15_2d[i, -1])
 
-      # 判断最近 break_days 天内是否有跌破信号
-      lookback = min(self.break_days, len(death_cross))
-      if death_cross[-lookback:].any():
-        selected_stocks.append(sym)
-        last_closes[sym] = close[-1]
-        last_ma15s[sym] = ma15[-1]
+    elif isinstance(klines, dict):
+      # 设置 alpha 库单序列计算上下文
+      al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN)
+
+      for sym in stocks:
+        df = klines.get(sym)
+        if df is None or len(df) < 15:
+          continue
+
+        close = df["close"].to_numpy()
+        ma15 = al.MA(close, 15)
+
+        # 跌破信号：前一日收盘 >= 均线，今日收盘 < 均线
+        death_cross = al.RCROSS(close, ma15)
+
+        # 判断最近 break_days 天内是否有跌破信号
+        lookback = min(self.break_days, len(death_cross))
+        if death_cross[-lookback:].any():
+          selected_stocks.append(sym)
+          last_closes[sym] = close[-1]
+          last_ma15s[sym] = ma15[-1]
 
     # 更新 factors DataFrame
     if not self.factors.is_empty():

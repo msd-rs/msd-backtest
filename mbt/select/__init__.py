@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING
+from mbt.shared import stocks
 from .selector import Selector, SelectorDataProvider
 from .panel import Panel
 from .msd import MsdSelectorDataProvider
-from mbt.shared import stocks
 
 if TYPE_CHECKING:
   from mbt.shared.stocks import ALL_STOCKS, A_STOCKS, A_STOCKS_EXCLUDE_ST, FOUNDS

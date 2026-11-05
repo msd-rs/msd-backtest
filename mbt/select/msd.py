@@ -129,20 +129,17 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     logger.debug(f"finish load financial for {len(ranges)} objs")
 
     total_rows = table.rows
-    cols = []
+    if total_rows > 0:
+      objs = np.repeat([r[0] for r in ranges], [r[2] - r[1] for r in ranges])
+    else:
+      objs = np.array([], dtype=str)
 
-    objs_type = pl.Enum(map(lambda r: r[0], ranges))
-    objs = [r[0] for r in ranges for i in range(r[1], r[2])  ]
-    logger.debug(f"finish objs series {len(objs)} financial for {len(ranges)} objs")
-    objs = pl.Series("obj", objs, dtype=objs_type)
-    logger.debug(f"finish objs series financial for {len(ranges)} objs")
-
-    cols.append(objs)
+    cols = [pl.Series("obj", objs, dtype=pl.String)]
     d = table.to_dict()
     for k, v in d.items():
       cols.append(pl.Series(k, v))
 
-    df = pl.DataFrame(d)
+    df = pl.DataFrame(cols)
     logger.debug(f"finish data frame financial for {len(ranges)} objs")
     return df
 

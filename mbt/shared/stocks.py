@@ -42,16 +42,18 @@ def parse_obj_kind(kind: str) -> int:
   return 0
 
 
-def parse_obj_status(name: str) -> int:
-  if 'ST' in name:
-    return 1
+def parse_obj_status(name: str | None) -> int:
+  if not name:
+    return STATUS_NORMAL
   if '*ST' in name:
-    return 2
-  return 0
+    return STATUS_STAR_ST
+  if 'ST' in name:
+    return STATUS_ST
+  return STATUS_NORMAL
 
 def build_limit_ratio(row: dict[str, str]) -> float:
-  obj = row['obj']
-  name = row['name']
+  obj = row.get('obj') or ''
+  name = row.get('name') or ''
   if name.startswith("ST") or name.startswith("*ST"):
     return 0.05
   elif obj.startswith("SZ30") or obj.startswith("SH68"): #科创板和创业板
@@ -67,6 +69,9 @@ def load_stocks_from_db() -> pl.DataFrame:
   def handler(t: pymsd.Table):
     nonlocal df
     m : dict[str, dict] = orjson.loads(t[0, 1])
+    for k, r in m.items():
+      if "obj" not in r:
+        r["obj"] = r.get("symbol", k)
     df = pl.from_records(list(m.values()), schema=JSON_SCHEMA, orient='row')
 
   conn.query_map("select * from stock_infos where obj='stocks'", handler)

@@ -17,9 +17,9 @@ def test_load_financial_long_dataframe():
   import polars as pl
   dp = MsdSelectorDataProvider(MSD_HOST)
   fields = ["f001", "f007"]
-  symbols = ["SH600000", "SZ000001"]
+  objs = ["SH600000", "SZ000001"]
 
-  df = dp.load_financial(symbols, fields=fields, only_year=True, lastN=3)
+  df = dp.load_financial(objs, fields=fields, only_year=True, lastN=3)
   assert isinstance(df, pl.DataFrame)
   assert "obj" in df.columns
   assert "ts" in df.columns
@@ -27,7 +27,7 @@ def test_load_financial_long_dataframe():
     assert f in df.columns
   assert df.columns[0] == "obj"
   assert len(df) > 0
-  assert set(df["obj"].unique().to_list()).issubset(set(symbols))
+  assert set(df["obj"].unique().to_list()).issubset(set(objs))
 
 
 def test_load_financial_empty():
@@ -40,12 +40,12 @@ def test_load_financial_empty():
 
 def test_load_snapshot_with_fin():
   dp = MsdSelectorDataProvider(MSD_HOST)
-  symbols = ["SH600000", "SZ000001"]
-  snap = dp.load_snapshot(symbols, fin_fields=["f001"])
+  objs = ["SH600000", "SZ000001"]
+  snap = dp.load_snapshot(objs, fin_fields=["f001"])
   assert "obj" in snap.columns
   assert "f_ts" in snap.columns
   assert "f001" in snap.columns
-  assert len(snap) == len(symbols)
+  assert len(snap) == len(objs)
 
 
 if __name__ == "__main__":

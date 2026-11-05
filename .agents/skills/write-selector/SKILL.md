@@ -46,18 +46,18 @@ class MySelector(mbt.Selector):
     # TODO: write select logic here
 ```
 
-- You will build a polars DataFrame named `factors` to select stocks as class member. It has `obj` (or `symbol`) column, other columns in `factors` are according to the user's requirements.
+- You will build a polars DataFrame named `factors` to select stocks as class member. It has `obj` (or `obj`) column, other columns in `factors` are according to the user's requirements.
 - You write several `stepXX` methods according to the user's requirements to gradually narrow down the result set, and update the `factors`. The `stepXX` methods are executed in order, and each method will be called with the result of the previous method as input. You should carefully design each step, there are some rules:
   - Usually, it's a good idea to first filter by snapshot via `load_snapshot`, then do deeper analysis that needs historical series via `load_kline`.
   - Keep the number of stocks in each step as small as possible.
   - Add docstring to each `stepXX` method to explain what it does (it will be logged automatically during execution).
   - You should use caching to avoid fetching data multiple times.
-- For `step00`, when incoming `stocks` is empty and user not specifies any initial symbol rules, you should use `A_STOCKS_EXCLUDE_ST` as the initial set of stocks. There are some other initial stocks can be use depending on the user's requirements.
+- For `step00`, when incoming `stocks` is empty and user not specifies any initial obj rules, you should use `A_STOCKS_EXCLUDE_ST` as the initial set of stocks. There are some other initial stocks can be use depending on the user's requirements.
   - `A_STOCKS`: all A-share stocks
   - `A_STOCKS_EXCLUDE_ST`: all A-share stocks except ST and *ST stocks
   - `FOUNDS`: all funds
   - `ALL_STOCKS`: is a polars DataFrame that hold all stocks and can be used to select stocks by some it's columns.
-    - `symbol`: stock symbol, prefix with market 'SH' | 'SZ', then stock code
+    - `obj`: stock obj, prefix with market 'SH' | 'SZ', then stock code
     - `name`: stock name
     - `kind`: stock kind
     - `status`: stock status
@@ -68,46 +68,46 @@ class MySelector(mbt.Selector):
 
 ## Using `Panel` (`mbt.select.Panel`)
 
-`self.dp.load_kline(symbols, lastN=100, fin_fields=[], fin_only_year=True, baseline=None)` returns a `Panel` object.
+`self.dp.load_kline(objs, lastN=100, fin_fields=[], fin_only_year=True, baseline=None)` returns a `Panel` object.
 
-`Panel` wraps the 1D contiguous block buffer (`n_symbols * bars` rows) into a `(n_symbols, bars)` 2D view and **always carries `symbols` metadata** (row `i` corresponds to `panel.symbols[i]`).
-- **Never** map results to your input `symbols` list positionally — `load_kline` may reorder or deduplicate symbols; always use `panel.symbols`.
+`Panel` wraps the 1D contiguous block buffer (`n_objs * bars` rows) into a `(n_objs, bars)` 2D view and **always carries `objs` metadata** (row `i` corresponds to `panel.objs[i]`).
+- **Never** map results to your input `objs` list positionally — `load_kline` may reorder or deduplicate objs; always use `panel.objs`.
 - **Recommended**: pass `baseline="SH000001"` to `load_kline` so a full-calendar index defines the shared time axis (the baseline block itself is automatically removed from the returned `Panel`).
-- **Legacy compatibility**: `data, symbols, bars = self.dp.load_kline(...)` triple unpacking is still supported.
+- **Legacy compatibility**: `data, objs, bars = self.dp.load_kline(...)` triple unpacking is still supported.
 
 ### Attributes & Metadata
-- `panel.frame`: underlying `pl.DataFrame` of length `n_symbols * bars`.
-- `panel.symbols`: `list[str]`, stock symbols corresponding to the row order.
-- `panel.bars`: `int`, number of K-line bars per symbol.
-- `panel.n_symbols` / `len(panel)`: number of symbols.
-- `panel.pick(symbol) -> int`: maps a stock symbol to its row index in `(n_symbols, bars)` (raises `KeyError` if not found).
+- `panel.frame`: underlying `pl.DataFrame` of length `n_objs * bars`.
+- `panel.objs`: `list[str]`, stock objs corresponding to the row order.
+- `panel.bars`: `int`, number of K-line bars per obj.
+- `panel.n_objs` / `len(panel)`: number of objs.
+- `panel.pick(obj) -> int`: maps a stock obj to its row index in `(n_objs, bars)` (raises `KeyError` if not found).
 
 ### 2D & 1D Views
-- `panel.buffer(name) -> np.ndarray`: 1D contiguous array `(n_symbols * bars,)` in block layout, directly consumed by `alpha-lib`.
-- `panel.column(name) -> np.ndarray`: 2D view `(n_symbols, bars)` sharing memory with `buffer(name)`.
-- `panel.last(name) -> np.ndarray`: value of the last bar for every symbol, shape `(n_symbols,)`.
-- `panel.offset(name, k) -> np.ndarray`: value of the `k`-th bar (supports negative index like `-2`) for every symbol, shape `(n_symbols,)`.
+- `panel.buffer(name) -> np.ndarray`: 1D contiguous array `(n_objs * bars,)` in block layout, directly consumed by `alpha-lib`.
+- `panel.column(name) -> np.ndarray`: 2D view `(n_objs, bars)` sharing memory with `buffer(name)`.
+- `panel.last(name) -> np.ndarray`: value of the last bar for every obj, shape `(n_objs,)`.
+- `panel.offset(name, k) -> np.ndarray`: value of the `k`-th bar (supports negative index like `-2`) for every obj, shape `(n_objs,)`.
 - `panel.timeline() -> np.ndarray`: shared date axis of shape `(bars,)`.
 
 ### Vectorized `alpha-lib` Computation
-Avoid per-symbol Python loops; compute over the entire panel at once:
-- `panel.compute(fn, *args, **kwargs) -> np.ndarray`: enters `panel.ctx()`, automatically resolves column name strings (e.g. `"close"`, `"dividend"`) into `panel.buffer(col)`, executes `fn`, and reshapes the output to `(n_symbols, bars)`:
+Avoid per-obj Python loops; compute over the entire panel at once:
+- `panel.compute(fn, *args, **kwargs) -> np.ndarray`: enters `panel.ctx()`, automatically resolves column name strings (e.g. `"close"`, `"dividend"`) into `panel.buffer(col)`, executes `fn`, and reshapes the output to `(n_objs, bars)`:
   ```python
-  ma15 = panel.compute(al.MA, "close", 15)          # shape: (n_symbols, bars)
-  div_ttm = panel.compute(al.SUM, "dividend", 250)  # shape: (n_symbols, bars)
+  ma15 = panel.compute(al.MA, "close", 15)          # shape: (n_objs, bars)
+  div_ttm = panel.compute(al.SUM, "dividend", 250)  # shape: (n_objs, bars)
   ```
-- `with panel.ctx(flags=None):` / `panel.set_ctx(flags=None)`: binds `al.set_ctx(groups=panel.n_symbols, flags=al.FLAG_SKIP_NAN)` to the current scope. Because `alpha-lib` group state is process-global and `load_kline` overwrites it, always use `panel.compute(...)` or `with panel.ctx():` when calling `alpha` functions directly:
+- `with panel.ctx(flags=None):` / `panel.set_ctx(flags=None)`: binds `al.set_ctx(groups=panel.n_objs, flags=al.FLAG_SKIP_NAN)` to the current scope. Because `alpha-lib` group state is process-global and `load_kline` overwrites it, always use `panel.compute(...)` or `with panel.ctx():` when calling `alpha` functions directly:
   ```python
   with panel.ctx():
     close = panel.column("close")
     ma15 = al.MA(close, 15)
-    cross = al.RCROSS(close, ma15)  # shape: (n_symbols, bars)
+    cross = al.RCROSS(close, ma15)  # shape: (n_objs, bars)
   ```
 
 ### Multi-Period Resampling (`panel.resample`)
 Convert daily K-line panels into weekly, monthly, quarterly, or yearly panels directly:
 - `monthly_panel = panel.resample("1M")` (supports `"1W"`/`"W"`, `"1M"`/`"M"`, `"1Q"`/`"Q"`, `"1Y"`/`"Y"`, or Polars `dt.truncate` syntax like `"1w"`, `"1mo"`).
-- Returns a standard `Panel` object with shape `(n_symbols, new_bars)` and the exact same column schema.
+- Returns a standard `Panel` object with shape `(n_objs, new_bars)` and the exact same column schema.
 - **OHLCV Aggregation**:
   - `open`: first valid open in period
   - `close`: last valid close in period
@@ -126,7 +126,7 @@ Convert daily K-line panels into weekly, monthly, quarterly, or yearly panels di
   ```
 
 ### Cross-Section Assembly & Debugging
-- `panel.cross_section(**columns) -> pl.DataFrame`: packs multiple `(n_symbols,)` 1D arrays into an `n_symbols`-row `pl.DataFrame` with `"obj"` (`panel.symbols`) as the first column. Ideal for building `self.factors` and filtering stocks:
+- `panel.cross_section(**columns) -> pl.DataFrame`: packs multiple `(n_objs,)` 1D arrays into an `n_objs`-row `pl.DataFrame` with `"obj"` (`panel.objs`) as the first column. Ideal for building `self.factors` and filtering stocks:
   ```python
   panel = self.dp.load_kline(stocks, lastN=100, baseline="SH000001")
   ma15 = panel.compute(al.MA, "close", 15)
@@ -142,7 +142,7 @@ Convert daily K-line panels into weekly, monthly, quarterly, or yearly panels di
   self.factors = df
   return df["obj"].to_list()
   ```
-- `panel.to_frame(key="enum" | "str") -> pl.DataFrame`: expands the panel into a long table with a `symbol` column (`pl.Enum` by default to save memory, or `"str"`). Use **only** for debugging/exporting; keep calculations on `column()` / `last()` / `compute()` / `cross_section()`.
+- `panel.to_frame(key="enum" | "str") -> pl.DataFrame`: expands the panel into a long table with a `obj` column (`pl.Enum` by default to save memory, or `"str"`). Use **only** for debugging/exporting; keep calculations on `column()` / `last()` / `compute()` / `cross_section()`.
 
 
 # Execution

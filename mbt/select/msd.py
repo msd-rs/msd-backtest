@@ -1,3 +1,4 @@
+import itertools
 import time
 from typing import Tuple
 
@@ -13,8 +14,8 @@ import numpy as np
 logger = logging.getLogger("selector")
 
 
-def symbols_where(symbols: list[str]) -> str:
-  return ",".join(map(lambda o: f'"{o}"', symbols))
+def objs_where(objs: list[str]) -> str:
+  return ",".join(map(lambda o: f'"{o}"', objs))
 
 
 def db_fields(fields: list[str]) -> str:
@@ -33,12 +34,12 @@ class MsdSelectorDataProvider(SelectorDataProvider):
     self._msd_host = msd_host
     self._client = pymsd.MsdConnection(msd_host)
 
-  def load_kline(self, symbols: list[str], lastN: int | list[int] = 100,
+  def load_kline(self, objs: list[str], lastN: int | list[int] = 100,
                  fin_fields: list[str] = [], fin_only_year: bool = True,
                  baseline: str | None = None) -> Panel:
     """见 SelectorDataProvider.load_kline 的布局契约与列语义说明"""
-    if len(symbols) == 0 and baseline is None:
-      raise ValueError("symbols is empty and no baseline given")
+    if len(objs) == 0 and baseline is None:
+      raise ValueError("objs is empty and no baseline given")
 
     # lastN: int 或 [kline_bars, dividend_events, shares_events]
     if isinstance(lastN, int):
@@ -52,12 +53,12 @@ class MsdSelectorDataProvider(SelectorDataProvider):
       start = [int(x) for x in lastN]
 
     # 排序去重, 让返回行序可复现; baseline 自动并入请求并保证成为对齐基准
-    request = sorted(set(symbols))
+    request = sorted(set(objs))
     if baseline is not None and baseline not in request:
       request = sorted({*request, baseline})
     baseline_sym = baseline if baseline is not None else request[0]
 
-    where_ = symbols_where(request)
+    where_ = objs_where(request)
     date_where = f'AND ts <= "{self.date}"' if self.date else ""
     sql = f"""
 SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {date_where} limit -{start[0]};
@@ -77,7 +78,7 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
       baseline_sym,
     )
     data = table.to_dict()
-    logger.info(f"raw data build, {time.time() - t1:.3f}s, {len(loaded)} symbols x {bars} bars")
+    logger.info(f"raw data build, {time.time() - t1:.3f}s, {len(loaded)} objs x {bars} bars")
 
     # groups 必须等于返回的股票数(而非入参数量: 可能重复/未排序)
     al.set_ctx(groups=len(loaded), flags=al.FLAG_SKIP_NAN)
@@ -106,46 +107,57 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
       loaded = [s for s in loaded if s != baseline]
 
     if bars <= 0:
-      raise ValueError(f"no bars loaded for {len(symbols)} symbols")
+      raise ValueError(f"no bars loaded for {len(objs)} objs")
 
     return Panel(full_df, loaded, bars)
 
-  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> pl.DataFrame:
+  def load_financial(self, objs: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> pl.DataFrame:
     """见 SelectorDataProvider.load_financial"""
-    if not symbols:
+    if not objs:
       return pl.DataFrame()
 
-    logger.debug(f"start load financial for {len(symbols)} symbols, lastN={lastN}")
+    logger.debug(f"start load financial objs, lastN={lastN}")
     date_where = f'AND ts <= "{self.date}"' if self.date else ""
     year_where = "AND ts.month=12" if only_year else ""
-    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({symbols_where(symbols)}) {date_where} {year_where} limit -{lastN}"
+    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({objs_where(objs)}) {date_where} {year_where} limit -{lastN}"
     res = self._client.query_concat(sql)
-    logger.debug(f"finish load financial for {len(symbols)} symbols")
 
     if "stock_financial" not in res:
+      logger.warning("no stock_financial in result")
       return pl.DataFrame()
-
     table, ranges = res["stock_financial"]
-    total_rows = table.rows
-    d = table.to_dict()
-    if total_rows > 0:
-      objs = np.repeat([r[0] for r in ranges], [r[2] - r[1] for r in ranges])
-    else:
-      objs = np.array([], dtype=str)
-    d = {"obj": objs, **d}
-    return pl.DataFrame(d)
+    logger.debug(f"finish load financial for {len(ranges)} objs")
 
-  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
+    total_rows = table.rows
+    cols = []
+
+    objs_type = pl.Enum(map(lambda r: r[0], ranges))
+    objs = [r[0] for r in ranges for i in range(r[1], r[2])  ]
+    logger.debug(f"finish objs series {len(objs)} financial for {len(ranges)} objs")
+    objs = pl.Series("obj", objs, dtype=objs_type)
+    logger.debug(f"finish objs series financial for {len(ranges)} objs")
+
+    cols.append(objs)
+    d = table.to_dict()
+    for k, v in d.items():
+      cols.append(pl.Series(k, v))
+
+    df = pl.DataFrame(d)
+    logger.debug(f"finish data frame financial for {len(ranges)} objs")
+    return df
+
+
+  def load_snapshot(self, objs: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
     """见 SelectorDataProvider.load_snapshot: 每只股票一行, 直接可做截面筛选"""
     table = self._client.snapshot([
       "stock_kline_1d",
       "stock_shares",
-    ], symbols, self.date)
+    ], objs, self.date)
 
     df = to_pl(table)
 
     if len(fin_fields) > 0:
-      fin_df = self.load_financial(symbols, fin_fields, fin_only_year, 1)
+      fin_df = self.load_financial(objs, fin_fields, fin_only_year, 1)
       if len(fin_df) > 0:
         if len(fin_df) > 1:
           fin_df = fin_df.group_by("obj", maintain_order=True).last()
@@ -159,12 +171,12 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
 if __name__ == "__main__":
   import os
   import logging
-  from mbt.shared import A_STOCKS_EXCLUDE_ST
-  logging.basicConfig(level=logging.INFO)
+  logging.basicConfig(
+  format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.DEBUG
+)
   msd_host = os.environ.get("MSD_HOST", "http://localhost:50511")
   if not msd_host:
     raise Exception("MSD_HOST is not set")
   dp = MsdSelectorDataProvider(msd_host)
-  panel = dp.load_kline(["SH600000", "SH600001"], 200, baseline="SH000001")
-  print(panel)
-  print(panel.cross_section(close=panel.last("close")))
+  table = dp.load_financial(['*'], ["f001", "f007"], False, 12)
+  print(table)

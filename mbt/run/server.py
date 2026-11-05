@@ -25,7 +25,7 @@ app = FastAPI(title="MSD Backtest Server")
 
 class RunRequestModel(BaseModel):
   strategy: str
-  symbols: List[str]
+  objs: List[str]
   start: str
   end: str
   args: Optional[List] = None
@@ -36,22 +36,22 @@ class RunRequestModel(BaseModel):
 @app.post("/backtest")
 async def run_backtest(req_model: RunRequestModel):
   try:
-    logger.info(f"Received backtest request for symbols: {req_model.symbols}")
+    logger.info(f"Received backtest request for objs: {req_model.objs}")
 
     # Use RunRequest to load the strategy (can be source code or file path)
-    # The RunRequest class in backend.py expects strategy, symbols, start, end, args
+    # The RunRequest class in backend.py expects strategy, objs, start, end, args
     # We'll pass the strategy string directly to load_strategy logic if needed,
     # but RunRequest handles it.
 
     # We need to load data first as in cli.py
-    logger.info(f"Loading data from {DEFAULT_MSD_HOST} for {req_model.symbols}")
-    dp, symbols = load_data(
-      DEFAULT_MSD_HOST, req_model.symbols, req_model.start, req_model.end
+    logger.info(f"Loading data from {DEFAULT_MSD_HOST} for {req_model.objs}")
+    dp, objs = load_data(
+      DEFAULT_MSD_HOST, req_model.objs, req_model.start, req_model.end
     )
 
     if "ts" not in dp.data:
       raise ValueError(
-        "No data found for the given symbols and date range. Please check your MSD server and parameters."
+        "No data found for the given objs and date range. Please check your MSD server and parameters."
       )
 
     logger.info("Data loaded successfully")

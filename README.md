@@ -52,7 +52,7 @@ uv run python -m mbt.run.cli strategy/double_avg.py -s 000001.SZ 600000.SH --beg
 
 **常用参数说明：**
 - `strategy`: 策略文件路径（`.py` 或 `.json`）。
-- `-s`, `--symbols`: 股票代码列表。
+- `-s`, `--objs`: 股票代码列表。
 - `-b`, `--begin`: 开始日期 (YYYY-MM-DD)。
 - `-e`, `--end`: 结束日期 (YYYY-MM-DD)。
 - `-o`, `--output`: 输出文件路径（支持 `.csv`, `.xlsx`, `.json`）。

@@ -17,7 +17,7 @@ class Context:
     """
     pass
 
-  def data(self, name: str, /, symbol: str | None = None) -> np.ndarray:
+  def data(self, name: str, /, obj: str | None = None) -> np.ndarray:
     """
     return the corresponding data
 
@@ -41,12 +41,12 @@ class Context:
     """
     return self.data(name)
 
-  def symbols(self) -> list[str]:
+  def objs(self) -> list[str]:
     """
-    return the symbols of the account
+    return the objs of the account
 
     Returns:
-      list of symbols
+      list of objs
     """
     pass
 

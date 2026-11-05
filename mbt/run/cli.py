@@ -21,10 +21,10 @@ logging.basicConfig(
 logger = logging.getLogger("backtest")
 
 
-def expand_symbols(symbols: list[str]) -> list[str]:
-  """read as file when input is a file path, and expand it. otherwise, return the input as a list of symbols"""
+def expand_objs(objs: list[str]) -> list[str]:
+  """read as file when input is a file path, and expand it. otherwise, return the input as a list of objs"""
   expanded = []
-  for s in symbols:
+  for s in objs:
     if os.path.isfile(s):
       with open(s, "r", encoding='utf-8') as f:
         lines = filter(
@@ -44,8 +44,8 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     "strategy",
     help="Strategy to run, can be a JSON file or a Python file",
   )
-  parser.add_argument("-s", "--symbols", nargs="+", default=[], help="Symbols to run")
-  parser.add_argument("-B", "--benchmark", type=str, default=os.environ.get("MSD_BT_BENCHMARK", "SH000300"), help="Benchmark symbol, env $MSD_BT_BENCHMARK")
+  parser.add_argument("-s", "--objs", nargs="+", default=[], help="objs to run")
+  parser.add_argument("-B", "--benchmark", type=str, default=os.environ.get("MSD_BT_BENCHMARK", "SH000300"), help="Benchmark obj, env $MSD_BT_BENCHMARK")
   parser.add_argument(
     "-b", "--begin", type=str, default=os.environ.get("MSD_BT_BEGIN", "2020-01-01"), help="Start date, env $MSD_BT_BEGIN"
   )
@@ -73,13 +73,13 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     logging.getLogger().setLevel(logging.DEBUG)
 
 
-  args.symbols = expand_symbols(args.symbols)
+  args.objs = expand_objs(args.objs)
 
   if args.strategy.endswith(".json"):
     with open(args.strategy, "r", encoding='utf-8') as f:
       req = RunRequest.from_json(
         f,
-        symbols=args.symbols,
+        objs=args.objs,
         start=args.begin,
         end=args.end,
         args=args.args,
@@ -88,7 +88,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     with open(args.strategy, "r", encoding='utf-8') as f:
       req = RunRequest(
         f,
-        args.symbols,
+        args.objs,
         start=args.begin,
         end=args.end,
         args=args.args,
@@ -96,15 +96,15 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   else:
     raise ValueError("Invalid strategy type")
 
-  if len(args.symbols) == 0:
-    raise ValueError("No symbols provided")
+  if len(args.objs) == 0:
+    raise ValueError("No objs provided")
 
   try:
-    args.symbols.remove(args.benchmark)
+    args.objs.remove(args.benchmark)
   except ValueError:
     pass
 
-  args.symbols.insert(0, args.benchmark)
+  args.objs.insert(0, args.benchmark)
 
   fee = Fee(args.fee) if len(args.fee) > 0 else Fee()
 
@@ -136,7 +136,7 @@ def build_output(reports: list[Report], output: str):
   logger.info(f"output kind: {ext}")
   if ext == "csv":
     for report in reports:
-      df = pl.DataFrame(report.detailed(with_symbol=True))
+      df = pl.DataFrame(report.detailed(with_obj=True))
       float_cols = [col for col, dtype in zip(df.columns, df.dtypes) if dtype in (pl.Float32, pl.Float64)]
       df = df.with_columns([
         pl.col(col).map_elements(float_format, return_dtype=pl.String)
@@ -156,7 +156,7 @@ def build_output(reports: list[Report], output: str):
       data['fw_price'] = report.fw_price
       data['bw_price'] = report.bw_price
       df = pl.DataFrame(data)
-      df.write_excel(workbook=wb, worksheet=report.symbol)
+      df.write_excel(workbook=wb, worksheet=report.obj)
     wb.close()
   elif ext == "json":
     data = build_json_report(reports)
@@ -176,9 +176,9 @@ def echo_reports(reports: list[Report]):
 def main():
   req, msd_host, output, fee = parse_args()
   logger.info(f"load data from {msd_host}")
-  dp, symbols = load_data(msd_host, req.symbols, req.start, req.end)
+  dp, objs = load_data(msd_host, req.objs, req.start, req.end)
   logger.info(
-    f"data loaded, symbols: {len(symbols)}, bars per symbol: {dp.bars}, total_bars: {dp.groups * dp.bars}"
+    f"data loaded, objs: {len(objs)}, bars per obj: {dp.bars}, total_bars: {dp.groups * dp.bars}"
   )
   account = Account(10000.0, dp, fee=fee)
   logger.info("account created")

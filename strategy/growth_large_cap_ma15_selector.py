@@ -38,14 +38,14 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
 
     if fin_data.is_empty():
       self.factors = pl.DataFrame(schema={
-        "symbol": pl.String,
+        "obj": pl.String,
         "net_profit_y1": pl.Float64,
         "net_profit_y2": pl.Float64,
         "net_profit_y3": pl.Float64,
       })
       return []
 
-    sym_col = "obj" if "obj" in fin_data.columns else "symbol"
+    sym_col = "obj" if "obj" in fin_data.columns else "obj"
     fin_grouped = (
       fin_data.filter(pl.col(sym_col).is_in(stocks))
       .sort("ts")
@@ -66,22 +66,22 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
         (pl.col("profits").list.get(2) > pl.col("profits").list.get(1))
       )
       .with_columns([
-        pl.col(sym_col).alias("symbol"),
+        pl.col(sym_col).alias("obj"),
         pl.col("profits").list.get(0).alias("net_profit_y1"),
         pl.col("profits").list.get(1).alias("net_profit_y2"),
         pl.col("profits").list.get(2).alias("net_profit_y3"),
       ])
-      .select(["symbol", "net_profit_y1", "net_profit_y2", "net_profit_y3"])
+      .select(["obj", "net_profit_y1", "net_profit_y2", "net_profit_y3"])
     )
 
-    valid_map = {row["symbol"]: row for row in fin_grouped.iter_rows(named=True)}
+    valid_map = {row["obj"]: row for row in fin_grouped.iter_rows(named=True)}
     selected_stocks = [s for s in stocks if s in valid_map]
 
     if selected_stocks:
       self.factors = pl.DataFrame([valid_map[s] for s in selected_stocks])
     else:
       self.factors = pl.DataFrame(schema={
-        "symbol": pl.String,
+        "obj": pl.String,
         "net_profit_y1": pl.Float64,
         "net_profit_y2": pl.Float64,
         "net_profit_y3": pl.Float64,
@@ -104,7 +104,7 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
     if isinstance(all_klines, Panel):
       close = all_klines.last("close")
       total_shares = all_klines.last("total_shares")
-      for sym, c, s in zip(all_klines.symbols, close, total_shares):
+      for sym, c, s in zip(all_klines.objs, close, total_shares):
         if c is not None and s is not None and not np.isnan(c) and not np.isnan(s):
           all_caps[sym] = float(c * s)
     elif isinstance(all_klines, dict):
@@ -135,9 +135,9 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
 
     # 更新 factors DataFrame
     if not self.factors.is_empty():
-      self.factors = self.factors.filter(pl.col("symbol").is_in(selected_stocks))
+      self.factors = self.factors.filter(pl.col("obj").is_in(selected_stocks))
       self.factors = self.factors.with_columns(
-        pl.col("symbol").map_elements(lambda x: all_caps.get(x), return_dtype=pl.Float64).alias("market_cap")
+        pl.col("obj").map_elements(lambda x: all_caps.get(x), return_dtype=pl.Float64).alias("market_cap")
       ).with_columns(
         (pl.col("market_cap") / pl.col("net_profit_y3")).alias("pe")
       )
@@ -165,12 +165,12 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
 
       ma15_2d = klines.compute(al.MA, "close", 15)
       with klines.ctx():
-        death_cross_2d = al.RCROSS(klines.buffer("close"), ma15_2d.ravel()).reshape(klines.n_symbols, klines.bars)
+        death_cross_2d = al.RCROSS(klines.buffer("close"), ma15_2d.ravel()).reshape(klines.n_objs, klines.bars)
 
       lookback = min(self.break_days, klines.bars)
       has_break = (death_cross_2d[:, -lookback:] > 0).any(axis=1)
 
-      for i, sym in enumerate(klines.symbols):
+      for i, sym in enumerate(klines.objs):
         if sym in stocks and has_break[i]:
           selected_stocks.append(sym)
           last_closes[sym] = float(klines.last("close")[i])
@@ -200,10 +200,10 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
 
     # 更新 factors DataFrame
     if not self.factors.is_empty():
-      self.factors = self.factors.filter(pl.col("symbol").is_in(selected_stocks))
+      self.factors = self.factors.filter(pl.col("obj").is_in(selected_stocks))
       self.factors = self.factors.with_columns([
-        pl.col("symbol").map_elements(lambda x: last_closes.get(x), return_dtype=pl.Float64).alias("close"),
-        pl.col("symbol").map_elements(lambda x: last_ma15s.get(x), return_dtype=pl.Float64).alias("ma15"),
+        pl.col("obj").map_elements(lambda x: last_closes.get(x), return_dtype=pl.Float64).alias("close"),
+        pl.col("obj").map_elements(lambda x: last_ma15s.get(x), return_dtype=pl.Float64).alias("ma15"),
       ])
 
     return selected_stocks

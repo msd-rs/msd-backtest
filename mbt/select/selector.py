@@ -21,32 +21,32 @@ class SelectorDataProvider:
   date: str | None = None
   """选股日期(YYYY-MM-DD), None 表示最新交易日。 """
 
-  def load_kline(self, symbols: list[str], lastN: int | list[int] = 100,
+  def load_kline(self, objs: list[str], lastN: int | list[int] = 100,
                  fin_fields: list[str] = [], fin_only_year: bool = True,
                  baseline: str | None = None) -> "Panel":
     """
-    load `lastN` kline bars for `symbols`, can also with asof joined some `fin_fields`.
+    load `lastN` kline bars for `objs`, can also with asof joined some `fin_fields`.
 
     Layout contract
     ---------------
-    The result is a *rectangular* matrix in symbol-major order:
+    The result is a *rectangular* matrix in obj-major order:
 
     ```python
-    block i = data[i*bars : (i+1)*bars]   # belongs to returned symbols[i]
+    block i = data[i*bars : (i+1)*bars]   # belongs to returned objs[i]
     ```
 
-    and `len(data) == len(symbols) * bars` always holds. It is NOT ragged: missing
+    and `len(data) == len(objs) * bars` always holds. It is NOT ragged: missing
     bars are padded with NaN, so "an all-NaN row" means "suspended / not yet
     listed", not "no data".
 
     The time axis of the WHOLE matrix is defined by the asof **baseline**
-    (default: the first symbol of the request, or `baseline` when given):
+    (default: the first obj of the request, or `baseline` when given):
 
-    * If the baseline is suspended, delisted or newly listed, every other symbol
+    * If the baseline is suspended, delisted or newly listed, every other obj
       in the request is silently truncated or shifted. No error is raised.
     * Recommended: `baseline="SH000001"` (a full-calendar index). The baseline
-      block is removed from the result, so `symbols`/`bars` are already clean.
-    * The returned `symbols` may be REORDERED by the implementation. Never map
+      block is removed from the result, so `objs`/`bars` are already clean.
+    * The returned `objs` may be REORDERED by the implementation. Never map
       results to your input list positionally; always use the returned order.
 
     Column semantics
@@ -63,7 +63,7 @@ class SelectorDataProvider:
     * `limited`: 1/-1/0 = limit-up/limit-down/normal, computed on adjusted prices.
 
     Args:
-      symbols: the list of symbols; the first one is used as the asof baseline
+      objs: the list of objs; the first one is used as the asof baseline
         when `baseline` is None.
       lastN: number of bars.
         * `int`: bars of kline; dividend/shares events are derived as
@@ -73,26 +73,26 @@ class SelectorDataProvider:
           e.g. `[750, 40, 2]` for a 3-year trailing dividend sum.
       fin_fields: a list of fin field to take, joined backward via asof.
       fin_only_year: only annual (12-31) financial data is used when True.
-      baseline: symbol used as the asof baseline, removed from the result.
+      baseline: obj used as the asof baseline, removed from the result.
 
     Returns:
-      A `Panel` exposing `frame`, `symbols`, `bars`, plus 2D views
+      A `Panel` exposing `frame`, `objs`, `bars`, plus 2D views
       (`column/last/offset`), `ctx()` for alpha-lib, `cross_section()` for the
       n-row factor table, and `to_frame(key="enum")` for debug/export.
-      It still unpacks as the legacy triple `(data, symbols, bars)`.
+      It still unpacks as the legacy triple `(data, objs, bars)`.
 
     Notes:
       * This method calls `alpha.set_ctx()` internally; if you call alpha
         functions afterwards, re-enter the context via `panel.ctx()`.
-      * For performance, use py-alpha-lib on the whole block; avoid per-symbol
+      * For performance, use py-alpha-lib on the whole block; avoid per-obj
         Python loops.
     """
     pass
 
-  def load_financial(self, symbols: list[str], fields: list[str],
+  def load_financial(self, objs: list[str], fields: list[str],
                      only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
     """
-    load `lastN` financial data for `symbols`
+    load `lastN` financial data for `objs`
 
     Financial data is provided on a quarterly basis, with dates of 03-31, 06-30,
     09-30, and 12-31. When `only_year` is True only the annual data (12-31) is
@@ -101,27 +101,27 @@ class SelectorDataProvider:
 
     Returns:
       A pl.DataFrame of lastN financial data,
-      DataFrame columns ['obj', 'ts', *fields]; missing symbols are absent.
+      DataFrame columns ['obj', 'ts', *fields]; missing objs are absent.
     """
     pass
 
-  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [],
+  def load_snapshot(self, objs: list[str], fin_fields: list[str] = [],
                     fin_only_year: bool = True) -> pl.DataFrame:
     """
-    Take a snapshot for the given symbols at the latest trading day.
+    Take a snapshot for the given objs at the latest trading day.
 
-    This is the fast path for cross-sectional screening: one row per symbol,
+    This is the fast path for cross-sectional screening: one row per obj,
     no block layout to worry about.
 
     Args:
-      symbols: symbols to snapshot
+      objs: objs to snapshot
       fin_fields: fields to snapshot from financial data
       fin_only_year: whether to only snapshot annual financial data
 
     Returns:
-      A DataFrame with one row per requested symbol, columns combined from
+      A DataFrame with one row per requested obj, columns combined from
       `load_kline` and `load_financial` (the financial 'ts' column is renamed to
-      'f_ts'). Symbols without a financial report get NULL financial columns.
+      'f_ts'). objs without a financial report get NULL financial columns.
       Row order follows the implementation, not the input list; join on `obj`.
     """
     pass

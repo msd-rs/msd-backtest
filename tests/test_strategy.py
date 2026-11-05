@@ -44,7 +44,7 @@ def test_strategy_actions_and_assets_with_unrounded_data():
       "right_shares": np.zeros(len(prices)),
       "right_price": np.zeros(len(prices)),
     },
-    symbols=["test_sym"],
+    objs=["test_sym"],
   )
 
   # Initial cash 1500.0

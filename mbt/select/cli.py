@@ -22,10 +22,10 @@ logger = logging.getLogger("selector")
 logger.setLevel(logging.DEBUG)
 
 
-def expand_symbols(symbols: list[str]) -> list[str]:
-  """read as file when input is a file path, and expand it. otherwise, return the input as a list of symbols"""
+def expand_objs(objs: list[str]) -> list[str]:
+  """read as file when input is a file path, and expand it. otherwise, return the input as a list of objs"""
   expanded = set()
-  for s in symbols:
+  for s in objs:
     if os.path.isfile(s):
       with open(s, "r", encoding='utf-8') as f:
         lines = filter(
@@ -118,7 +118,7 @@ def main():
   parser.add_argument(
     "-m", "--msd", type=str, default=os.environ.get("MSD_HOST", "http://localhost:50510"), help="MSD host, env $MSD_HOST"
   )
-  parser.add_argument("-s", "--symbols", nargs="+", default=[], help="Symbols to run")
+  parser.add_argument("-s", "--objs", nargs="+", default=[], help="objs to run")
   parser.add_argument("-f", "--factors", action='store_true', help="show factors if possible")
   parser.add_argument("-d", "--date", type=str, default=None, help="run selector at date (YYYY-MM-DD), default to last day")
   
@@ -130,15 +130,15 @@ def main():
   dp = MsdSelectorDataProvider(args.msd, args.date)
   logger.info("data provider created")
 
-  init_symbols = expand_symbols(args.symbols)
+  init_objs = expand_objs(args.objs)
 
-  stocks = selector.execute(dp, init_symbols)
+  stocks = selector.execute(dp, init_objs)
   stocks.sort()
   logger.info("selector finished")
   factors = getattr(selector, 'factors', None)
   if args.factors and factors is not None and isinstance(factors, pl.DataFrame):
-    # 因子表的股票代码列名历史上为 obj, 部分文档写作 symbol, 两者都兼容
-    for key in ("obj", "symbol"):
+    # 因子表的股票代码列名历史上为 obj, 部分文档写作 obj, 两者都兼容
+    for key in ("obj", "obj"):
       if key in factors.columns:
         try:
           factors = factors.sort(key)

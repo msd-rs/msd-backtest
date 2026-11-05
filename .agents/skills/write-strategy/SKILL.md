@@ -96,8 +96,8 @@ After writing a strategy, you can run it to verify it works as expected.
 
 ## mbt.Context
 
-- `ctx.data(name: str, /, symbol: str | None = None) -> np.ndarray`
-  the primary method to get data, `name` is the data name, `symbol` is used only when comparison, keep `None` for no explicit requirements. `name` can be:
+- `ctx.data(name: str, /, obj: str | None = None) -> np.ndarray`
+  the primary method to get data, `name` is the data name, `obj` is used only when comparison, keep `None` for no explicit requirements. `name` can be:
   - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.

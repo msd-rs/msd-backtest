@@ -12,30 +12,30 @@ class MockSelectorDataProvider(SelectorDataProvider):
     self._panel = panel
     self._snap = snap
 
-  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
-    return self._snap.filter(pl.col("obj").is_in(symbols))
+  def load_snapshot(self, objs: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
+    return self._snap.filter(pl.col("obj").is_in(objs))
 
   def load_kline(
     self,
-    symbols: list[str],
+    objs: list[str],
     lastN: int | list[int] = 100,
     fin_fields: list[str] = [],
     fin_only_year: bool = True,
     baseline: str | None = None,
   ) -> Panel:
-    # Filter panel by symbols
-    sub_symbols = [s for s in symbols if s in self._panel.symbols]
+    # Filter panel by objs
+    sub_objs = [s for s in objs if s in self._panel.objs]
     bars = self._panel.bars
     rows = []
-    for s in sub_symbols:
+    for s in sub_objs:
       idx = self._panel.pick(s)
       rows.append(self._panel.frame.slice(idx * bars, bars))
     df = pl.concat(rows)
-    return Panel(df, sub_symbols, bars)
+    return Panel(df, sub_objs, bars)
 
 
 def test_volume_breakout_monthly_yang_selector():
-  symbols = ["SZ000001", "SZ000002", "SZ000003", "SZ000004"]
+  objs = ["SZ000001", "SZ000002", "SZ000003", "SZ000004"]
   bars = 80
 
   # Construct dates covering 4 months: 2026-07 to 2026-10
@@ -46,7 +46,7 @@ def test_volume_breakout_monthly_yang_selector():
       dates.append(datetime(2026, month, day))
 
   dfs = []
-  for sym in symbols:
+  for sym in objs:
     # Default base prices and volume
     open_p = np.full(bars, 10.0)
     high_p = np.full(bars, 10.5)
@@ -125,10 +125,10 @@ def test_volume_breakout_monthly_yang_selector():
     dfs.append(df_sym)
 
   full_frame = pl.concat(dfs)
-  panel = Panel(full_frame, symbols, bars)
+  panel = Panel(full_frame, objs, bars)
 
   snap = pl.DataFrame({
-    "obj": symbols,
+    "obj": objs,
     "open": [13.0, 12.0, 12.0, 13.0],
     "close": [14.0, 13.0, 12.5, 14.0],
     "volume": [2500.0, 2500.0, 2500.0, 1100.0],
@@ -144,7 +144,7 @@ def test_volume_breakout_monthly_yang_selector():
     today_yang=True,
   )
 
-  selected = selector.execute(dp, symbols)
+  selected = selector.execute(dp, objs)
 
   assert selected == ["SZ000001"]
   assert selector.factors is not None

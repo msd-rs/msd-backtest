@@ -4,7 +4,7 @@ import alpha as al
 import numpy as np
 
 MSD_HOST = "http://localhost:50510"
-SYMBOLS = [
+objs = [
   "SH600000",
   "SH600004",
   "SH600006",
@@ -19,25 +19,25 @@ SYMBOLS = [
 
 
 def load_data_msd(
-  msd_host: str, symbols: list[str], start: str, end: str
+  msd_host: str, objs: list[str], start: str, end: str
 ) -> tuple[DataProvider, list[str]]:
 
   client = pymsd.create_msd_polars(msd_host)
 
   dfs = client.load(
-    objs=symbols,
+    objs=objs,
     tables="stock_kline_1d",
     start=start,
     end=end,
     join="nearest",
   )
 
-  data, symbols = client.concat(dfs, base="SZ000001", join="nan")
+  data, objs = client.concat(dfs, base="SZ000001", join="nan")
   data["price"] = data["close"]
 
-  dp = DataProvider(data, symbols=symbols)
+  dp = DataProvider(data, objs=objs)
 
-  return dp, symbols
+  return dp, objs
 
 
 def run_strategy(dp: DataProvider, strategy: Strategy):
@@ -63,8 +63,8 @@ def print_result(dp: DataProvider):
   assets = dp.all("assets")
   action_shares = dp.all("action_shares")
   actions = dp.all("actions")
-  for i, symbol in enumerate(dp.symbols):
-    print(symbol)
+  for i, obj in enumerate(dp.objs):
+    print(obj)
     s = i * dp.bars
     e = s + dp.bars
     print(assets[s:e])
@@ -73,7 +73,7 @@ def print_result(dp: DataProvider):
 
 
 def main():
-  dp, symbols = load_data_msd(MSD_HOST, SYMBOLS, "2020-01-01", "2020-12-31")
+  dp, objs = load_data_msd(MSD_HOST, objs, "2020-01-01", "2020-12-31")
   al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN)
   strategy = DoubleMaStrategy(5, 20)
   run_strategy(dp, strategy)

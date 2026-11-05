@@ -6,14 +6,14 @@ class RunRequest:
   def __init__(
     self,
     strategy: str | IO | Strategy,
-    symbols: list[str],
+    objs: list[str],
     /,
     start: str,
     end: str,
     args: list | None = None,
   ):
     self.strategy = RunRequest.load_strategy(strategy, args=args)
-    self.symbols = symbols
+    self.objs = objs
     self.start = start
     self.end = end
 
@@ -71,7 +71,7 @@ class RunRequest:
   def from_json(
     data: str | IO[str] | IO[bytes] | bytes,
     /,
-    symbols: list[str] | None = None,
+    objs: list[str] | None = None,
     start: str | None = None,
     end: str | None = None,
     args: list | None = None,
@@ -88,7 +88,7 @@ class RunRequest:
 
     return RunRequest(
       config.get("strategy"),
-      symbols if symbols is not None else config.get("symbols"),
+      objs if objs is not None else config.get("objs"),
       start=start if start is not None else config.get("start"),
       end=end if end is not None else config.get("end"),
       args=args if args is not None else config.get("args"),

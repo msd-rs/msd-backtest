@@ -6,7 +6,7 @@ from mbt.select.panel import Panel
 
 
 def test_panel_resample_monthly_and_weekly():
-  symbols = ["SH600000", "SZ000001"]
+  objs = ["SH600000", "SZ000001"]
   # 6 trading days across 2 weeks and 2 months:
   # Week 1: 2026-09-29, 2026-09-30 (Sep)
   # Week 2: 2026-10-08, 2026-10-09 (Oct)
@@ -21,7 +21,7 @@ def test_panel_resample_monthly_and_weekly():
   ]
   bars = len(dates)
 
-  # Symbol 0: SH600000
+  # obj 0: SH600000
   s0_open = [10.0, 10.2, 10.5, 10.8, 11.0, 11.2]
   s0_high = [10.5, 10.6, 11.0, 11.2, 11.5, 11.8]
   s0_low = [9.8, 10.0, 10.2, 10.5, 10.8, 11.0]
@@ -30,7 +30,7 @@ def test_panel_resample_monthly_and_weekly():
   s0_amt = [1000.0, 1500.0, 2000.0, 2500.0, 3000.0, 3500.0]
   s0_shares = [10000.0] * bars
 
-  # Symbol 1: SZ000001 with NaNs (e.g. suspended on day 0 and day 3)
+  # obj 1: SZ000001 with NaNs (e.g. suspended on day 0 and day 3)
   s1_open = [np.nan, 20.0, 20.5, np.nan, 21.0, 21.5]
   s1_high = [np.nan, 20.8, 21.0, np.nan, 21.8, 22.0]
   s1_low = [np.nan, 19.8, 20.2, np.nan, 20.8, 21.2]
@@ -50,14 +50,14 @@ def test_panel_resample_monthly_and_weekly():
     "total_shares": s0_shares + s1_shares,
   })
 
-  panel = Panel(df, symbols, bars)
+  panel = Panel(df, objs, bars)
 
   # 1. Test Monthly Resampling ("1M")
   # Expect 2 monthly bars: 2026-09 (first 2 days) and 2026-10 (last 4 days)
   m_panel = panel.resample("1M")
   assert m_panel.bars == 2
-  assert m_panel.n_symbols == 2
-  assert m_panel.symbols == symbols
+  assert m_panel.n_objs == 2
+  assert m_panel.objs == objs
   assert m_panel.frame.schema == panel.frame.schema
 
   # Check SH600000 monthly values
@@ -96,7 +96,7 @@ def test_panel_resample_monthly_and_weekly():
   # 3 weeks: Sep 29-30, Oct 8-9, Oct 12-13
   w_panel = panel.resample("1W")
   assert w_panel.bars == 3
-  assert w_panel.n_symbols == 2
+  assert w_panel.n_objs == 2
 
   # Week 1 (Sep 29-30)
   assert w_panel.column("open")[0, 0] == 10.0

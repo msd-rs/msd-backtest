@@ -11,19 +11,19 @@ class MockSelectorDataProvider(SelectorDataProvider):
     self.kline_data = kline_data
     self.financial_data = financial_data
 
-  def load_kline(self, symbols: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
-    return {sym: self.kline_data[sym] for sym in symbols if sym in self.kline_data}
+  def load_kline(self, objs: list[str], lastN: int = 100) -> dict[str, pl.DataFrame]:
+    return {sym: self.kline_data[sym] for sym in objs if sym in self.kline_data}
 
-  def load_financial(self, symbols: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
+  def load_financial(self, objs: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
     rows = []
-    for sym in symbols:
+    for sym in objs:
       if sym in self.financial_data and len(self.financial_data[sym]) > 0:
         rows.append(self.financial_data[sym].with_columns(pl.lit(sym).alias("obj")))
     return pl.concat(rows) if rows else pl.DataFrame()
 
-  def load_snapshot(self, symbols: list[str], fin_fields: list[str] = [], fin_only_year: bool = True, snapshot_date: str = '') -> pl.DataFrame:
+  def load_snapshot(self, objs: list[str], fin_fields: list[str] = [], fin_only_year: bool = True, snapshot_date: str = '') -> pl.DataFrame:
     rows = []
-    for sym in symbols:
+    for sym in objs:
       if sym not in self.kline_data:
         continue
       k_df = self.kline_data[sym]
@@ -137,7 +137,7 @@ def test_growth_large_cap_ma15_selector():
   # Check factors
   factors = selector.factors
   assert len(factors) == 1
-  assert factors[0, "symbol"] == "SZ000001"
+  assert factors[0, "obj"] == "SZ000001"
   assert factors[0, "net_profit_y3"] == 150.0
   assert factors[0, "market_cap"] == 8000.0
   assert factors[0, "pe"] == 8000.0 / 150.0

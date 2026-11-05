@@ -6,9 +6,9 @@ from mbt.run.report import Report
 
 
 def test_report_initialization_and_metrics():
-  # Set up a DataProvider with 2 symbols, 5 bars each
-  # Symbol 0: "a" (benchmark)
-  # Symbol 1: "b"
+  # Set up a DataProvider with 2 objs, 5 bars each
+  # obj 0: "a" (benchmark)
+  # obj 1: "b"
   price = np.array([
     1.0, 1.02, 1.04, 1.03, 1.06,
     1.0, 1.05, 1.10, 1.08, 1.15,
@@ -20,27 +20,27 @@ def test_report_initialization_and_metrics():
       "close": price,
       "bw_price": price,
       "fw_price": price,
-      "ror": np.array([0.0, 0.02, 0.04, -0.03, 0.03,    # Symbol "a" ror
-                       0.0, 0.05, 0.10, 0.08, 0.15]),   # Symbol "b" ror
+      "ror": np.array([0.0, 0.02, 0.04, -0.03, 0.03,    # obj "a" ror
+                       0.0, 0.05, 0.10, 0.08, 0.15]),   # obj "b" ror
       "ror_hold": np.zeros(10),
-      "actions": np.array([0, 1, 0, 2, 0,               # Symbol "a" actions
-                           0, 1, 0, 2, 0]),             # Symbol "b" actions
+      "actions": np.array([0, 1, 0, 2, 0,               # obj "a" actions
+                           0, 1, 0, 2, 0]),             # obj "b" actions
       "action_shares": np.array([0.0, 100.0, 0.0, 100.0, 0.0,
                                  0.0, 200.0, 0.0, 200.0, 0.0]),
-      "assets": np.array([1000.0, 990.0, 1020.0, 1015.0, 1030.0, # Symbol "a"
-                          2000.0, 1980.0, 2080.0, 2060.0, 2120.0]),# Symbol "b"
+      "assets": np.array([1000.0, 990.0, 1020.0, 1015.0, 1030.0, # obj "a"
+                          2000.0, 1980.0, 2080.0, 2060.0, 2120.0]),# obj "b"
       "dividend": np.zeros(10),
       "transfer_shares": np.zeros(10),
       "right_shares": np.zeros(10),
       "right_price": np.zeros(10),
     },
-    symbols=["a", "b"]
+    objs=["a", "b"]
   )
 
-  # Check initialization of symbol "b"
+  # Check initialization of obj "b"
   account = Account(1000, dp, group=1)
   report = Report("b", dp, account)
-  assert report.symbol == "b"
+  assert report.obj == "b"
   assert np.array_equal(report.close, np.array([1.0, 1.05, 1.10, 1.08, 1.15]))
   assert np.array_equal(report.ror, np.array([0.0, 0.0, 0.0, 0.0, 0.0])) # Account had clear the ror
   assert np.array_equal(report.actions, np.array([0, 0, 0, 0, 0])) # Account had clear the actions
@@ -59,7 +59,7 @@ def test_report_initialization_and_metrics():
   assert isinstance(report.calmar, float)
 
   # Verify trade metrics
-  # For Symbol "b":
+  # For obj "b":
   # action_shares: [0, 200, 0, 200, 0]
   # actions: [0, 1 (BUY), 0, 2 (SELL), 0]
   # assets: [2000, 1980, 2080, 2060, 2120]
@@ -101,7 +101,7 @@ def test_report_edge_cases():
       "right_shares": np.zeros(1),
       "right_price": np.zeros(1),
     },
-    symbols=["a"]
+    objs=["a"]
   )
 
   account = Account(1000, dp)

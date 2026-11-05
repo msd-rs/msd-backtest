@@ -18,11 +18,11 @@ def parse_args():
   sort_parser = sub_commands.add_parser("sort", help="Sort by a metric")
   sort_parser.add_argument("-m", "--metric", type=str, help="Metric to sort by")
   sort_parser.add_argument("-o", "--order", type=str, help="Order, desc or asc", default="desc")
-  sort_parser.add_argument("-l", "--limit", type=int, help="Limit number of symbols")
+  sort_parser.add_argument("-l", "--limit", type=int, help="Limit number of objs")
   sort_parser.set_defaults(func=do_sort)
 
-  detail_parser = sub_commands.add_parser("detail", help="Show detail for a symbol")
-  detail_parser.add_argument("-s", "--symbol", type=str, help="Symbol to show")
+  detail_parser = sub_commands.add_parser("detail", help="Show detail for a obj")
+  detail_parser.add_argument("-s", "--obj", type=str, help="obj to show")
   detail_parser.set_defaults(func=do_detail)
   
   return parser.parse_args()
@@ -30,8 +30,8 @@ def parse_args():
 def do_stat(args):
   reports = load_reports(args.report)
   df = pl.DataFrame([r.metrics(True) for r in reports.values()])
-  if "symbol" in df.columns:
-    df = df.drop("symbol")
+  if "obj" in df.columns:
+    df = df.drop("obj")
   stat = df.describe()
   stat_col = stat.columns[0]
   stats = stat[stat_col].to_list()
@@ -43,25 +43,25 @@ def do_stat(args):
 
 def do_detail(args):
   reports = load_reports(args.report)
-  symbol_report = reports[args.symbol]
+  obj_report = reports[args.obj]
   d = {}
-  d.update(symbol_report.detailed(False))
-  d.update(symbol_report.metrics(True))
+  d.update(obj_report.detailed(False))
+  d.update(obj_report.metrics(True))
   print(orjson.dumps(d, option=orjson.OPT_SERIALIZE_NUMPY))
 
 def do_sort(args):
   reports = load_reports(args.report)
-  records = [{"symbol": r.symbol, "val": getattr(r, args.metric, 0)} for r in reports.values()]
+  records = [{"obj": r.obj, "val": getattr(r, args.metric, 0)} for r in reports.values()]
   records.sort(key=lambda x: x["val"], reverse=args.order != "asc")
   if args.limit:
     records = records[:args.limit]
-  res = {args.metric: {r["symbol"]: r["val"] for r in records}}
+  res = {args.metric: {r["obj"]: r["val"] for r in records}}
   print(orjson.dumps(res).decode())
   
 def load_reports(report_path: str) -> dict[str, Report]:
   with open(report_path, "r", encoding='utf-8') as f:
     data = orjson.loads(f.read())
-  return {symbol: Report.from_dict(symbol, data[symbol]) for symbol in data}
+  return {obj: Report.from_dict(obj, data[obj]) for obj in data}
 
 
 def main():

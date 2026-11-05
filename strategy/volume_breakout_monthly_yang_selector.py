@@ -71,7 +71,7 @@ class VolumeBreakoutMonthlyYangSelector(mbt.Selector):
       return []
 
     count = self.monthly_yang_count
-    # 获取最近 N 个月的开盘价与收盘价 (n_symbols, count)
+    # 获取最近 N 个月的开盘价与收盘价 (n_objs, count)
     m_opens = month_panel.column("open")[:, -count:]
     m_closes = month_panel.column("close")[:, -count:]
 
@@ -80,7 +80,7 @@ class VolumeBreakoutMonthlyYangSelector(mbt.Selector):
     is_all_yang = valid_data & (m_closes > m_opens).all(axis=1)
 
     passed_indices = np.where(is_all_yang)[0]
-    selected = [month_panel.symbols[idx] for idx in passed_indices]
+    selected = [month_panel.objs[idx] for idx in passed_indices]
 
     # 装配月度涨幅因子
     month_timeline = month_panel.timeline()[-count:]
@@ -133,7 +133,7 @@ class VolumeBreakoutMonthlyYangSelector(mbt.Selector):
     )
 
     passed_indices = np.where(breakout_cond)[0]
-    selected = [panel.symbols[idx] for idx in passed_indices]
+    selected = [panel.objs[idx] for idx in passed_indices]
 
     breakout_factors = panel.cross_section(
       prev_high=np.round(prev_high, 2),

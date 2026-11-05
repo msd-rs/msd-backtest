@@ -24,7 +24,7 @@ STATUS_ST = 1
 STATUS_STAR_ST = 2
 
 JSON_SCHEMA = {
-      'symbol': pl.String,
+      'obj': pl.String,
       'name': pl.String,
       "volume_unit": pl.UInt8,
       "price_decimal": pl.String,
@@ -50,11 +50,11 @@ def parse_obj_status(name: str) -> int:
   return 0
 
 def build_limit_ratio(row: dict[str, str]) -> float:
-  symbol = row['symbol']
+  obj = row['obj']
   name = row['name']
   if name.startswith("ST") or name.startswith("*ST"):
     return 0.05
-  elif symbol.startswith("SZ30") or symbol.startswith("SH68"): #科创板和创业板
+  elif obj.startswith("SZ30") or obj.startswith("SH68"): #科创板和创业板
     return 0.2
   return 0.1
 
@@ -93,28 +93,28 @@ def normalize_stocks(df: pl.DataFrame) -> pl.DataFrame:
   return df.with_columns([
     kind.alias("kind"),
     pl.col("name").map_elements(parse_obj_status, return_dtype=pl.Int8).alias("status"),
-    pl.struct([pl.col("symbol"), pl.col("name")])
+    pl.struct([pl.col("obj"), pl.col("name")])
       .map_elements(build_limit_ratio, return_dtype=pl.Float64).alias("limit_ratio"),
   ])
 
 
 
-def where_clause(symbols: list[str], col: str = 'obj') -> str:
-  sql = ','.join([f'"{s}"' for s in symbols])
+def where_clause(objs: list[str], col: str = 'obj') -> str:
+  sql = ','.join([f'"{s}"' for s in objs])
   sql = f"{col} IN ({sql})"
   return sql
 
 
-def get_limit_ratio(symbols: list[str], repeat: int = 1) -> np.ndarray | float:
+def get_limit_ratio(objs: list[str], repeat: int = 1) -> np.ndarray | float:
   _ensure_stocks_loaded()
-  if len(symbols) == 1 and repeat <= 1:
+  if len(objs) == 1 and repeat <= 1:
     # fast path
-    return ALL_STOCKS.filter(pl.col("symbol") == symbols[0]).get_column("limit_ratio").item()
-  df = pl.DataFrame({"symbol": symbols}, schema={"symbol": pl.String})
+    return ALL_STOCKS.filter(pl.col("obj") == objs[0]).get_column("limit_ratio").item()
+  df = pl.DataFrame({"obj": objs}, schema={"obj": pl.String})
   if repeat <= 1:
-    return df.join(ALL_STOCKS, on="symbol", how="left").get_column("limit_ratio").to_numpy()
+    return df.join(ALL_STOCKS, on="obj", how="left").get_column("limit_ratio").to_numpy()
   else:
-    return df.join(ALL_STOCKS, on="symbol", how="left").get_column("limit_ratio").to_numpy().repeat(repeat)
+    return df.join(ALL_STOCKS, on="obj", how="left").get_column("limit_ratio").to_numpy().repeat(repeat)
 
 
 _LAZY_VARS = ("ALL_STOCKS", "A_STOCKS", "A_STOCKS_EXCLUDE_ST", "FOUNDS")
@@ -125,12 +125,12 @@ def _ensure_stocks_loaded():
   if "ALL_STOCKS" not in g:
     all_stocks = load_stocks_from_db()
     g["ALL_STOCKS"] = all_stocks
-    g["A_STOCKS"] = all_stocks.filter(pl.col("kind") == KIND_STOCK).get_column("symbol").to_list()
+    g["A_STOCKS"] = all_stocks.filter(pl.col("kind") == KIND_STOCK).get_column("obj").to_list()
     g["A_STOCKS_EXCLUDE_ST"] = all_stocks.filter(
       (pl.col("kind") == KIND_STOCK) &
       (pl.col("status") == STATUS_NORMAL)
-    ).get_column("symbol").to_list()
-    g["FOUNDS"] = all_stocks.filter(pl.col("kind") == KIND_FUND).get_column("symbol").to_list()
+    ).get_column("obj").to_list()
+    g["FOUNDS"] = all_stocks.filter(pl.col("kind") == KIND_FUND).get_column("obj").to_list()
 
 
 def __getattr__(name: str):
@@ -156,5 +156,5 @@ if __name__ == "__main__":
   print(r2) # should be [0.1, 0.1, 0.2, 0.2, 0.05, 0.05]
 
   with open("a.txt", "w") as fp:
-    for symbol in A_STOCKS_EXCLUDE_ST:
-      fp.write(f"{symbol}\n")
+    for obj in A_STOCKS_EXCLUDE_ST:
+      fp.write(f"{obj}\n")

@@ -7,7 +7,7 @@ import dataclasses
 
 @dataclasses.dataclass
 class Report:
-  symbol: str
+  obj: str
   date: np.ndarray 
   ror: np.ndarray
   ror_hold: np.ndarray
@@ -36,11 +36,11 @@ class Report:
   trade_count: int
   
 
-  def __init__(self, symbol: str, dp: DataProvider , account: Account ):
-    if len(symbol) == 0:
+  def __init__(self, obj: str, dp: DataProvider , account: Account ):
+    if len(obj) == 0:
       return
-    self.symbol = symbol
-    s, e = dp.symbol_indices(symbol)
+    self.obj = obj
+    s, e = dp.obj_indices(obj)
     self.date = dp.dates[s:e]
     
 
@@ -63,9 +63,9 @@ class Report:
     
 
   @staticmethod
-  def from_dict(symbol: str, d: dict) -> "Report":
+  def from_dict(obj: str, d: dict) -> "Report":
     r = Report('', None, None) # type: ignore
-    r.symbol = symbol
+    r.obj = obj
     r.date = d.get('date', np.array([], dtype='int64'))
     r.ror = np.array(d.get('ror', []), dtype='float64')
     r.ror_hold = np.array(d.get('ror_hold', []), dtype='float64')
@@ -165,7 +165,7 @@ class Report:
       calmar = 0.0
 
     # 3. Trade-level metrics
-    action_shares = dp.slice("action_shares", self.symbol) if "action_shares" in dp.data else np.zeros_like(self.price)
+    action_shares = dp.slice("action_shares", self.obj) if "action_shares" in dp.data else np.zeros_like(self.price)
 
     # Track shares held at each bar
     shares = np.zeros(len(self.actions))
@@ -189,7 +189,7 @@ class Report:
     trade_profits = []
     trade_returns = []
 
-    s = dp.symbols.index(self.symbol) * dp.bars
+    s = dp.objs.index(self.obj) * dp.bars
     e = s + dp.bars
     assets = dp.all("assets")[s:e]
 
@@ -246,9 +246,9 @@ class Report:
     self.trade_count = len(trade_profits)
     
 
-  def metrics(self, with_symbol: bool = False) -> dict:
+  def metrics(self, with_obj: bool = False) -> dict:
     d = {
-      "symbol": self.symbol,
+      "obj": self.obj,
       "profit": self.profit,
       "profit_original": self.profit_original,
       "alpha": self.alpha,
@@ -266,21 +266,21 @@ class Report:
       "fee_rate": self.fee_rate,
       "trade_count": self.trade_count,
     }
-    if not with_symbol:
-      del d["symbol"]
+    if not with_obj:
+      del d["obj"]
     return d
 
-  def detailed(self, with_symbol: bool = False) -> dict:
+  def detailed(self, with_obj: bool = False) -> dict:
     d = {
-      "symbol": [self.symbol] * len(self.date),
+      "obj": [self.obj] * len(self.date),
       "date": self.date,
       "ror": self.ror,
       "ror_hold": self.ror_hold,
       "ror_original": self.ror_original,
       "actions": self.actions,
     }
-    if not with_symbol:
-      del d["symbol"]
+    if not with_obj:
+      del d["obj"]
     return d
 
 def uniform_ror(a: np.ndarray) -> np.ndarray:
@@ -291,7 +291,7 @@ def uniform_ror(a: np.ndarray) -> np.ndarray:
 
 
 def build_report(dp: DataProvider, accounts: list[Account]) -> list[Report]:
-  reports = [Report(symbol, dp, accounts[i]) for i, symbol in enumerate(dp.symbols)]
+  reports = [Report(obj, dp, accounts[i]) for i, obj in enumerate(dp.objs)]
 
   return reports
 
@@ -304,7 +304,7 @@ def build_json_report(reports: list[Report]) -> dict:
     d = {}
     d.update(report.metrics())
     d.update(report.detailed())
-    data[report.symbol] = d
+    data[report.obj] = d
   return data
 
 

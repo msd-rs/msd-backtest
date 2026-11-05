@@ -9,8 +9,8 @@ from mbt.shared import get_limit_ratio
 logger = logging.getLogger("msd_loader")
 
 
-def symbols_where(symbols: list[str]) -> str:
-  return ",".join(map(lambda o: f'"{o}"', symbols))
+def objs_where(objs: list[str]) -> str:
+  return ",".join(map(lambda o: f'"{o}"', objs))
 
 
 def next_hook_al(i: int, groups: int, bars: int):
@@ -18,22 +18,22 @@ def next_hook_al(i: int, groups: int, bars: int):
 
 
 def load_data(
-  msd_host: str, symbols: list[str], start: str, end: str
+  msd_host: str, objs: list[str], start: str, end: str
 ) -> tuple[DataProvider, list[str]]:
   """
   create a DataProvider for backtesting from msd database.
 
   Args:
     msd_host: msd server host
-    symbols: symbols to backtest
+    objs: objs to backtest
     start: start date
     end: end date
 
   Returns:
-    DataProvider and symbols
+    DataProvider and objs
   """
-  if not symbols:
-    return DataProvider({"ts": np.array([])}, symbols=[]), []
+  if not objs:
+    return DataProvider({"ts": np.array([])}, objs=[]), []
 
   client = pymsd.MsdConnection(msd_host)
 
@@ -53,42 +53,42 @@ def load_data(
   ts_cond = f"and {' and '.join(ts_where)}" if ts_where else ""
   limit_cond = f" {limit}" if limit else ""
 
-  where_ = symbols_where(symbols)
+  where_ = objs_where(objs)
   sql = f"""
 SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_dividend WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_shares WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_financial WHERE obj in ({where_}) {ts_cond}{limit_cond};
 """
-  logger.debug(f"start load data for {len(symbols)} symbols")
+  logger.debug(f"start load data for {len(objs)} objs")
   t1 = time.time()
   try:
-    table, symbols, bars = client.query_join(
+    table, objs, bars = client.query_join(
       sql,
       "stock_kline_1d",
       {"stock_dividend": "zero", "*": "backward"},
-      symbols[0],
+      objs[0],
     )
   except Exception as e:
     logger.warning(f"failed to query_join from msd: {e}")
-    return DataProvider({"ts": np.array([])}, symbols=[]), []
+    return DataProvider({"ts": np.array([])}, objs=[]), []
 
   if bars == 0 or table.rows == 0:
-    return DataProvider({"ts": np.array([])}, symbols=[]), []
+    return DataProvider({"ts": np.array([])}, objs=[]), []
 
   data = dict((k, v) for k, v in table.to_list())
-  logger.info(f"raw data build from msd, {len(symbols)} symbols, {bars} bars, {time.time() - t1:.3f}s")
+  logger.info(f"raw data build from msd, {len(objs)} objs, {bars} bars, {time.time() - t1:.3f}s")
 
   if data is None or "ts" not in data or len(data["ts"]) == 0:
-    return DataProvider({"ts": np.array([])}, symbols=[]), []
+    return DataProvider({"ts": np.array([])}, objs=[]), []
 
   for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
     if col not in data:
       data[col] = np.zeros_like(data["close"])
 
-  dp = DataProvider(data, symbols=symbols, next_hook=next_hook_al)
+  dp = DataProvider(data, objs=objs, next_hook=next_hook_al)
 
-  data["limit_ratio"] = get_limit_ratio(symbols, repeat=dp.bars)
+  data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)
 
   # keep original as price
   data["price"] = data["close"].copy()
@@ -111,8 +111,8 @@ SELECT * FROM stock_financial WHERE obj in ({where_}) {ts_cond}{limit_cond};
   logger.info("adjustment factors applied")
 
   if dp.bars == 0:
-    raise ValueError("No data found for the given symbols and date range.")
+    raise ValueError("No data found for the given objs and date range.")
 
   # reset al context
   al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
-  return dp, symbols
+  return dp, objs

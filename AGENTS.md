@@ -12,7 +12,7 @@ This project is a stock strategy backtest framework.
 
 - `mbt`: source code
   - `account.py`: simulates account holding and cash.
-  - `data_provider.py`: base class of data provider to retrieve multiple data series over time for multiple symbols.
+  - `data_provider.py`: base class of data provider to retrieve multiple data series over time for multiple objs.
   - `strategy.py`: base class of strategy.
   - `run/`: a strategy runner based on `msd` database and `python-alpha-lib` algorithms library.
     - `cli.py`: a command line interface to run a strategy.
@@ -37,4 +37,4 @@ use `uv python -m mbt.run.server -h` to see the available options and arguments.
 # Dev Environment
 
 - The `msd` database server address is `http://localhost:50511`.
-- The stock symbol is Chinese stock symbol, e.g. `SH600000`, `SZ000001`.
+- The stock obj is Chinese stock obj, e.g. `SH600000`, `SZ000001`.

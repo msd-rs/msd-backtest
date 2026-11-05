@@ -32,10 +32,10 @@ class RunnerContext(Context):
     self.actions = np.zeros(len(self.dp.dates), dtype=np.int32)
     self.action_percents = np.zeros(len(self.dp.dates), dtype=np.float64)
 
-  def data(self, name: str, /, symbol: str | None = None) -> np.ndarray:
+  def data(self, name: str, /, obj: str | None = None) -> np.ndarray:
     # user may use it like ctx.open, ctx.high, ctx.low, ctx.close, ctx.volume
     if name in self.dp.data:
-      return self.dp.all(name, symbol=symbol)
+      return self.dp.all(name, obj=obj)
     raise ValueError(f"data '{name}' not found")
 
   def buy(self, flags: np.ndarray, percent: float = 1.0):

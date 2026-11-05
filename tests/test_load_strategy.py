@@ -67,7 +67,7 @@ def test_from_json():
     code = "from mbt import Strategy\nclass MyStrategy(Strategy):\n    def __init__(self, *args): pass\n    def execute(self, ctx): pass"
     config = {
         "strategy": code,
-        "symbols": ["AAPL"],
+        "objs": ["AAPL"],
         "start": "2020-01-01",
         "end": "2020-12-31",
         "args": [10]
@@ -76,12 +76,12 @@ def test_from_json():
     
     # Test from string
     req = RunRequest.from_json(json_str)
-    assert req.symbols == ["AAPL"]
+    assert req.objs == ["AAPL"]
     assert req.start == "2020-01-01"
     
     # Test with overrides
-    req2 = RunRequest.from_json(json_str, symbols=["MSFT"], start="2021-01-01")
-    assert req2.symbols == ["MSFT"]
+    req2 = RunRequest.from_json(json_str, objs=["MSFT"], start="2021-01-01")
+    assert req2.objs == ["MSFT"]
     assert req2.start == "2021-01-01"
     assert req2.end == "2020-12-31"
 
@@ -90,7 +90,7 @@ def test_from_json_io():
     code = "from mbt import Strategy\nclass MyStrategy(Strategy): pass"
     config = {
         "strategy": code,
-        "symbols": ["AAPL"],
+        "objs": ["AAPL"],
         "start": "2020-01-01",
         "end": "2020-12-31"
     }
@@ -98,4 +98,4 @@ def test_from_json_io():
     f = io.StringIO(json_str)
     
     req = RunRequest.from_json(f)
-    assert req.symbols == ["AAPL"]
+    assert req.objs == ["AAPL"]

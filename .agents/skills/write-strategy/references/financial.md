@@ -1,3 +1,3 @@
-使用命令 ${MSD} shell ".schema stock_financial" 来查看该表的定义以获取财务字段列表和说明
+Use the command `${MSD} shell ".schema stock_financial"` to view the definition of this table and obtain the list and descriptions of the financial fields. 
 
-${MSD} 是当前机器上 msd 数据库的可执行文件
+`${MSD}` is the executable file for the msd database on the current machine.

@@ -107,6 +107,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     "-s",
     "--objs",
     nargs="+",
+    action="extend",
     default=[],
     help="objs or selector (.py) to run",
   )
@@ -119,6 +120,8 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     "-a",
     "--args",
     nargs="*",
+    action="extend",
+    default=[],
     help="Strategy/Selector arguments in key=value format",
   )
   parser.add_argument(

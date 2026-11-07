@@ -1,3 +1,4 @@
+import datetime
 import time
 import logging
 import numpy as np
@@ -38,27 +39,41 @@ def load_data(
   client = pymsd.MsdConnection(msd_host)
 
   ts_where = []
+  fin_ts_where = []
   limit = ""
+  fin_limit = ""
   if isinstance(start, int):
     limit = f"limit -{start}"
+    fin_limit = f"limit -{max(start // 50, 8)}"
   elif start:
     ts_where.append(f"ts >= '{start}'")
+    try:
+      fin_start = (
+        datetime.date.fromisoformat(str(start)[:10]) - datetime.timedelta(days=400)
+      ).isoformat()
+    except ValueError:
+      fin_start = str(start)
+    fin_ts_where.append(f"ts >= '{fin_start}'")
 
   if end:
     if str(end).startswith("="):
-      ts_where.append(f"ts <= '{str(end)[1:]}'")
+      end_clause = f"ts <= '{str(end)[1:]}'"
     else:
-      ts_where.append(f"ts < '{end}'")
+      end_clause = f"ts < '{end}'"
+    ts_where.append(end_clause)
+    fin_ts_where.append(end_clause)
 
   ts_cond = f"and {' and '.join(ts_where)}" if ts_where else ""
+  fin_ts_cond = f"and {' and '.join(fin_ts_where)}" if fin_ts_where else ""
   limit_cond = f" {limit}" if limit else ""
+  fin_limit_cond = f" {fin_limit}" if fin_limit else ""
 
   where_ = objs_where(objs)
   sql = f"""
 SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_dividend WHERE obj in ({where_}) {ts_cond}{limit_cond};
-SELECT * FROM stock_shares WHERE obj in ({where_}) {ts_cond}{limit_cond};
-SELECT * FROM stock_financial WHERE obj in ({where_}) {ts_cond}{limit_cond};
+SELECT * FROM stock_shares WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond};
+SELECT * FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond};
 """
   logger.debug(f"start load data for {len(objs)} objs")
   t1 = time.time()

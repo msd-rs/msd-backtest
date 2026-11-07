@@ -134,11 +134,10 @@ class Strategy(mbt.Strategy):
 - `alpha-lib` as factor compute library, a parallel factor building algorithms
 - `prepare(self, ctx)` lifecycle hook: called once before the bar-by-bar loop with full-range `alpha-lib` context (`start=0, end=bars`). Always pre-compute static technical indicators (such as `al.MA`, `al.MACD`, `al.RSI`) in `prepare()` so they run in `O(N * T)` instead of recomputing them inside `execute()` on every bar (`O(N * T^2)`). Use `execute(self, ctx)` for dynamic signals that depend on account state (such as `ctx.ror_hold`) or to submit precomputed signals.
 - `mbt.Context` hold context of strategy running, including:
-  - data
+  - data (`ctx.data(name)` or `ctx.<name>`)
   - stock list (`ctx.objs()`)
-  - 2D `Panel` view (`ctx.panel()`) for multi-period resampling (`panel.resample("1W")`) and 2D array slicing
-  - step
-  - see `mbt.RunnerContext`, which is an implementation of abstract `mbt.Context`, use attributes of `mbt.RunnerContext` is not suggested, use it when you really needed.
+  - current bar index (`ctx.bar` or `ctx.step`, 0-based), total bars per stock (`ctx.bars`), and stock count (`ctx.n_objs`)
+  - 2D `Panel` view (`ctx.panel()`) for multi-period resampling (`panel.resample("1W")`) and 2D array slicing (`panel.compute(...)`, `panel.column(...)`)
 - when you to implement the `execute`, use any loop carefully, because it may too slow, vector computing should use preferentially.
 
 # Execution
@@ -167,17 +166,20 @@ After writing a strategy, you can run it to verify it works as expected.
 
 - `ctx.data(name: str, /, obj: str | None = None) -> np.ndarray`
   the primary method to get data, `name` is the data name, `obj` is used only when comparison, keep `None` for no explicit requirements. `name` can be:
-  - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level (all price/vwap series are forward-adjusted to share a consistent scale)
+  - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level (`open`, `high`, `low`, `close`, `vwap` are forward-adjusted to share a consistent scale for technical indicators)
+  - `price`, `raw_open`, `raw_vwap`: unadjusted raw prices. **Important**: When computing market cap (`ctx.price * ctx.total_shares`) or comparing with per-share financial fields (such as PB = `ctx.price / ctx.f004` or PE), always use unadjusted `ctx.price` rather than forward-adjusted `ctx.close`.
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.
   - `limited` used to check whether the bar had reached the daily limit. `0` for no limit, `1` for limit up, `-1` for limit down
   - `total_shares`: total shares, total stock shares, use to calculate total market capitalization etc.
   - `tradable_shares`: tradable shares, tradable stock shares, use to calculate tradable market capitalization, turnover etc.
-  - Financial fields are named like `f001` can be referred to [financial](./references/financial.md)
+  - Financial fields are named like `f001` can be referred to [financial](./references/financial.md) (Note: financial records in MSD are indexed by fiscal period end date such as `03-31`, `06-30`, `09-30`, `12-31` and aligned backward to daily bars).
+- `ctx.bar -> int` (alias `ctx.step -> int`)
+  current 0-based bar index during `execute(ctx)`. Also `ctx.bars -> int` (total bars per stock) and `ctx.n_objs -> int` (number of stocks in context).
 - `ctx.objs() -> list[str]`
   return the list of stock objs in the current backtest.
 - `ctx.panel() -> mbt.select.Panel`
-  return a 2D `Panel` view (`(n_objs, bars)`) of the strategy data. Useful in `prepare(ctx)` for multi-period resampling (e.g. `ctx.panel().resample("1W")`) or 2D views (`panel.column("close")`).
+  return a 2D `Panel` view (`(n_objs, bars)`) of the strategy data. Useful in `prepare(ctx)` for multi-period resampling (e.g. `ctx.panel().resample("1W")`), `panel.compute(...)`, or 2D views (`panel.column("close")`).
 - `ctx.buy(signals: np.ndarray, percent: float = 1.0)`
   `ctx.sell(signals: np.ndarray, percent: float = 1.0)`
   buy/sell a position, `signals` is a boolean array of signals, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.

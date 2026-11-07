@@ -32,6 +32,7 @@ class Report:
   profit_factor: float
   profit: float
   profit_original: float
+  benchmark_profit: float
   fee_rate: float
   trade_count: int
   
@@ -91,6 +92,7 @@ class Report:
     r.profit_factor = d.get('profit_factor', 0.0)
     r.profit = d.get('profit', 0.0)
     r.profit_original = d.get('profit_original', 0.0)
+    r.benchmark_profit = d.get('benchmark_profit', 0.0)
     r.fee_rate = d.get('fee_rate', 0.0)
     r.trade_count = d.get('trade_count', 0)
 
@@ -242,6 +244,11 @@ class Report:
     self.profit_factor = 0.0 if np.isnan(profit_factor) else np.round(profit_factor, 4)
     self.profit = self.ror[-1] if self.ror.size > 0 else 0.0
     self.profit_original = self.ror_original[-1] if self.ror_original.size > 0 else 0.0
+    self.benchmark_profit = (
+      0.0
+      if (len(benchmark) == 0 or np.isnan(benchmark[-1]))
+      else float(np.round(benchmark[-1], 4))
+    )
     self.fee_rate = np.round(account.deducted / account.initial_cash, 4)
     self.trade_count = len(trade_profits)
     
@@ -251,6 +258,7 @@ class Report:
       "obj": self.obj,
       "profit": self.profit,
       "profit_original": self.profit_original,
+      "benchmark_profit": self.benchmark_profit,
       "alpha": self.alpha,
       "beta": self.beta,
       "sharpe": self.sharpe,
@@ -433,6 +441,11 @@ def build_portfolio_report(
   r.profit_factor = 0.0 if np.isnan(profit_factor) else float(np.round(profit_factor, 4))
   r.profit = float(r.ror[-1]) if r.ror.size > 0 else 0.0
   r.profit_original = float(r.ror_original[-1]) if r.ror_original.size > 0 else 0.0
+  r.benchmark_profit = (
+    0.0
+    if (len(benchmark) == 0 or np.isnan(benchmark[-1]))
+    else float(np.round(benchmark[-1], 4))
+  )
   r.fee_rate = float(np.round(account.deducted / account.initial_cash, 4)) if account.initial_cash > 0 else 0.0
   r.trade_count = trade_bars
 
@@ -454,6 +467,7 @@ def build_json_report(reports: list[Report]) -> dict:
 SUMMARY_METRICS = [
   "profit",
   "profit_original",
+  "benchmark_profit",
   "alpha",
   "beta",
   "sharpe",
@@ -480,12 +494,17 @@ def build_markdown_summary(reports: list[Report], top_k: int = 10) -> str:
   active = sum(1 for r in reports if r.trade_count > 0)
   pos_profit = sum(1 for r in reports if r.profit > 0)
   beat_hold = sum(1 for r in reports if r.profit > r.profit_original)
+  bench_ret = float(getattr(reports[0], "benchmark_profit", 0.0))
+  beat_bench = sum(
+    1 for r in reports if r.profit > float(getattr(r, "benchmark_profit", 0.0))
+  )
 
   lines = [
     "# Backtest Summary",
     "",
     f"- **Total Objs**: {total} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)",
     f"- **Positive Profit**: {pos_profit} ({pos_profit / total * 100:.2f}%) | **Beat Buy&Hold**: {beat_hold} ({beat_hold / total * 100:.2f}%)",
+    f"- **Benchmark Return**: {bench_ret:.4f} ({bench_ret * 100:.2f}%) | **Beat Benchmark**: {beat_bench} ({beat_bench / total * 100:.2f}%)",
     "",
     "## Metrics Statistics",
     "",

@@ -58,6 +58,7 @@ author: elsejj
   - `sort`: `python -m mbt.run.review ${backtest_output_file} sort -m ${metric} [-o desc|asc] [-l 10]` to show a specific metric sorted. the metric can be any of:
     - `profit` : the final profit of the strategy.
     - `profit_original` : the final profit during the test but without apply the strategy.
+    - `benchmark_profit` : the final profit of the benchmark index over the same period.
     - `alpha` : the alpha of the strategy.
     - `beta` : the beta of the strategy.
     - `sharpe` : the sharpe ratio of the strategy.

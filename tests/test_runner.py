@@ -49,15 +49,26 @@ def test_runner_prepare_and_panel():
   import alpha as al
 
   class PrecomputedStrategy(Strategy):
+    def __init__(self):
+      super().__init__()
+      self.visited_bars = []
+
     def prepare(self, ctx: Context):
       panel = ctx.panel()
       assert panel.n_objs == 2
       assert panel.bars == 5
+      assert ctx.n_objs == 2
+      assert ctx.bars == 5
+      # Verify panel.compute inside prepare() works and leaves full-range context intact
+      ma2_2d = panel.compute(al.MA, "close", 2)
+      assert not np.all(np.isnan(ma2_2d))
       self.ma2 = al.MA(ctx.close, 2)
       self.buy_sig = ctx.close > self.ma2
       self.sell_sig = ctx.close < self.ma2
 
     def execute(self, ctx: Context):
+      assert ctx.bar == ctx.step
+      self.visited_bars.append(ctx.bar)
       ctx.buy(self.buy_sig, 1.0)
       ctx.sell(self.sell_sig, 1.0)
 
@@ -79,7 +90,9 @@ def test_runner_prepare_and_panel():
   )
   account = Account(10000.0, dp)
   runner = Runner(account)
-  runner.run(PrecomputedStrategy())
+  strat = PrecomputedStrategy()
+  runner.run(strat)
+  assert strat.visited_bars == [1, 2, 3, 4]
   # Bought at bar 1 (price 12.0), sold at bar 3 (price 11.0)
   assert runner.ctx.accounts[0].position.shares == 0.0
 

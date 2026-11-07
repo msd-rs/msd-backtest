@@ -40,6 +40,22 @@ class RunnerContext(Context):
   def objs(self) -> list[str]:
     return self.dp.objs
 
+  @property
+  def bar(self) -> int:
+    return self.dp.i
+
+  @property
+  def step(self) -> int:
+    return self.dp.i
+
+  @property
+  def bars(self) -> int:
+    return self.dp.bars
+
+  @property
+  def n_objs(self) -> int:
+    return self.dp.groups
+
   def panel(self):
     return self.dp.to_panel()
 

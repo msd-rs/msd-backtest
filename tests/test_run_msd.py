@@ -27,7 +27,7 @@ def test_load_data_empty_objs():
 
 def test_load_data_real():
   try:
-    dp, objs = load_data(MSD_HOST, ["SH600000"], "2024-01-01", "2024-01-10")
+    dp, objs = load_data(MSD_HOST, ["SH600000"], "2025-01-01", "2025-01-15")
   except Exception as e:
     pytest.skip(f"MSD server not available: {e}")
 
@@ -46,3 +46,8 @@ def test_load_data_real():
   assert "bw_price" in dp.data
   assert "limited" in dp.data
   assert "limit_ratio" in dp.data
+  # Verify 400-day lookback populates financial & share fields at bar 0 of Jan 2025
+  assert "total_shares" in dp.data
+  assert not np.isnan(dp.data["total_shares"][0])
+  assert "f001" in dp.data
+  assert not np.isnan(dp.data["f001"][0])

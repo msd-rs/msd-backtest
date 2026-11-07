@@ -50,6 +50,26 @@ class Context:
     """
     pass
 
+  @property
+  def bar(self) -> int:
+    """current bar index (0-based) during execute()"""
+    return 0
+
+  @property
+  def step(self) -> int:
+    """alias for current bar index (0-based) during execute()"""
+    return self.bar
+
+  @property
+  def bars(self) -> int:
+    """total number of bars per stock"""
+    return 0
+
+  @property
+  def n_objs(self) -> int:
+    """total number of stocks/groups in the context"""
+    return 0
+
   def panel(self):
     """
     return a Panel view of the underlying data provider

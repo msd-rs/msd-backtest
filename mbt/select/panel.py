@@ -95,7 +95,7 @@ class Panel:
       groups=self.n_objs,
       flags=al.FLAG_SKIP_NAN if flags is None else flags,
       start=0,
-      end=0,
+      end=self.bars,
     )
 
   @contextlib.contextmanager

@@ -251,6 +251,22 @@ class PortfolioContext(Context):
   def objs(self) -> list[str]:
     return self.dp.objs
 
+  @property
+  def bar(self) -> int:
+    return self.dp.i
+
+  @property
+  def step(self) -> int:
+    return self.dp.i
+
+  @property
+  def bars(self) -> int:
+    return self.dp.bars
+
+  @property
+  def n_objs(self) -> int:
+    return self.dp.groups
+
   def panel(self) -> Panel:
     return self.dp.to_panel()
 
@@ -479,7 +495,7 @@ class SelectorStrategy(PortfolioStrategy):
     return Panel(pl.DataFrame(new_cols), list(self._full_panel.objs), end_bar)
 
   def execute(self, ctx: PortfolioContext):  # type: ignore[override]
-    i = ctx.dp.i
+    i = ctx.bar
     if i < self.min_bars or (i - self.min_bars) % self.rebalance_period != 0:
       return
 

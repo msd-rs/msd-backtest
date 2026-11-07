@@ -157,6 +157,7 @@ def test_build_markdown_summary():
   assert "# Backtest Summary" in md
   assert "**Total Objs**: 2 | **Active (Traded)**: 2 (100.00%)" in md
   assert "**Positive Profit**: 1 (50.00%) | **Beat Buy&Hold**: 1 (50.00%)" in md
+  assert "**Benchmark Return**: 0.0000 (0.00%) | **Beat Benchmark**: 1 (50.00%)" in md
   assert "## Metrics Statistics" in md
   assert "| profit | 0.1000 |" in md
   assert "## Top 2 Objs (by profit)" in md

@@ -7,32 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [0.1.15] - 2026-11-07
+
+### Add
+
+- Improve by some feedback
 
 ## [0.1.14] - 2026-11-07
 
 ### Add
 
 - `Strategy.prepare(ctx)` pre-calculation lifecycle hook to compute static indicators in `O(N * T)` before the bar-by-bar loop.
-- `DataProvider.to_panel()` and `Context.panel()` to unify `DataProvider` and 2D `Panel` views (enabling `panel.resample()` in backtest strategies).
+- `DataProvider.to_panel()` and `Context.panel()` to unify `DataProvider` and 2D `Panel` views (enabling `panel.resample()` in backtest strategies), plus public `ctx.bar` (`ctx.step`), `ctx.bars`, and `ctx.n_objs` properties on `Context`.
 - Shared-cash portfolio backtesting (`PortfolioStrategy`, `PortfolioAccount`, `PortfolioContext`, `PortfolioRunner`, `SelectorStrategy`) and `ctx.rebalance(weights)` API.
 - `StaticSelector` to unify fixed stock code lists and `.py` selector strategies under `Selector` execution in `mbt.run.cli`.
-- Support coexisting `Selector` and `Strategy` subclasses in a single `.py` file with automatic detection and signature-based `-a key=val` argument dispatch.
-- Markdown statistical summary report (`build_markdown_summary`), `-S/--summary` and `.md` output in `mbt.run.cli`, and `summary` subcommand in `mbt.run.review`.
+- Support coexisting `Selector` and `Strategy` subclasses in a single `.py` file with automatic detection and signature-based `-a key=val` argument dispatch (supporting both `-a k1=v1 k2=v2` and repeated `-a k1=v1 -a k2=v2`).
+- Markdown statistical summary report (`build_markdown_summary` with `benchmark_profit` and `Beat Benchmark` stats), `-S/--summary` and `.md` output in `mbt.run.cli`, and `summary` subcommand in `mbt.run.review`.
 - Support `exec_mode="next_open"` and `check_limit=True` in `Runner` and `PortfolioRunner`.
 
 ### Change
 
 - Unify `-a/--args` in `mbt.run.cli` to `key=value` format consistent with `mbt.select.cli`, and add `-p/--portfolio` and `-c/--cash` options.
+- Extend lookback window by 400 days for `stock_shares` and `stock_financial` in `mbt.run.msd.load_data` so backward asof joins populate initial backtest bars with the prior year's latest financial reports and share counts.
 - Separate `buy_percents` and `sell_percents` in `RunnerContext` using vectorized indexing so same-bar sell and buy signals do not overwrite each other (executing sells before buys).
 - Forward-adjust `vwap` to match the scale of forward-adjusted `open/high/low/close`, while preserving `raw_open` and `raw_vwap`.
-- Update `.agents/skills` (`write-strategy` and `optimize-strategy`) documentation with new APIs and Markdown summary workflow.
+- Update `.agents/skills` (`write-strategy`, `write-selector`, and `optimize-strategy`) documentation with new APIs, valuation/financial caveats, and Markdown summary workflow.
 
 ### Fix
 
 - Fix `Account.do_buy` tuple unpacking `TypeError` when `cash == 0` and recalculate fee after position downsizing (including `min_commission_buy` lot adjustment).
 - Fix rights issue (`right_shares`) cash overdraft and suspended bar (`NaN` price) contamination in `Account.do_operation`.
 - Calculate daily limit (`limited`) on unadjusted prices against corporate-action ex-dividend reference prices in `mbt.run.msd` and `mbt.select.msd`.
-- Reset `alpha-lib` `start=0, end=0` context in `Panel.set_ctx` and `Runner.run` `finally` blocks, and add lock protection in `mbt.run.server`.
+- Fix `Panel.set_ctx` to explicitly set `start=0, end=self.bars` (avoiding `py-alpha-lib` `end=0` empty window issue during `Strategy.prepare`), and reset `alpha-lib` context in `Runner.run` `finally` blocks with lock protection in `mbt.run.server`.
+- Replace positional `pl.concat(..., how="align_left")` with `df.join(fin_df, on="obj", how="left")` in `MsdSelectorDataProvider.load_snapshot` to prevent row misalignment when stocks lack financial records.
 
 ## [0.1.13] - 2026-11-05
 

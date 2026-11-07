@@ -128,11 +128,18 @@ def main():
   logger.debug(f"msd {os.environ.get('MSD_HOST', '')}")
   parser = argparse.ArgumentParser(description="Run a selector")
   parser.add_argument("selector", help="Selector Python file")
-  parser.add_argument("-a", "--arg", nargs='*', help="any init arguments with format key=value")
+  parser.add_argument(
+    "-a",
+    "--arg",
+    nargs="*",
+    action="extend",
+    default=[],
+    help="any init arguments with format key=value",
+  )
   parser.add_argument(
     "-m", "--msd", type=str, default=os.environ.get("MSD_HOST", "http://localhost:50511"), help="MSD host, env $MSD_HOST"
   )
-  parser.add_argument("-s", "--objs", nargs="+", default=[], help="objs to run")
+  parser.add_argument("-s", "--objs", nargs="+", action="extend", default=[], help="objs to run")
   parser.add_argument("-f", "--factors", action='store_true', help="show factors if possible")
   parser.add_argument("-d", "--date", type=str, default=None, help="run selector at date (YYYY-MM-DD), default to last day")
   

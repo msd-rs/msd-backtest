@@ -78,9 +78,12 @@ class MySelector(mbt.Selector):
 ### Attributes & Metadata
 - `panel.frame`: underlying `pl.DataFrame` of length `n_objs * bars`.
 - `panel.objs`: `list[str]`, stock objs corresponding to the row order.
-- `panel.bars`: `int`, number of K-line bars per obj.
+- `panel.bars`: `int`, number of K-line bars per obj. Note: when `self.dp.date` is near the start of database history, `panel.bars` may be smaller than the requested `lastN`; use `min(window, panel.bars)` when setting rolling windows or minimum valid bar thresholds.
 - `panel.n_objs` / `len(panel)`: number of objs.
 - `panel.pick(obj) -> int`: maps a stock obj to its row index in `(n_objs, bars)` (raises `KeyError` if not found).
+- **Price & Financial Semantics**:
+  - In `load_snapshot`, `close` is the unadjusted raw price on `self.dp.date`, so it can be directly compared with per-share financial fields (e.g. `f004` BVPS for PB) or multiplied by `total_shares` for market cap. In `load_kline`, `open`/`high`/`low`/`close` are forward-adjusted for technical indicator calculation.
+  - Financial records in MSD are indexed by report period end date (`03-31`, `06-30`, `09-30`, `12-31`). When `fin_only_year=False` is used on dates between `01-01` and `04-30`, companies that have not yet published their annual report will naturally return their latest available Q3 (`09-30`) report. Do not confuse cumulative Q3 income/profit figures with full-year figures.
 
 ### 2D & 1D Views
 - `panel.buffer(name) -> np.ndarray`: 1D contiguous array `(n_objs * bars,)` in block layout, directly consumed by `alpha-lib`.

@@ -79,6 +79,10 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     )
     data = table.to_dict()
     logger.info(f"raw data build, {time.time() - t1:.3f}s, {len(loaded)} objs x {bars} bars")
+    if bars < start[0]:
+      logger.warning(
+        f"load_kline requested {start[0]} bars, but only {bars} bars available (date={self.date})"
+      )
 
     # groups 必须等于返回的股票数(而非入参数量: 可能重复/未排序)
     al.set_ctx(groups=len(loaded), flags=al.FLAG_SKIP_NAN)
@@ -165,7 +169,7 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
           fin_df = fin_df.group_by("obj", maintain_order=True).last()
         if "ts" in fin_df.columns:
           fin_df = fin_df.rename({"ts": "f_ts"})
-        return pl.concat([df, fin_df], how='align_left')
+        return df.join(fin_df, on="obj", how="left")
 
     return df
 

@@ -1,6 +1,6 @@
 [project]
 name = "msd-backtest"
-version = "0.1.14"
+version = "0.1.15"
 description = "MSD backtest framework"
 readme = "README.md"
 requires-python = ">=3.12"

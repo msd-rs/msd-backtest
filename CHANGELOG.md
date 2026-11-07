@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Add
 
 - Improve by some feedback
+- `fee.json` is optional now.
 
 ## [0.1.14] - 2026-11-07
 

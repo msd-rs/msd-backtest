@@ -1,5 +1,18 @@
 
-from .report import Report, build_report, build_json_report
+from .report import (
+  Report,
+  build_report,
+  build_portfolio_report,
+  build_json_report,
+  build_markdown_summary,
+)
 from .backend import RunRequest
 
-__all__ = ["Report", "build_report", "build_json_report", "RunRequest"]
+__all__ = [
+  "Report",
+  "build_report",
+  "build_portfolio_report",
+  "build_json_report",
+  "build_markdown_summary",
+  "RunRequest",
+]

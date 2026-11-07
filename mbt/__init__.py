@@ -1,5 +1,5 @@
 from .data_provider import DataProvider
-from .strategy import Context, Strategy
+from .strategy import Context, Strategy, PortfolioStrategy
 from .account import Account, Operation, Position, Fee
 from .account import (
   ACTION_BUY,
@@ -9,7 +9,13 @@ from .account import (
   ACTION_KEEP,
 )
 from .run.runner import Runner
-from .select import Selector, SelectorDataProvider
+from .select import Selector, StaticSelector, SelectorDataProvider
+from .portfolio import (
+  PortfolioAccount,
+  PortfolioContext,
+  PortfolioRunner,
+  SelectorStrategy,
+)
 
 
 __all__ = [
@@ -23,9 +29,15 @@ __all__ = [
   "DataProvider",
   "Fee",
   "Operation",
+  "PortfolioAccount",
+  "PortfolioContext",
+  "PortfolioRunner",
+  "PortfolioStrategy",
   "Position",
   "Runner",
   "Selector", 
   "SelectorDataProvider",
+  "SelectorStrategy",
+  "StaticSelector",
   "Strategy",
 ]

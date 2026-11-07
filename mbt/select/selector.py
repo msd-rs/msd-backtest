@@ -161,3 +161,18 @@ class Selector:
     logger.info(f"done execute selector {self.__class__.__name__}, "
                 f"used {time.time() - t0:0.3f}s, remain {len(stocks)}")
     return stocks
+
+
+class StaticSelector(Selector):
+  """总是返回预设股票列表的选股策略，用于将固定股票代码列表统一抽象为 Selector。"""
+
+  def __init__(self, objs: list[str] | None = None):
+    super().__init__()
+    self.fixed_objs = list(objs) if objs is not None else []
+
+  def step00(self, stocks: list[str]) -> list[str]:
+    """直接返回预设的股票列表"""
+    if self.fixed_objs:
+      return list(self.fixed_objs)
+    return list(stocks)
+

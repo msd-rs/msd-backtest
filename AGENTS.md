@@ -14,10 +14,11 @@ This project is a stock strategy backtest framework.
   - `account.py`: simulates account holding and cash.
   - `data_provider.py`: base class of data provider to retrieve multiple data series over time for multiple objs.
   - `strategy.py`: base class of strategy.
-  - `run/`: a strategy runner based on `msd` database and `python-alpha-lib` algorithms library.
+  - `run/`: a trading strategy runner based on `msd` database and `python-alpha-lib` algorithms library.
     - `cli.py`: a command line interface to run a strategy.
     - `server.py`: a http server to run a strategy.
     - `msd.py`: a module to load data from `msd` database.
+  - `select/`: a selector strategy runner
 - `tests/`: test code for `mbt`.
 - `strategy`: some example strategies.
 

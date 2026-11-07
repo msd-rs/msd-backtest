@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 from mbt.shared import stocks
-from .selector import Selector, SelectorDataProvider
+from .selector import Selector, StaticSelector, SelectorDataProvider
 from .panel import Panel
 from .msd import MsdSelectorDataProvider
 
@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 __all__ = [
   'Selector',
+  'StaticSelector',
   'SelectorDataProvider',
   'MsdSelectorDataProvider',
   'Panel',

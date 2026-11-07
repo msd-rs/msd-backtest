@@ -50,6 +50,12 @@ class Context:
     """
     pass
 
+  def panel(self):
+    """
+    return a Panel view of the underlying data provider
+    """
+    pass
+
   def buy(self, flags: np.ndarray, percent: float = 1.0):
     """
     buy a position
@@ -70,9 +76,32 @@ class Context:
     """
     pass
 
+  def rebalance(self, weights: np.ndarray):
+    """
+    rebalance portfolio holdings to target weights (used in PortfolioStrategy).
+
+    Args:
+      weights: 1D array of target weights per stock (shape: (groups,) or (groups * bars,)).
+               Non-negative values; if sum > 1.0, weights are automatically normalized to sum to 1.0.
+    """
+    pass
+
 
 class Strategy:
   """Base class of a strategy"""
+
+  portfolio: bool = False
+
+  def prepare(self, ctx: Context):
+    """
+    prepare static indicators or signals once before the bar-by-bar loop starts.
+    During prepare(), alpha-lib context is set to the full bar range [0, bars),
+    reducing indicator calculation complexity from O(N * T^2) to O(N * T).
+
+    Args:
+      ctx: context of the strategy
+    """
+    pass
 
   def execute(self, ctx: Context):
     """
@@ -83,3 +112,9 @@ class Strategy:
       ctx: context of the strategy
     """
     pass
+
+
+class PortfolioStrategy(Strategy):
+  """Base class for multi-stock portfolio rebalancing strategies sharing a single cash pool."""
+
+  portfolio: bool = True

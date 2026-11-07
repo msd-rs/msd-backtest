@@ -132,3 +132,15 @@ class DataProvider:
 
   def reset(self):
     self.i = 0
+
+  def to_panel(self):
+    """Convert DataProvider's block-layout data dictionary into a mbt.select.Panel"""
+    import polars as pl
+    from mbt.select.panel import Panel
+
+    if self.bars <= 0 or len(self.objs) == 0:
+      raise ValueError("cannot build Panel from empty DataProvider")
+    cols = {
+      k: v for k, v in self.data.items() if len(v) == self.groups * self.bars
+    }
+    return Panel(pl.DataFrame(cols), list(self.objs), self.bars)

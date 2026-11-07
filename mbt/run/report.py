@@ -296,6 +296,149 @@ def build_report(dp: DataProvider, accounts: list[Account]) -> list[Report]:
   return reports
 
 
+def build_portfolio_report(
+  dp: DataProvider, account, obj_name: str = "PORTFOLIO"
+) -> list[Report]:
+  """Build a Report for a shared-cash PortfolioAccount."""
+  r = Report("", None, None)  # type: ignore
+  r.obj = obj_name
+  bars = dp.bars
+  r.date = dp.dates[:bars] if bars > 0 else np.array([], dtype="int64")
+
+  ror = np.round(account.portfolio_ror, 4)
+  r.ror = (
+    pl.Series("", ror)
+    .fill_nan(None)
+    .fill_null(strategy="forward")
+    .fill_null(0.0)
+    .to_numpy()
+  )
+  r.ror_hold = r.ror.copy()
+
+  # Compute equal-weight original buy-and-hold ror across tradable stocks
+  start_g = getattr(account, "tradable_start", 0)
+  if dp.groups > start_g and "bw_price" in dp.data:
+    orig_rors = [
+      uniform_ror(dp.slice("bw_price", g * bars))
+      for g in range(start_g, dp.groups)
+    ]
+    r.ror_original = np.round(np.nanmean(orig_rors, axis=0), 4)
+  elif "bw_price" in dp.data and bars > 0:
+    r.ror_original = np.round(uniform_ror(dp.slice("bw_price", 0)), 4)
+  else:
+    r.ror_original = np.zeros(bars, dtype=np.float64)
+
+  r.ror_original = (
+    pl.Series("", r.ror_original)
+    .fill_nan(None)
+    .fill_null(strategy="forward")
+    .fill_null(0.0)
+    .to_numpy()
+  )
+
+  # Aggregate portfolio-level actions per bar
+  all_actions = account.actions.reshape(dp.groups, bars)
+  has_buy = (all_actions[start_g:] == 1).any(axis=0)
+  has_sell = (all_actions[start_g:] == 2).any(axis=0)
+  r.actions = np.where(has_buy, 1, np.where(has_sell, 2, 0)).astype(np.int32)
+
+  nav = (
+    account.portfolio_assets / account.initial_cash
+    if account.initial_cash > 0
+    else np.ones(bars, dtype=np.float64)
+  )
+  r.price = np.round(nav, 4)
+  r.close = r.price
+  r.fw_price = np.round(nav, 3)
+  r.bw_price = np.round(nav, 3)
+
+  # Compute portfolio metrics against benchmark (group 0)
+  if "bw_price" in dp.data and bars > 0:
+    benchmark = uniform_ror(dp.slice("bw_price", 0))
+  else:
+    benchmark = np.zeros(bars, dtype=np.float64)
+
+  strategy_ratio = 1.0 + r.ror
+  benchmark_ratio = 1.0 + benchmark
+
+  if len(strategy_ratio) > 1:
+    strategy_daily = np.diff(strategy_ratio) / strategy_ratio[:-1]
+    benchmark_daily = np.diff(benchmark_ratio) / benchmark_ratio[:-1]
+  else:
+    strategy_daily = np.array([], dtype=np.float64)
+    benchmark_daily = np.array([], dtype=np.float64)
+
+  if len(strategy_daily) >= 2:
+    mean_strat = np.mean(strategy_daily)
+    std_strat = np.std(strategy_daily, ddof=1)
+    sharpe = (mean_strat / std_strat * np.sqrt(252)) if std_strat != 0.0 else 0.0
+
+    cov = np.cov(strategy_daily, benchmark_daily)
+    var_bench = cov[1, 1]
+    beta = (cov[0, 1] / var_bench) if var_bench != 0.0 else 0.0
+
+    mean_bench = np.mean(benchmark_daily)
+    alpha = (mean_strat - beta * mean_bench) * 252
+
+    active_daily = strategy_daily - benchmark_daily
+    mean_active = np.mean(active_daily)
+    std_active = np.std(active_daily, ddof=1)
+    ir = (mean_active / std_active * np.sqrt(252)) if std_active != 0.0 else 0.0
+
+    downside_daily = np.minimum(strategy_daily, 0.0)
+    std_downside = np.std(downside_daily, ddof=1)
+    sortino = (mean_strat / std_downside * np.sqrt(252)) if std_downside != 0.0 else 0.0
+
+    treynor = (mean_strat * 252 / beta) if beta != 0.0 else 0.0
+  else:
+    sharpe = beta = alpha = ir = sortino = treynor = 0.0
+
+  if len(r.ror) > 0:
+    equity = 1.0 + r.ror
+    peaks = np.maximum.accumulate(equity)
+    drawdowns = (equity - peaks) / peaks
+    max_drawdown = float(np.min(drawdowns))
+  else:
+    max_drawdown = 0.0
+
+  calmar = (
+    (np.mean(strategy_daily) * 252) / abs(max_drawdown)
+    if max_drawdown != 0.0 and len(strategy_daily) >= 2
+    else 0.0
+  )
+
+  # Active rebalance / trade statistics
+  trade_bars = int(np.sum((has_buy | has_sell)))
+  wins_ret = strategy_daily[strategy_daily > 0]
+  losses_ret = strategy_daily[strategy_daily < 0]
+  active_days = len(wins_ret) + len(losses_ret)
+  win_rate = (len(wins_ret) / active_days) if active_days > 0 else 0.0
+  avg_win = float(np.mean(wins_ret)) if len(wins_ret) > 0 else 0.0
+  avg_loss = float(np.mean(losses_ret)) if len(losses_ret) > 0 else 0.0
+  sum_loss = float(abs(np.sum(losses_ret)))
+  profit_factor = float(np.sum(wins_ret) / sum_loss) if sum_loss != 0.0 else 0.0
+
+  r.alpha = 0.0 if np.isnan(alpha) else float(np.round(alpha, 4))
+  r.beta = 0.0 if np.isnan(beta) else float(np.round(beta, 4))
+  r.sharpe = 0.0 if np.isnan(sharpe) else float(np.round(sharpe, 4))
+  r.information_ratio = 0.0 if np.isnan(ir) else float(np.round(ir, 4))
+  r.ir = r.information_ratio
+  r.sortino = 0.0 if np.isnan(sortino) else float(np.round(sortino, 4))
+  r.treynor = 0.0 if np.isnan(treynor) else float(np.round(treynor, 4))
+  r.max_drawdown = 0.0 if np.isnan(max_drawdown) else float(np.round(max_drawdown, 4))
+  r.calmar = 0.0 if np.isnan(calmar) else float(np.round(calmar, 4))
+  r.win_rate = 0.0 if np.isnan(win_rate) else float(np.round(win_rate, 4))
+  r.avg_win = 0.0 if np.isnan(avg_win) else float(np.round(avg_win, 4))
+  r.avg_loss = 0.0 if np.isnan(avg_loss) else float(np.round(avg_loss, 4))
+  r.profit_factor = 0.0 if np.isnan(profit_factor) else float(np.round(profit_factor, 4))
+  r.profit = float(r.ror[-1]) if r.ror.size > 0 else 0.0
+  r.profit_original = float(r.ror_original[-1]) if r.ror_original.size > 0 else 0.0
+  r.fee_rate = float(np.round(account.deducted / account.initial_cash, 4)) if account.initial_cash > 0 else 0.0
+  r.trade_count = trade_bars
+
+  return [r]
+
+
 def build_json_report(reports: list[Report]) -> dict:
   """Helper to build a JSON report from DataProvider"""
 
@@ -306,6 +449,87 @@ def build_json_report(reports: list[Report]) -> dict:
     d.update(report.detailed())
     data[report.obj] = d
   return data
+
+
+SUMMARY_METRICS = [
+  "profit",
+  "profit_original",
+  "alpha",
+  "beta",
+  "sharpe",
+  "information_ratio",
+  "sortino",
+  "treynor",
+  "max_drawdown",
+  "calmar",
+  "win_rate",
+  "avg_win",
+  "avg_loss",
+  "profit_factor",
+  "fee_rate",
+  "trade_count",
+]
+
+
+def build_markdown_summary(reports: list[Report], top_k: int = 10) -> str:
+  """Build a compact Markdown statistical summary of backtest reports for humans and AI Agents."""
+  total = len(reports)
+  if total == 0:
+    return "# Backtest Summary\n\nNo reports generated.\n"
+
+  active = sum(1 for r in reports if r.trade_count > 0)
+  pos_profit = sum(1 for r in reports if r.profit > 0)
+  beat_hold = sum(1 for r in reports if r.profit > r.profit_original)
+
+  lines = [
+    "# Backtest Summary",
+    "",
+    f"- **Total Objs**: {total} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)",
+    f"- **Positive Profit**: {pos_profit} ({pos_profit / total * 100:.2f}%) | **Beat Buy&Hold**: {beat_hold} ({beat_hold / total * 100:.2f}%)",
+    "",
+    "## Metrics Statistics",
+    "",
+    "| Metric | Mean | Std | Min | 25% | 50% (Median) | 75% | Max |",
+    "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+  ]
+
+  for m in SUMMARY_METRICS:
+    vals = np.array([float(getattr(r, m, 0.0)) for r in reports], dtype=np.float64)
+    vals = vals[~np.isnan(vals)]
+    if len(vals) == 0:
+      lines.append(f"| {m} | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |")
+      continue
+    mean_v = float(np.mean(vals))
+    std_v = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
+    min_v = float(np.min(vals))
+    p25, p50, p75 = [float(x) for x in np.percentile(vals, [25, 50, 75])]
+    max_v = float(np.max(vals))
+    lines.append(
+      f"| {m} | {mean_v:.4f} | {std_v:.4f} | {min_v:.4f} | {p25:.4f} | {p50:.4f} | {p75:.4f} | {max_v:.4f} |"
+    )
+
+  def _format_obj_table(title: str, subset: list[Report]):
+    lines.extend([
+      "",
+      f"## {title}",
+      "",
+      "| obj | profit | profit_original | alpha | sharpe | max_drawdown | win_rate | fee_rate | trade_count |",
+      "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for r in subset:
+      lines.append(
+        f"| {r.obj} | {r.profit:.4f} | {r.profit_original:.4f} | {r.alpha:.4f} | {r.sharpe:.4f} | {r.max_drawdown:.4f} | {r.win_rate:.4f} | {r.fee_rate:.4f} | {r.trade_count} |"
+      )
+
+  k = min(max(1, top_k), total)
+  sorted_desc = sorted(reports, key=lambda x: x.profit, reverse=True)
+  _format_obj_table(f"Top {k} Objs (by profit)", sorted_desc[:k])
+
+  if total > 1:
+    sorted_asc = sorted(reports, key=lambda x: x.profit)
+    _format_obj_table(f"Bottom {k} Objs (by profit)", sorted_asc[:k])
+
+  return "\n".join(lines) + "\n"
 
 
 

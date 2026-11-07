@@ -39,6 +39,9 @@ def test_load_data_real():
   assert dp.groups == 1
   assert "close" in dp.data
   assert "price" in dp.data
+  assert "raw_open" in dp.data
+  assert "raw_vwap" in dp.data
+  assert "vwap" in dp.data
   assert "fw_price" in dp.data
   assert "bw_price" in dp.data
   assert "limited" in dp.data

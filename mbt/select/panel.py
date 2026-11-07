@@ -94,6 +94,8 @@ class Panel:
     al.set_ctx(
       groups=self.n_objs,
       flags=al.FLAG_SKIP_NAN if flags is None else flags,
+      start=0,
+      end=0,
     )
 
   @contextlib.contextmanager

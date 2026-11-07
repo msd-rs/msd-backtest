@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from typing import Any
-from mbt.select import Selector , MsdSelectorDataProvider
+from mbt.select import Selector, StaticSelector, MsdSelectorDataProvider
+from mbt.run.backend import instantiate_class
 import mbt.shared.stocks 
 import logging
 from typing import Tuple
@@ -49,8 +50,10 @@ def expand_objs(objs: list[str]) -> list[str]:
   return l
 
 
-def load_selector(py_file: str, **kwargs) -> Selector:
+def try_load_selector(py_file: str, **kwargs) -> Selector | None:
   path = os.path.abspath(py_file)
+  if not os.path.isfile(path):
+    return None
   dir_path = os.path.dirname(path)
   if dir_path not in sys.path:
     sys.path.insert(0, dir_path)
@@ -61,8 +64,19 @@ def load_selector(py_file: str, **kwargs) -> Selector:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     for obj in vars(module).values():
-      if isinstance(obj, type) and issubclass(obj, Selector) and obj is not Selector:
-        return obj(**kwargs) if kwargs is not None else obj()
+      if (
+        isinstance(obj, type)
+        and issubclass(obj, Selector)
+        and obj not in (Selector, StaticSelector)
+      ):
+        return instantiate_class(obj, kwargs)
+  return None
+
+
+def load_selector(py_file: str, **kwargs) -> Selector:
+  selector = try_load_selector(py_file, **kwargs)
+  if selector is not None:
+    return selector
   raise ValueError(f"Could not find a Selector class in {py_file}")
 
 

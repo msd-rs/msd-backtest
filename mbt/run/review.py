@@ -1,4 +1,4 @@
-from mbt.run.report import Report
+from mbt.run.report import Report, build_markdown_summary
 import orjson
 import sys
 import argparse
@@ -11,6 +11,10 @@ def parse_args():
   parser.add_argument("report", type=str, help="Path to the report file")
 
   sub_commands = parser.add_subparsers(dest="command", required=True)
+
+  summary_parser = sub_commands.add_parser("summary", help="Show markdown summary report")
+  summary_parser.add_argument("-l", "--limit", type=int, default=10, help="Limit number of top/bottom objs")
+  summary_parser.set_defaults(func=do_summary)
 
   stat_parser = sub_commands.add_parser("stat", help="Show statistics")
   stat_parser.set_defaults(func=do_stat)
@@ -26,6 +30,11 @@ def parse_args():
   detail_parser.set_defaults(func=do_detail)
   
   return parser.parse_args()
+
+def do_summary(args):
+  reports = load_reports(args.report)
+  print(build_markdown_summary(list(reports.values()), top_k=args.limit), end="")
+
 
 def do_stat(args):
   reports = load_reports(args.report)

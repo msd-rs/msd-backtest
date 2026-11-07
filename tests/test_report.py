@@ -121,3 +121,46 @@ def test_report_edge_cases():
   assert report.avg_win == 0.0
   assert report.avg_loss == 0.0
   assert report.profit_factor == 0.0
+
+
+def test_build_markdown_summary():
+  from mbt.run.report import build_markdown_summary
+
+  r1 = Report.from_dict(
+    "SH600000",
+    {
+      "profit": 0.25,
+      "profit_original": 0.10,
+      "alpha": 0.12,
+      "sharpe": 1.5,
+      "max_drawdown": -0.08,
+      "win_rate": 0.6,
+      "fee_rate": 0.005,
+      "trade_count": 4,
+    },
+  )
+  r2 = Report.from_dict(
+    "SZ000001",
+    {
+      "profit": -0.05,
+      "profit_original": 0.02,
+      "alpha": -0.03,
+      "sharpe": -0.4,
+      "max_drawdown": -0.15,
+      "win_rate": 0.3,
+      "fee_rate": 0.004,
+      "trade_count": 2,
+    },
+  )
+
+  md = build_markdown_summary([r1, r2], top_k=2)
+  assert "# Backtest Summary" in md
+  assert "**Total Objs**: 2 | **Active (Traded)**: 2 (100.00%)" in md
+  assert "**Positive Profit**: 1 (50.00%) | **Beat Buy&Hold**: 1 (50.00%)" in md
+  assert "## Metrics Statistics" in md
+  assert "| profit | 0.1000 |" in md
+  assert "## Top 2 Objs (by profit)" in md
+  assert "## Bottom 2 Objs (by profit)" in md
+  assert "| SH600000 | 0.2500 |" in md
+  assert "| SZ000001 | -0.0500 |" in md
+

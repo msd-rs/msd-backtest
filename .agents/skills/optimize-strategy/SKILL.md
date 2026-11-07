@@ -42,17 +42,20 @@ author: elsejj
 
 ## Do backtest
 
-- Backtest the strategy with `uv run python -m mbt.run.cli ${strategy_file} -s ${objs} -o ${backtest_output_file}`. This will be generate `backtest_output_file`, which contains detailed performance metrics for each obj.
+- Backtest the strategy with `uv run python -m mbt.run.cli ${strategy_file} -s ${objs} -o ${backtest_output_file} -S` (if `${strategy_file}` already contains a `Selector` subclass, `-s ${objs}` can be omitted).
+  - `-o ${backtest_output_file}` saves the full detailed report for each obj to disk.
+  - `-S` (`--summary`) directly prints a compact **Markdown statistical summary** (including overview counts, distribution statistics across all metrics, and Top 10 / Bottom 10 objs by profit) to stdout, allowing you to immediately evaluate the round without reading the large JSON file.
 - You can use `uv run python -m mbt.run.cli --help` to get more information about the command.
 - You can also edit `.env` to modify some fixed arguments
 
 
 ## Review the metrics 
 
-- Because `backtest_output_file` may be very large, you should use `uv run python -m mbt.run.review ${backtest_output_file}` to explore the data instead reading the file directly. There are 3 sub command of `uv run python -m mbt.run.review ${backtest_output_file}`:
-  - `stat`: `python -m mbt.run.review ${backtest_output_file} stat` to review the statistics of the metrics.
-  - `detail`: `python -m mbt.run.review ${backtest_output_file} detail -s ${obj}` to review the metrics of a specific obj.
-  - `sort`: `python -m mbt.run.review ${backtest_output_file} sort -m ${metric}` to show the metric sorted. the metric can be any of:
+- Because `backtest_output_file` may be very large, never read the JSON file directly. Start from the Markdown summary printed by `-S` (or re-generate it via `uv run python -m mbt.run.review ${backtest_output_file} summary`), and use `uv run python -m mbt.run.review ${backtest_output_file}` when you need to drill down further. There are 4 sub-commands of `uv run python -m mbt.run.review ${backtest_output_file}`:
+  - `summary`: `python -m mbt.run.review ${backtest_output_file} summary [-l 10]` to output the Markdown statistical summary and Top/Bottom objs table.
+  - `stat`: `python -m mbt.run.review ${backtest_output_file} stat` to review the statistics of the metrics in JSON format.
+  - `detail`: `python -m mbt.run.review ${backtest_output_file} detail -s ${obj}` to review the detailed bar-by-bar series and metrics of a specific obj.
+  - `sort`: `python -m mbt.run.review ${backtest_output_file} sort -m ${metric} [-o desc|asc] [-l 10]` to show a specific metric sorted. the metric can be any of:
     - `profit` : the final profit of the strategy.
     - `profit_original` : the final profit during the test but without apply the strategy.
     - `alpha` : the alpha of the strategy.

@@ -90,10 +90,25 @@ SELECT * FROM stock_financial WHERE obj in ({where_}) {ts_cond}{limit_cond};
 
   data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)
 
-  # keep original as price
+  # keep original unadjusted prices for realistic execution & limit calculation
+  data["raw_open"] = data["open"].copy()
   data["price"] = data["close"].copy()
 
   al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN)
+
+  # Calculate limit up/down on unadjusted prices with corporate-action reference price
+  prev_raw_close = al.REF(data["price"], 1)
+  denom = 1.0 + data["transfer_shares"] + data["right_shares"]
+  denom = np.where(denom > 0, denom, 1.0)
+  ex_ref_price = (
+    prev_raw_close - data["dividend"] + data["right_shares"] * data["right_price"]
+  ) / denom
+  limit_up_price = np.round(ex_ref_price * (1.0 + data["limit_ratio"]), 2)
+  limit_down_price = np.round(ex_ref_price * (1.0 - data["limit_ratio"]), 2)
+  is_limit_up = (data["price"] == data["high"]) & (data["price"] >= limit_up_price)
+  is_limit_down = (data["price"] == data["low"]) & (data["price"] <= limit_down_price)
+  data["limited"] = np.where(is_limit_up, 1, np.where(is_limit_down, -1, 0))
+
   data["bw_price"] = al.BW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
   data["fw_price"] = al.FW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
 
@@ -103,11 +118,11 @@ SELECT * FROM stock_financial WHERE obj in ({where_}) {ts_cond}{limit_cond};
   data["high"] = al.FW_SPLIT(data["high"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
   data["low"] = al.FW_SPLIT(data["low"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
   data["close"] = data["fw_price"]
-  data["vwap"] = data["amount"] / data["volume"]
-  # check if it is limited: 
-  is_limit_up = (data["close"] == data["high"]) & (data["close"] >= al.REF(data["close"], 1) * (1 + data["limit_ratio"])) 
-  is_limit_down = (data["close"] == data["low"]) & (data["close"] <= al.REF(data["close"], 1) * (1 - data["limit_ratio"]))
-  data["limited"] = np.where(is_limit_up, 1, np.where(is_limit_down, -1, 0))
+  with np.errstate(divide="ignore", invalid="ignore"):
+    raw_vwap = np.where(data["volume"] > 0, data["amount"] / data["volume"], np.nan)
+    fw_factor = np.where(data["price"] > 0, data["fw_price"] / data["price"], 1.0)
+  data["raw_vwap"] = raw_vwap
+  data["vwap"] = raw_vwap * fw_factor
   logger.info("adjustment factors applied")
 
   if dp.bars == 0:

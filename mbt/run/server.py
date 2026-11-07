@@ -9,6 +9,7 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
+import threading
 
 # Configuration
 logging.basicConfig(
@@ -19,6 +20,9 @@ logger = logging.getLogger("backtest-server")
 DEFAULT_MSD_HOST = "http://localhost:50510"
 
 DEFAULT_FEE = Fee()
+
+# Lock to serialize alpha-lib process-global context access across concurrent requests
+_BACKTEST_LOCK = threading.Lock()
 
 app = FastAPI(title="MSD Backtest Server")
 
@@ -43,35 +47,35 @@ async def run_backtest(req_model: RunRequestModel):
     # We'll pass the strategy string directly to load_strategy logic if needed,
     # but RunRequest handles it.
 
-    # We need to load data first as in cli.py
-    logger.info(f"Loading data from {DEFAULT_MSD_HOST} for {req_model.objs}")
-    dp, objs = load_data(
-      DEFAULT_MSD_HOST, req_model.objs, req_model.start, req_model.end
-    )
-
-    if "ts" not in dp.data:
-      raise ValueError(
-        "No data found for the given objs and date range. Please check your MSD server and parameters."
+    with _BACKTEST_LOCK:
+      logger.info(f"Loading data from {DEFAULT_MSD_HOST} for {req_model.objs}")
+      dp, objs = load_data(
+        DEFAULT_MSD_HOST, req_model.objs, req_model.start, req_model.end
       )
 
-    logger.info("Data loaded successfully")
+      if "ts" not in dp.data or len(dp.dates) == 0:
+        raise ValueError(
+          "No data found for the given objs and date range. Please check your MSD server and parameters."
+        )
 
-    # Initialize Account and Runner
-    account = Account(10000.0, dp, fee=DEFAULT_FEE)
-    runner = Runner(account)
+      logger.info("Data loaded successfully")
 
-    # Load the strategy using backend logic
-    # RunRequest constructor expects strategy as (str | IO | Strategy)
-    strategy_obj = RunRequest.load_strategy(req_model.strategy, args=req_model.args)
+      # Initialize Account and Runner
+      account = Account(10000.0, dp, fee=DEFAULT_FEE)
+      runner = Runner(account)
 
-    logger.info("Running strategy...")
-    runner.run(strategy_obj)
-    logger.info("Strategy run completed")
+      # Load the strategy using backend logic
+      # RunRequest constructor expects strategy as (str | IO | Strategy)
+      strategy_obj = RunRequest.load_strategy(req_model.strategy, args=req_model.args)
 
-    # Build report
-    reports = build_report(dp, runner.ctx.accounts)[1:]
-    report = build_json_report(reports)
-    return report
+      logger.info("Running strategy...")
+      runner.run(strategy_obj)
+      logger.info("Strategy run completed")
+
+      # Build report
+      reports = build_report(dp, runner.ctx.accounts)[1:]
+      report = build_json_report(reports)
+      return report
 
   except Exception as e:
     logger.exception("Error during backtest execution")

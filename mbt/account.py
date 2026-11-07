@@ -343,31 +343,54 @@ class Account:
       right_price = self.right_prices[ts]
 
       if dividend > 0 or transfer_shares > 0 or right_share > 0:
-        self.cash += self.position.shares * dividend
-        self.cash -= self.position.shares * right_share * right_price
-        self.position.shares += self.position.shares * (transfer_shares + right_share)
+        if dividend > 0 and not np.isnan(dividend):
+          self.cash += self.position.shares * dividend
+        if transfer_shares > 0 and not np.isnan(transfer_shares):
+          self.position.shares += self.position.shares * transfer_shares
+        if right_share > 0 and not np.isnan(right_share):
+          max_right_shares = self.position.shares * right_share
+          if right_price > 0 and not np.isnan(right_price):
+            affordable = int(self.cash / right_price) if self.cash > 0 else 0
+            actual_right = min(max_right_shares, float(affordable))
+            self.cash -= actual_right * right_price
+          else:
+            actual_right = max_right_shares
+          self.position.shares += actual_right
+
+    op_price = operation.position.price
+    is_valid_price = not np.isnan(op_price) and op_price > 0
 
     if operation.action == ACTION_BUY:
       operation, fee = self.do_buy(ts, operation.position)
     elif operation.action == ACTION_BUY_PERCENT:
-      operation, fee = self.do_buy(
-        ts,
-        Position.from_cash(
-          self.cash * operation.position.shares, operation.position.price, self.unit
-        ),
-      )
+      if not is_valid_price:
+        operation, fee = Operation.buy_no_cash(Position(0, 0)), 0.0
+      else:
+        operation, fee = self.do_buy(
+          ts,
+          Position.from_cash(
+            self.cash * operation.position.shares, operation.position.price, self.unit
+          ),
+        )
     elif operation.action == ACTION_SELL:
-      operation, fee = self.do_sell(ts, operation.position)
+      if not is_valid_price:
+        operation, fee = Operation.sell_no_hold(Position(0, 0)), 0.0
+      else:
+        operation, fee = self.do_sell(ts, operation.position)
     elif operation.action == ACTION_SELL_PERCENT:
-      operation, fee = self.do_sell(
-        ts,
-        Position(
-          self.position.shares * operation.position.shares,
-          operation.position.price,
-        ),
-      )
+      if not is_valid_price:
+        operation, fee = Operation.sell_no_hold(Position(0, 0)), 0.0
+      else:
+        operation, fee = self.do_sell(
+          ts,
+          Position(
+            self.position.shares * operation.position.shares,
+            operation.position.price,
+          ),
+        )
     elif operation.action == ACTION_KEEP:
-      self.position.price = operation.position.price
+      if is_valid_price:
+        self.position.price = operation.position.price
     else:
       raise ValueError(f"invalid operation: {operation}")
 
@@ -400,20 +423,23 @@ class Account:
         operation: because buy operation may be rejected or partially filled, return the actual operation
     """
 
-    if self.cash == 0:
-      return Operation.buy_no_cash(Position(0, 0))
+    if self.cash <= 0 or np.isnan(position.price) or position.price <= 0:
+      return Operation.buy_no_cash(Position(0, 0)), 0.0
 
     fee_item = self.fee.get(self.dates[ts])
     fee = fee_item.buy(position.value)
     if position.value + fee > self.cash:
-      position = Position.from_cash(self.cash - fee, position.price, self.unit)
+      position = Position.from_cash(max(self.cash - fee, 0.0), position.price, self.unit)
+      fee = fee_item.buy(position.value)
+      while position.shares > 0 and position.value + fee > self.cash:
+        position = Position(max(position.shares - self.unit, 0.0), position.price)
+        fee = fee_item.buy(position.value)
 
-    if position.shares == 0:
+    if position.shares <= 0:
       return Operation.buy_no_cash(Position(0, 0)), 0.0
 
     self.cash -= position.value + fee
     self.position += position
-    fee = fee_item.buy(position.value)
     self.deducted += fee
     if self.per_assets == 0:
       self.per_assets = self.asset

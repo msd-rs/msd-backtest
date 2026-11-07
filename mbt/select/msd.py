@@ -83,18 +83,23 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     # groups 必须等于返回的股票数(而非入参数量: 可能重复/未排序)
     al.set_ctx(groups=len(loaded), flags=al.FLAG_SKIP_NAN)
 
+    # limit_ratio 必须按返回块顺序生成, 且基于未复权除权参考价计算涨跌停, 避免前复权缩放后 round 失真
+    limit_ratio = get_limit_ratio(loaded, repeat=bars)
+    prev_raw_close = np.nan_to_num(al.REF(data["close"], 1))
+    denom = 1.0 + data["transfer_shares"] + data["right_shares"]
+    denom = np.where(denom > 0, denom, 1.0)
+    ex_ref_price = (
+      prev_raw_close - data["dividend"] + data["right_shares"] * data["right_price"]
+    ) / denom
+    data["limited"] = np.where(
+      (data["close"] >= np.round(ex_ref_price * (1 + limit_ratio), 2)), 1, np.where(
+      (data["close"] <= np.round(ex_ref_price * (1 - limit_ratio), 2)), -1, 0))
+
     # Apply forward adjustment factor to price related columns
     data["open"] = al.FW_SPLIT(data["open"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
     data["high"] = al.FW_SPLIT(data["high"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
     data["low"] = al.FW_SPLIT(data["low"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
     data["close"] = al.FW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-
-    # limit_ratio 必须按返回块顺序生成, 否则涨跌停标记会错配到别的股票
-    limit_ratio = get_limit_ratio(loaded, repeat=bars)
-    last_close = np.nan_to_num(al.REF(data["close"], 1))
-    data["limited"] = np.where(
-      (data["close"] >= np.round(last_close * (1 + limit_ratio), 2)), 1, np.where(
-      (data["close"] <= np.round(last_close * (1 - limit_ratio), 2)), -1, 0))
 
     full_df = pl.DataFrame(data)
 

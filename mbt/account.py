@@ -148,8 +148,26 @@ class FeeItem:
     return max(commission, min_commission) + tax + transaction_fee
 
 
+DEFAULT_FEE_CONFIG: list[dict] = [
+  {
+    "ts": 4102416000,
+    "commission_buy": 0.0015,
+    "min_commission_buy": 5.0,
+    "tax_buy": 0.001,
+    "transaction_fee_buy": 0.0001,
+    "commission_sell": 0.0015,
+    "min_commission_sell": 5.0,
+    "tax_sell": 0.0,
+    "transaction_fee_sell": 0.0,
+  }
+]
+
+
 class Fee:
-  def __init__(self, config: list[FeeItem] | list[str] | str | bytes | None = None):
+  def __init__(
+    self,
+    config: list[FeeItem] | list[str] | list[dict] | str | Path | bytes | None = None,
+  ):
     def build_fee_item(x):
       return FeeItem(**x)
 
@@ -157,15 +175,29 @@ class Fee:
       if len(config) > 0 and isinstance(config[0], str):
         self.config = [json.loads(x, object_hook=build_fee_item) for x in config]  # type: ignore
         self.config.sort(key=lambda x: x.ts)
+      elif len(config) > 0 and isinstance(config[0], dict):
+        self.config = [FeeItem(**x) for x in config]  # type: ignore
+        self.config.sort(key=lambda x: x.ts)
       else:
-        self.config = config
-    elif isinstance(config, str):
+        self.config = list(config)
+    elif isinstance(config, (str, Path)):
       p = Path(config)
 
       if p.is_file():
-        self.config = json.load(p.open("r"), object_hook=build_fee_item)
+        self.config = json.load(p.open("r", encoding="utf-8"), object_hook=build_fee_item)
       else:
-        self.config = json.loads(config, object_hook=build_fee_item)
+        project_p = Path(__file__).resolve().parent.parent / p
+        if project_p.is_file():
+          self.config = json.load(project_p.open("r", encoding="utf-8"), object_hook=build_fee_item)
+        else:
+          try:
+            self.config = json.loads(str(config), object_hook=build_fee_item)
+          except Exception:
+            logger.warning(
+              "Fee config '%s' not found or invalid JSON, falling back to default fee configuration",
+              config,
+            )
+            self.config = [FeeItem(**item) for item in DEFAULT_FEE_CONFIG]
     elif isinstance(config, bytes):
       self.config = json.loads(config.decode("utf-8"), object_hook=build_fee_item)
     else:
@@ -174,6 +206,72 @@ class Fee:
     # add a default fee item at the beginning when no fee item is provided
     if len(self.config) == 0:
       self.config = [FeeItem()]
+
+  @classmethod
+  def default(cls) -> "Fee":
+    """
+    Return a Fee instance initialized with default project fee config.
+    Tries ./etc/fee.json and project_root/etc/fee.json, falling back to DEFAULT_FEE_CONFIG.
+    """
+    for candidate in [
+      Path.cwd() / "etc" / "fee.json",
+      Path(__file__).resolve().parent.parent / "etc" / "fee.json",
+    ]:
+      if candidate.is_file():
+        try:
+          return cls(candidate)
+        except Exception as e:
+          logger.warning("Failed to load fee config from %s: %s", candidate, e)
+    return cls([FeeItem(**item) for item in DEFAULT_FEE_CONFIG])
+
+  @classmethod
+  def load(cls, config: str | Path | None = None) -> "Fee":
+    """
+    Load Fee from a given file path or JSON string.
+    If config is empty/None or file not found, fall back to default fee configuration.
+    """
+    if not config:
+      return cls.default()
+
+    p = Path(config)
+    if p.is_file():
+      try:
+        return cls(p)
+      except Exception as e:
+        logger.warning(
+          "Failed to load fee config from %s: %s, falling back to default fee",
+          p,
+          e,
+        )
+        return cls.default()
+
+    project_p = Path(__file__).resolve().parent.parent / p
+    if project_p.is_file():
+      try:
+        return cls(project_p)
+      except Exception as e:
+        logger.warning(
+          "Failed to load fee config from %s: %s, falling back to default fee",
+          project_p,
+          e,
+        )
+        return cls.default()
+
+    if isinstance(config, str) and config.strip().startswith(("{", "[")):
+      try:
+        return cls(config)
+      except Exception as e:
+        logger.warning(
+          "Failed to parse fee JSON config: %s, falling back to default fee",
+          e,
+        )
+        return cls.default()
+
+    logger.warning(
+      "Fee config '%s' not found, falling back to default fee configuration",
+      config,
+    )
+    return cls.default()
 
   def get(self, ts: int) -> FeeItem:
     """

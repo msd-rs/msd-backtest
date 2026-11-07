@@ -122,7 +122,7 @@ AI 在编写策略时应优先使用这些向量化算子，以确保最佳性�
 5. 编写 `.env` 配置文件, 例如
 ```env
 MSD_HOST=http://localhost:50510
-MSD_BT_FEE=/path/to/fee.json # 一个简单的 fee json 配置文件可以从本仓库复制一份
+# MSD_BT_FEE=/path/to/fee.json # 选配，未配置时默认使用 etc/fee.json 标准费率
 ```
 6. 运行 `claude` ，然后输入 `编写一个双均线策略`, 如果一切正常, `claude` 会使用 write_strategy 技能为你编写相应的策略并测试运行.
 

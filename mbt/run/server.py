@@ -19,7 +19,7 @@ logger = logging.getLogger("backtest-server")
 
 DEFAULT_MSD_HOST = "http://localhost:50510"
 
-DEFAULT_FEE = Fee()
+DEFAULT_FEE = Fee.default()
 
 # Lock to serialize alpha-lib process-global context access across concurrent requests
 _BACKTEST_LOCK = threading.Lock()
@@ -95,12 +95,12 @@ if __name__ == "__main__":
   parser.add_argument(
     "--fee",
     default=os.environ.get("MSD_BT_FEE", ""),
-    help="fee config path, env $MSD_BT_FEE",
+    help="fee config path, env $MSD_BT_FEE (optional, defaults to etc/fee.json)",
   )
   args = parser.parse_args()
 
   if len(args.fee) > 0:
-    DEFAULT_FEE = Fee(args.fee)
+    DEFAULT_FEE = Fee.load(args.fee)
 
   DEFAULT_MSD_HOST = args.msd
 

@@ -137,7 +137,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     "-f",
     "--fee",
     default=os.environ.get("MSD_BT_FEE", ""),
-    help="fee config path, env $MSD_BT_FEE",
+    help="fee config path, env $MSD_BT_FEE (optional, defaults to etc/fee.json)",
   )
   parser.add_argument(
     "-p",
@@ -214,7 +214,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   req.cash = args.cash  # type: ignore[attr-defined]
   req.summary = bool(args.summary)  # type: ignore[attr-defined]
 
-  fee = Fee(args.fee) if len(args.fee) > 0 else Fee()
+  fee = Fee.load(args.fee)
 
   return req, args.msd, args.output, fee
 

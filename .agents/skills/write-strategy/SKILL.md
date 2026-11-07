@@ -19,7 +19,7 @@ Programming language: Python 3.12+
 - Ensure `msd-backtest[cli]` be installed use project package manager.
 - When your need to run in server mode, ensure `msd-backtest[server]` is installed. Normally, server mode is not required.
 - Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first. When user can't provide it, you can ask and install it by [the guide](./references/msd.md).
-- There should have a `./etc/fee.json` used calculate each trade fee, default can be 
+- `MSD_BT_FEE` is optional. `./etc/fee.json` can be used to customize trade fees, defaulting to standard rates if omitted:
 
 ```json
 [

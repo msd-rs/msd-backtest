@@ -158,6 +158,12 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     action="store_true",
     help="print markdown statistical summary report to stdout",
   )
+  parser.add_argument(
+    "--fin-only-year",
+    action="store_true",
+    default=False,
+    help="only query annual financial reports (ts.month=12) from stock_financial",
+  )
   parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
 
@@ -213,6 +219,11 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   req.portfolio = bool(args.portfolio or getattr(req.strategy, "portfolio", False))  # type: ignore[attr-defined]
   req.cash = args.cash  # type: ignore[attr-defined]
   req.summary = bool(args.summary)  # type: ignore[attr-defined]
+  req.fin_only_year = bool(
+    args.fin_only_year
+    or getattr(req.strategy, "fin_only_year", False)
+    or getattr(req, "fin_only_year", False)
+  )
 
   fee = Fee.load(args.fee)
 
@@ -291,7 +302,12 @@ def main():
   fin_fields = getattr(req, "fin_fields", None) or getattr(
     req.strategy, "fin_fields", None
   )
-  dp, objs = load_data(msd_host, req.objs, req.start, req.end, fin_fields=fin_fields)
+  fin_only_year = getattr(req, "fin_only_year", False) or getattr(
+    req.strategy, "fin_only_year", False
+  )
+  dp, objs = load_data(
+    msd_host, req.objs, req.start, req.end, fin_fields=fin_fields, fin_only_year=fin_only_year
+  )
   logger.info(
     f"data loaded, objs: {len(objs)}, bars per obj: {dp.bars}, total_bars: {dp.groups * dp.bars}"
   )

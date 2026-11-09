@@ -369,3 +369,118 @@ def test_portfolio_context_run_selector():
   assert not acc.has_position("SZ000001")
   assert acc.positions[0].shares == 800.0  # 10000 / 12.0 = 833.3 -> 800 shares @ 12.0
 
+
+def test_portfolio_rebalance_tolerance_band():
+  # Test that rebalance with tolerance suppresses micro trades but executes liquidations
+  prices_a = np.array([10.0, 10.0, 10.0, 10.0, 10.0])
+  prices_b = np.array([10.0, 10.0, 10.0, 10.0, 10.0])
+  prices = np.concatenate([prices_a, prices_b])
+
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(5), 2),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(10),
+      "transfer_shares": np.zeros(10),
+      "right_shares": np.zeros(10),
+      "right_price": np.zeros(10),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class TolStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):
+      if ctx.bar == 1:
+        # Initial 50/50 allocation
+        ctx.rebalance(np.array([0.5, 0.5]))
+      elif ctx.bar == 2:
+        # Micro deviation within 5% tolerance: target 0.52 vs current ~0.50
+        ctx.rebalance(np.array([0.52, 0.48]), tolerance=0.05)
+      elif ctx.bar == 3:
+        # Large deviation outside 5% tolerance: target 0.70 vs current ~0.50
+        ctx.rebalance(np.array([0.70, 0.30]), tolerance=0.05)
+      elif ctx.bar == 4:
+        # Full liquidation on SZ000001 even within tolerance
+        ctx.rebalance(np.array([1.0, 0.0]), tolerance=0.05)
+
+  acc = PortfolioAccount(10000.0, dp)
+  runner = PortfolioRunner(acc)
+  runner.run(TolStrategy())
+
+  records = acc.records
+  # At bar 1: 2 buys (SH600000, SZ000001)
+  assert sum(1 for r in records if r.bar == 1) == 2
+  # At bar 2: deviation <= 0.05, so NO trades at bar 2!
+  assert sum(1 for r in records if r.bar == 2) == 0
+  # At bar 3: deviation > 0.05, trades occur
+  assert sum(1 for r in records if r.bar == 3) > 0
+  # At bar 4: SZ000001 must be completely liquidated
+  assert acc.positions[1].shares == 0.0
+
+
+def test_portfolio_context_panel_warning_and_slice(caplog):
+  import logging
+  prices = np.ones(10)
+  dp = DataProvider(
+    {
+      "ts": np.arange(10),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(10),
+      "transfer_shares": np.zeros(10),
+      "right_shares": np.zeros(10),
+      "right_price": np.zeros(10),
+    },
+    objs=["SH600000"],
+  )
+
+  class InspectStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):
+      if ctx.bar == 2:
+        # Calling ctx.panel() without allow_future should log a warning
+        p_full = ctx.panel()
+        assert p_full.bars == 10
+        # Calling ctx.panel(sliced=True) should return sliced panel
+        p_sliced = ctx.panel(sliced=True)
+        assert p_sliced.bars == 3  # bar 0, 1, 2
+        # Calling ctx.slice_panel(lastN=2)
+        p_slice2 = ctx.slice_panel(lastN=2)
+        assert p_slice2.bars == 2
+
+  acc = PortfolioAccount(10000.0, dp)
+  runner = PortfolioRunner(acc)
+  with caplog.at_level(logging.WARNING):
+    runner.run(InspectStrategy())
+
+  assert any("Calling ctx.panel() during execute()" in rec.message for rec in caplog.records)
+
+
+def test_historical_panel_selector_fin_only_year_warning(caplog):
+  import logging
+  from mbt.portfolio import _HistoricalPanelSelectorDataProvider
+  from mbt.select.panel import Panel
+
+  df = pl.DataFrame({
+    "close": [10.0, 11.0],
+    "f001": [1.0, 2.0],
+  })
+  panel = Panel(df, ["SH600000"], 2)
+
+  # When backtest was NOT loaded with fin_only_year (fin_only_year=False),
+  # requesting fin_only_year=True with fin_fields triggers a warning
+  dp_slice = _HistoricalPanelSelectorDataProvider(panel, fin_only_year=False)
+  with caplog.at_level(logging.WARNING):
+    dp_slice.load_snapshot(["SH600000"], fin_fields=["f001"], fin_only_year=True)
+  assert any("requested fin_only_year=True with fin_fields" in rec.message for rec in caplog.records)
+
+  # When backtest WAS loaded with fin_only_year=True, no warning
+  caplog.clear()
+  dp_slice_ok = _HistoricalPanelSelectorDataProvider(panel, fin_only_year=True)
+  with caplog.at_level(logging.WARNING):
+    dp_slice_ok.load_snapshot(["SH600000"], fin_fields=["f001"], fin_only_year=True)
+  assert not any("requested fin_only_year=True with fin_fields" in rec.message for rec in caplog.records)
+
+

@@ -213,6 +213,9 @@ def test_portfolio_markdown_summary_with_trades():
   assert np.isclose(trades[1]["profit_amount"], 20000.0)
 
   reports = build_portfolio_report(dp, acc)
+  assert reports[0].trade_count == len(acc.records) == 3
+  assert reports[0].rebalance_count == 2
+  assert "rebalance_count" in reports[0].metrics()
   md = build_markdown_summary(reports)
 
   assert "## Rebalance Records" in md

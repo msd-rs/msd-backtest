@@ -88,3 +88,30 @@ class MyStrategy(mbt.Strategy):
   req = RunRequest(code, ["SH600000"], start="2025-01-01", end="2025-01-15")
   assert getattr(req.strategy, "fin_fields", None) == ["f001", "f007"]
   assert req.fin_fields is None
+
+
+def test_run_request_fin_only_year():
+  from mbt.run.backend import RunRequest
+  code = """
+import mbt
+
+class MyStrategy(mbt.Strategy):
+  fin_only_year = True
+  def execute(self, ctx):
+    pass
+"""
+  req = RunRequest(code, ["SH600000"], start="2025-01-01", end="2025-01-15")
+  assert getattr(req.strategy, "fin_only_year", False) is True
+
+  # Also test from_json
+  import json
+  data = json.dumps({
+    "strategy": code,
+    "objs": ["SH600000"],
+    "start": "2025-01-01",
+    "end": "2025-01-15",
+    "fin_only_year": True,
+  })
+  req_json = RunRequest.from_json(data)
+  assert req_json.fin_only_year is True
+

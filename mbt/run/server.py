@@ -34,6 +34,7 @@ class RunRequestModel(BaseModel):
   end: str
   args: Optional[List] = None
   fin_fields: Optional[List[str]] = None
+  fin_only_year: bool = False
 
 
 
@@ -53,10 +54,16 @@ async def run_backtest(req_model: RunRequestModel):
       # RunRequest constructor expects strategy as (str | IO | Strategy)
       strategy_obj = RunRequest.load_strategy(req_model.strategy, args=req_model.args)
       fin_fields = req_model.fin_fields or getattr(strategy_obj, "fin_fields", None)
+      fin_only_year = req_model.fin_only_year or getattr(strategy_obj, "fin_only_year", False)
 
       logger.info(f"Loading data from {DEFAULT_MSD_HOST} for {req_model.objs}")
       dp, objs = load_data(
-        DEFAULT_MSD_HOST, req_model.objs, req_model.start, req_model.end, fin_fields=fin_fields
+        DEFAULT_MSD_HOST,
+        req_model.objs,
+        req_model.start,
+        req_model.end,
+        fin_fields=fin_fields,
+        fin_only_year=fin_only_year,
       )
 
       if "ts" not in dp.data or len(dp.dates) == 0:

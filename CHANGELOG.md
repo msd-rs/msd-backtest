@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.1.18] - 2026-11-09
+
+- financial alignment: backtest data supports `fin_only_year` to align annual report criteria between static universe selection and in-backtest dynamic selection
+- lookahead prevention: calling `ctx.panel()` during `execute()` warns of future bar access; added `ctx.slice_panel()` and `ctx.panel(sliced=True)`
+- portfolio report metrics: `trade_count` now reflects actual executed trade records, added `rebalance_count` for rebalance bars, and clarified benchmark vs pool buy-and-hold returns
+- portfolio rebalance tolerance: added `tolerance` parameter to `rebalance()` and `PortfolioAccount` to suppress micro-trades within tolerance band
+
 ## [0.1.17] - 2026-11-09
 
 ### Added

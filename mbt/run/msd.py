@@ -32,6 +32,7 @@ def load_data(
   start: str,
   end: str,
   fin_fields: list[str] | str | None = None,
+  fin_only_year: bool = False,
 ) -> tuple[DataProvider, list[str]]:
   """
   create a DataProvider for backtesting from msd database.
@@ -43,6 +44,7 @@ def load_data(
     end: end date
     fin_fields: financial fields to query from stock_financial. If not provided,
       queries all fields '*' by default. Specifying needed fields reduces memory consumption.
+    fin_only_year: if True, only queries annual reports (ts.month=12) from stock_financial.
 
   Returns:
     DataProvider and objs
@@ -76,6 +78,9 @@ def load_data(
       end_clause = f"ts < '{end}'"
     ts_where.append(end_clause)
     fin_ts_where.append(end_clause)
+
+  if fin_only_year:
+    fin_ts_where.append("ts.month=12")
 
   ts_cond = f"and {' and '.join(ts_where)}" if ts_where else ""
   fin_ts_cond = f"and {' and '.join(fin_ts_where)}" if fin_ts_where else ""
@@ -117,6 +122,7 @@ SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin
       data[col] = np.zeros_like(data["close"])
 
   dp = DataProvider(data, objs=objs, next_hook=next_hook_al)
+  dp.fin_only_year = fin_only_year
 
   data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)
 

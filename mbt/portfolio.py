@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Callable
+import logging
 import numpy as np
 import polars as pl
 import alpha as al
+
+logger = logging.getLogger(__name__)
 
 from .account import (
   ACTION_BUY,
@@ -56,6 +59,7 @@ class PortfolioAccount:
     unit: int = 100,
     slippage: float = 0.0,
     tradable_start: int = 0,
+    tolerance: float = 0.0,
   ):
     self.initial_cash = float(initial_cash)
     self.cash = float(initial_cash)
@@ -64,6 +68,7 @@ class PortfolioAccount:
     self.unit = unit
     self.slippage = slippage
     self.tradable_start = max(0, int(tradable_start))
+    self.tolerance = float(tolerance)
     self.deducted = 0.0
     self.records: list[PortfolioRecord] = []
 
@@ -313,7 +318,9 @@ class PortfolioAccount:
     deal_prices: np.ndarray,
     mark_prices: np.ndarray,
     limited: np.ndarray | None = None,
+    tolerance: float | None = None,
   ):
+    tol = self.tolerance if tolerance is None else float(tolerance)
     weights = np.maximum(np.nan_to_num(np.asarray(target_weights, dtype=np.float64), nan=0.0), 0.0)
     if self.tradable_start > 0:
       weights[: self.tradable_start] = 0.0
@@ -329,6 +336,21 @@ class PortfolioAccount:
 
     total_equity = self.asset
     target_values = total_equity * weights
+
+    # Apply tolerance band: keep current position value if deviation is within tolerance
+    if tol > 0.0 and total_equity > 0.0:
+      for g in range(self.tradable_start, self.groups):
+        tgt_w = weights[g]
+        # Explicit liquidation (target 0) is never suppressed
+        if tgt_w == 0.0:
+          continue
+        dp_g = deal_prices[g]
+        if np.isnan(dp_g) or dp_g <= 0:
+          continue
+        curr_val = self.positions[g].shares * dp_g
+        curr_w = curr_val / total_equity
+        if abs(tgt_w - curr_w) <= tol:
+          target_values[g] = curr_val
 
     # Pass 1: Sells first to free up cash
     for g in range(self.tradable_start, self.groups):
@@ -375,9 +397,10 @@ class PortfolioAccount:
 class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
   """In-memory SelectorDataProvider sliced at current backtest bar for SelectorStrategy."""
 
-  def __init__(self, panel_slice: Panel):
+  def __init__(self, panel_slice: Panel, fin_only_year: bool = False):
     super().__init__()
     self._panel = panel_slice
+    self._fin_only_year = fin_only_year
 
   def load_kline(
     self,
@@ -387,6 +410,12 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     fin_only_year: bool = True,
     baseline: str | None = None,
   ) -> Panel:
+    if len(fin_fields) > 0 and fin_only_year and not self._fin_only_year:
+      logger.warning(
+        "_HistoricalPanelSelectorDataProvider: load_snapshot/load_kline requested fin_only_year=True with fin_fields, "
+        "but backtest data was not loaded with fin_only_year=True (contains quarterly as-of joins). "
+        "To align data, set fin_only_year=True on your Strategy or via --fin-only-year."
+      )
     n_bars = lastN if isinstance(lastN, int) else int(lastN[0])
     n_bars = min(n_bars, self._panel.bars)
     start_bar = self._panel.bars - n_bars
@@ -411,7 +440,12 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     fin_fields: list[str] = [],
     fin_only_year: bool = True,
   ) -> pl.DataFrame:
-    p = self.load_kline(objs, lastN=1)
+    p = self.load_kline(
+      objs,
+      lastN=1,
+      fin_fields=fin_fields,
+      fin_only_year=fin_only_year,
+    )
     cols = {col: p.last(col) for col in p.frame.columns}
     return p.cross_section(**cols)
 
@@ -425,10 +459,12 @@ class PortfolioContext(Context):
     self._obj_to_group = account._obj_to_group
     self.universe: set[str] | None = None
     self._full_panel: Panel | None = None
+    self._in_execute = False
     n = len(self.dp.dates)
     self.buy_percents = np.zeros(n, dtype=np.float64)
     self.sell_percents = np.zeros(n, dtype=np.float64)
     self.target_weights = np.full((self.dp.bars, self.dp.groups), np.nan, dtype=np.float64)
+    self.target_tolerances = np.full(self.dp.bars, np.nan, dtype=np.float64)
     self._group_offsets = np.arange(self.dp.groups, dtype=np.int64) * self.dp.bars
 
   def set_universe(self, objs: list[str] | set[str] | None):
@@ -467,7 +503,8 @@ class PortfolioContext(Context):
     sub_panel = self.slice_panel(lastN=lastN)
     with sub_panel.ctx():
       if isinstance(selector, Selector):
-        dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel)
+        fin_only_year = getattr(self.dp, "fin_only_year", False)
+        dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel, fin_only_year=fin_only_year)
         return selector.execute(dp_slice, list(sub_panel.objs))
       return selector(sub_panel)
 
@@ -490,7 +527,15 @@ class PortfolioContext(Context):
   def n_objs(self) -> int:
     return self.dp.groups
 
-  def panel(self) -> Panel:
+  def panel(self, allow_future: bool = False, sliced: bool = False) -> Panel:
+    if sliced:
+      return self.slice_panel(lastN=self.dp.i + 1)
+    if self._in_execute and not allow_future:
+      logger.warning(
+        "Calling ctx.panel() during execute() returns the full-range panel with future bars. "
+        "To avoid lookahead bias, use ctx.slice_panel(...) or ctx.panel(sliced=True), "
+        "or pass allow_future=True."
+      )
     return self.dp.to_panel()
 
   def data(self, name: str, /, obj: str | None = None) -> np.ndarray:
@@ -551,8 +596,10 @@ class PortfolioContext(Context):
     if len(active) > 0:
       self.sell_percents[active] = percent
 
-  def rebalance(self, weights: np.ndarray):
+  def rebalance(self, weights: np.ndarray, tolerance: float | None = None):
     """Set target portfolio weights for the current bar (shape: (groups,) or (groups * bars,))."""
+    if tolerance is not None:
+      self.target_tolerances[self.dp.i] = float(tolerance)
     arr = np.asarray(weights, dtype=np.float64)
     ts_start = self.account.tradable_start
     if arr.ndim == 1 and len(arr) == self.dp.groups:
@@ -585,9 +632,12 @@ class PortfolioRunner:
     /,
     exec_mode: str = "close",
     check_limit: bool = True,
+    tolerance: float = 0.0,
   ):
     if exec_mode not in ("close", "next_open"):
       raise ValueError(f"unsupported exec_mode: {exec_mode}, expected 'close' or 'next_open'")
+    if tolerance > 0.0:
+      account.tolerance = float(tolerance)
     self.ctx = PortfolioContext(account)
     self.exec_mode = exec_mode
     self.check_limit = check_limit
@@ -620,58 +670,64 @@ class PortfolioRunner:
     acc.update_mark_to_market(0, prices[offsets])
 
     bar_ctx = al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
-    with bar_ctx:
-      for i in dp:
-        bar_ctx.end = i + 1
-        bar_ctx.apply()
-        strategy.execute(self.ctx)
-        acc.apply_corporate_actions(i)
+    self.ctx._in_execute = True
+    try:
+      with bar_ctx:
+        for i in dp:
+          bar_ctx.end = i + 1
+          bar_ctx.apply()
+          strategy.execute(self.ctx)
+          acc.apply_corporate_actions(i)
 
-        sig_i = i - 1 if self.exec_mode == "next_open" else i
-        idx_now = offsets + i
-        mark_p = prices[idx_now]
-        deal_p = deal_prices_all[idx_now]
-        lim_now = limited_all[idx_now] if limited_all is not None else None
+          sig_i = i - 1 if self.exec_mode == "next_open" else i
+          idx_now = offsets + i
+          mark_p = prices[idx_now]
+          deal_p = deal_prices_all[idx_now]
+          lim_now = limited_all[idx_now] if limited_all is not None else None
 
-        if sig_i < 0:
+          if sig_i < 0:
+            acc.update_mark_to_market(i, mark_p)
+            continue
+
+          # 1. Check if explicit target_weights were provided at sig_i
+          tgt_w = self.ctx.target_weights[sig_i]
+          if not np.all(np.isnan(tgt_w)):
+            step_tol = self.ctx.target_tolerances[sig_i]
+            tol_val = None if np.isnan(step_tol) else float(step_tol)
+            acc.rebalance_step(i, tgt_w, deal_p, mark_p, lim_now, tolerance=tol_val)
+            continue
+
+          # 2. Otherwise process buy/sell signals on shared cash pool
+          idx_sig = offsets + sig_i
+          sell_p = self.ctx.sell_percents[idx_sig]
+          buy_p = self.ctx.buy_percents[idx_sig]
+
+          # Execute sells first
+          for g in range(acc.tradable_start, dp.groups):
+            if sell_p[g] > 0:
+              if lim_now is not None and lim_now[g] == -1:
+                continue
+              shares_to_sell = acc.positions[g].shares * sell_p[g]
+              if sell_p[g] < 1.0:
+                shares_to_sell = float(int(shares_to_sell) - (int(shares_to_sell) % acc.unit))
+              acc._sell_group(g, i, shares_to_sell, deal_p[g])
+
+          # Execute buys sharing available cash across active buy signals
+          buy_groups = [
+            g
+            for g in range(acc.tradable_start, dp.groups)
+            if buy_p[g] > 0 and (lim_now is None or lim_now[g] != 1)
+          ]
+          if len(buy_groups) > 0 and acc.cash > 0:
+            total_req = sum(buy_p[g] for g in buy_groups)
+            alloc_cash = acc.cash * min(1.0, total_req)
+            for g in buy_groups:
+              budget = alloc_cash * (buy_p[g] / total_req)
+              acc._buy_group(g, i, budget, deal_p[g])
+
           acc.update_mark_to_market(i, mark_p)
-          continue
-
-        # 1. Check if explicit target_weights were provided at sig_i
-        tgt_w = self.ctx.target_weights[sig_i]
-        if not np.all(np.isnan(tgt_w)):
-          acc.rebalance_step(i, tgt_w, deal_p, mark_p, lim_now)
-          continue
-
-        # 2. Otherwise process buy/sell signals on shared cash pool
-        idx_sig = offsets + sig_i
-        sell_p = self.ctx.sell_percents[idx_sig]
-        buy_p = self.ctx.buy_percents[idx_sig]
-
-        # Execute sells first
-        for g in range(acc.tradable_start, dp.groups):
-          if sell_p[g] > 0:
-            if lim_now is not None and lim_now[g] == -1:
-              continue
-            shares_to_sell = acc.positions[g].shares * sell_p[g]
-            if sell_p[g] < 1.0:
-              shares_to_sell = float(int(shares_to_sell) - (int(shares_to_sell) % acc.unit))
-            acc._sell_group(g, i, shares_to_sell, deal_p[g])
-
-        # Execute buys sharing available cash across active buy signals
-        buy_groups = [
-          g
-          for g in range(acc.tradable_start, dp.groups)
-          if buy_p[g] > 0 and (lim_now is None or lim_now[g] != 1)
-        ]
-        if len(buy_groups) > 0 and acc.cash > 0:
-          total_req = sum(buy_p[g] for g in buy_groups)
-          alloc_cash = acc.cash * min(1.0, total_req)
-          for g in buy_groups:
-            budget = alloc_cash * (buy_p[g] / total_req)
-            acc._buy_group(g, i, budget, deal_p[g])
-
-        acc.update_mark_to_market(i, mark_p)
+    finally:
+      self.ctx._in_execute = False
 
 
 class SelectorStrategy(PortfolioStrategy):
@@ -711,7 +767,8 @@ class SelectorStrategy(PortfolioStrategy):
     sub_panel = self._slice_panel(i + 1)
     with sub_panel.ctx():
       if isinstance(self.selector, Selector):
-        dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel)
+        fin_only_year = getattr(ctx.dp, "fin_only_year", False)
+        dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel, fin_only_year=fin_only_year)
         selected = self.selector.execute(dp_slice, list(sub_panel.objs))
       else:
         selected = self.selector(sub_panel)

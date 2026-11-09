@@ -36,6 +36,7 @@ class Report:
   benchmark_profit: float
   fee_rate: float
   trade_count: int
+  rebalance_count: int = 0
   
 
   def __init__(self, obj: str, dp: DataProvider , account: Account ):
@@ -96,6 +97,7 @@ class Report:
     r.benchmark_profit = d.get('benchmark_profit', 0.0)
     r.fee_rate = d.get('fee_rate', 0.0)
     r.trade_count = d.get('trade_count', 0)
+    r.rebalance_count = d.get('rebalance_count', r.trade_count)
 
     return r    
     
@@ -252,6 +254,7 @@ class Report:
     )
     self.fee_rate = np.round(account.deducted / account.initial_cash, 4)
     self.trade_count = len(trade_profits)
+    self.rebalance_count = self.trade_count
     
 
   def metrics(self, with_obj: bool = False) -> dict:
@@ -274,6 +277,7 @@ class Report:
       "profit_factor": self.profit_factor,
       "fee_rate": self.fee_rate,
       "trade_count": self.trade_count,
+      "rebalance_count": self.rebalance_count,
     }
     if not with_obj:
       del d["obj"]
@@ -451,7 +455,9 @@ def build_portfolio_report(
     else float(np.round(benchmark[-1], 4))
   )
   r.fee_rate = float(np.round(account.deducted / account.initial_cash, 4)) if account.initial_cash > 0 else 0.0
-  r.trade_count = trade_bars
+  records = getattr(account, "records", [])
+  r.trade_count = len(records) if len(records) > 0 else trade_bars
+  r.rebalance_count = trade_bars
 
   return [r]
 
@@ -486,6 +492,7 @@ SUMMARY_METRICS = [
   "profit_factor",
   "fee_rate",
   "trade_count",
+  "rebalance_count",
 ]
 
 
@@ -618,11 +625,14 @@ def build_markdown_summary(
     1 for r in reports if r.profit > float(getattr(r, "benchmark_profit", 0.0))
   )
 
+  is_portfolio = (total == 1 and reports[0].obj == "PORTFOLIO") or (getattr(reports[0], "records", None) is not None)
+  pool_note = " (Pool Buy&Hold)" if is_portfolio else ""
+
   lines = [
     "# Backtest Summary",
     "",
     f"- **Total Objs**: {total} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)",
-    f"- **Positive Profit**: {pos_profit} ({pos_profit / total * 100:.2f}%) | **Beat Buy&Hold**: {beat_hold} ({beat_hold / total * 100:.2f}%)",
+    f"- **Positive Profit**: {pos_profit} ({pos_profit / total * 100:.2f}%) | **Beat Buy&Hold{pool_note}**: {beat_hold} ({beat_hold / total * 100:.2f}%)",
     f"- **Benchmark Return**: {bench_ret:.4f} ({bench_ret * 100:.2f}%) | **Beat Benchmark**: {beat_bench} ({beat_bench / total * 100:.2f}%)",
     "",
     "## Metrics Statistics",
@@ -651,12 +661,13 @@ def build_markdown_summary(
       "",
       f"## {title}",
       "",
-      "| obj | profit | profit_original | alpha | sharpe | max_drawdown | win_rate | fee_rate | trade_count |",
-      "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+      "| obj | profit | benchmark_profit | profit_original | alpha | sharpe | max_drawdown | win_rate | fee_rate | trade_count |",
+      "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     for r in subset:
+      bench_p = float(getattr(r, "benchmark_profit", 0.0))
       lines.append(
-        f"| {r.obj} | {r.profit:.4f} | {r.profit_original:.4f} | {r.alpha:.4f} | {r.sharpe:.4f} | {r.max_drawdown:.4f} | {r.win_rate:.4f} | {r.fee_rate:.4f} | {r.trade_count} |"
+        f"| {r.obj} | {r.profit:.4f} | {bench_p:.4f} | {r.profit_original:.4f} | {r.alpha:.4f} | {r.sharpe:.4f} | {r.max_drawdown:.4f} | {r.win_rate:.4f} | {r.fee_rate:.4f} | {r.trade_count} |"
       )
 
   k = min(max(1, top_k), total)

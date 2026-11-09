@@ -70,9 +70,15 @@ class Context:
     """total number of stocks/groups in the context"""
     return 0
 
-  def panel(self):
+  def panel(self, allow_future: bool = False, sliced: bool = False):
     """
     return a Panel view of the underlying data provider
+    """
+    pass
+
+  def slice_panel(self, lastN: int = 100):
+    """
+    return a Panel sliced up to the current bar (no lookahead)
     """
     pass
 
@@ -96,13 +102,15 @@ class Context:
     """
     pass
 
-  def rebalance(self, weights: np.ndarray):
+  def rebalance(self, weights: np.ndarray, tolerance: float | None = None):
     """
     rebalance portfolio holdings to target weights (used in PortfolioStrategy).
 
     Args:
       weights: 1D array of target weights per stock (shape: (groups,) or (groups * bars,)).
                Non-negative values; if sum > 1.0, weights are automatically normalized to sum to 1.0.
+      tolerance: optional tolerance band (e.g. 0.01 for 1%). If position weight deviation
+                 from target is within tolerance, no trade is executed.
     """
     pass
 
@@ -112,6 +120,7 @@ class Strategy:
 
   portfolio: bool = False
   fin_fields: list[str] | None = None
+  fin_only_year: bool = False
 
   def prepare(self, ctx: Context):
     """

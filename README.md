@@ -95,11 +95,11 @@ class MyStrategy(Strategy):
 
 ## 🧠 AI 辅助策略编写
 
-本项目深度集成 AI 辅助开发流程。利用 [write_strategy](.agents/skills/write-strategy/SKILL.md) 技能，AI 可以根据用户描述自动生成符合规范的策略代码。
+本项目深度集成 AI 辅助开发流程。利用 [msd-strategy-guide](.agents/skills/msd-strategy-guide/SKILL.md) 技能，AI 可以根据用户描述自动生成符合规范的策略代码。
 
 ### 核心方法与目标
 - **目标：** 通过自然语言描述，由 AI 生成高效、可运行的 Python 策略类。
-- **技术栈：** Python 3.11+, NumPy, `py-alpha-lib`。
+- **技术栈：** Python 3.12+, NumPy, `py-alpha-lib`。
 - **编码规范：**
   - 必须继承 `mbt.Strategy`。
   - 实现 `execute(self, ctx: mbt.Context)` 方法。

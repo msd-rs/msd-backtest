@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.16] - 2026-11-09
+
+### Refactor
+
+- Combine skills to one `msd-strategy-guide`
+- alpha lib context
+- trading strategy now can filter financial fields to reduce memory usage
 
 ## [0.1.15] - 2026-11-07
 

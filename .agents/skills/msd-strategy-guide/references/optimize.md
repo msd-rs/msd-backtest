@@ -1,11 +1,3 @@
----
-name: optimize-strategy
-description: guide user to optimize a strategy for msd backtest
-tags: [msd, strategy, backtest, optimize]
-version: 1.0
-author: elsejj
----
-
 
 # Workflow
 
@@ -37,8 +29,6 @@ author: elsejj
 
 1. Create a `strategy_file` for this round. Follow previous round's `report_file` to improve. 
 2. You can freely experiment from multiple perspectives, add constraints, use more data, test different parameters, while keeping the user's core needs in mind.
-3. Using `write-strategy` skill to write it.
-
 
 ## Do backtest
 

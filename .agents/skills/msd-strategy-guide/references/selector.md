@@ -1,25 +1,3 @@
----
-name: write-selector
-description: guide to write a selector to select stocks from some initial set
-tags: [msd, strategy, backtest]
-version: 1.0
-author: elsejj
----
-
-
-This guide will help you to write a selector to select stocks.
-
-# Technical stack
-
-Programming language: Python 3.11+
-
-
-# Preparation
-
-- Ensure `msd-backtest[cli]` be installed use project package manager.
-- When your need to run in server mode, ensure `msd-backtest[server]` is installed. Normally, server mode is not required.
-- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first. When user can't provide it, you can ask and install it by [the guide](./references/msd.md).
-
 
 # Coding Specification
 
@@ -163,7 +141,6 @@ After writing a strategy, you can run it to verify it works as expected.
 `uv run` can be omitted current workspace not using `uv` as package manager.
 
 
-
 ## alpha-lib
 
-refer to [algo.md](./references/algo.md) to see what algorithm function supported.
+refer to [algo.md](./algo.md) to see what algorithm function supported.

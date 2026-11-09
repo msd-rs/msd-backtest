@@ -1,42 +1,3 @@
----
-name: write-strategy
-description: guide user to write a strategy for msd backtest
-tags: [msd, strategy, backtest]
-version: 1.0
-author: elsejj
----
-
-
-This guide will help you to write a strategy for msd backtest.
-
-# Technical stack
-
-Programming language: Python 3.12+
-
-
-# Preparation
-
-- Ensure `msd-backtest[cli]` be installed use project package manager.
-- When your need to run in server mode, ensure `msd-backtest[server]` is installed. Normally, server mode is not required.
-- Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first. When user can't provide it, you can ask and install it by [the guide](./references/msd.md).
-- `MSD_BT_FEE` is optional. `./etc/fee.json` can be used to customize trade fees, defaulting to standard rates if omitted:
-
-```json
-[
-  {
-    "ts": 4102416000,
-    "commission_buy": 0.0015,
-    "min_commission_buy": 5.0,
-    "tax_buy": 0.001,
-    "transaction_fee_buy": 0.0001,
-    "commission_sell": 0.0015,
-    "min_commission_sell": 5.0,
-    "tax_sell": 0.0,
-    "transaction_fee_sell": 0.0
-  }
-]
-```
-more less ts item, can be more reality.
 
 
 # Coding Specification
@@ -52,6 +13,9 @@ import alpha as al
 # Other libraries can be imported as needed
 
 class Strategy(mbt.Strategy):
+
+  # Optional: declare needed financial fields to avoid loading all columns (*)
+  # fin_fields = ["f001", "f004"]
 
   def __init__(self):
     super().__init__()
@@ -78,66 +42,18 @@ class Strategy(mbt.Strategy):
     pass
 ```
 
-## Portfolio Rebalancing Strategy (`mbt.PortfolioStrategy`)
 
-When the strategy needs to manage a **multi-stock portfolio sharing a single cash pool** and rebalance positions across stocks (rather than testing each stock independently), subclass `mbt.PortfolioStrategy` and use `ctx.rebalance(weights)` (or `ctx.buy` / `ctx.sell`):
-
-```python
-class Strategy(mbt.PortfolioStrategy):
-
-  def __init__(self, period: int = 20, top_k: int = 5):
-    super().__init__()
-    self.period = period
-    self.top_k = top_k
-
-  def prepare(self, ctx: mbt.Context):
-    # Pre-compute momentum factor across all stocks
-    self.roc = al.ROC(ctx.close, self.period)
-
-  def execute(self, ctx: mbt.Context):
-    # Call ctx.rebalance(weights) on rebalance bars; sells are executed first to free cash for buys
-    ...
-```
-
-## Combining Selector and Strategy in a Single File
-
-A single `.py` file can define both a `Selector` (subclass of `mbt.Selector`, see `write-selector` skill) and a `Strategy` (subclass of `mbt.Strategy` or `mbt.PortfolioStrategy`):
-
-```python
-class Selector(mbt.Selector):
-  def __init__(self, min_roe: float = 15.0):
-    super().__init__()
-    self.min_roe = min_roe
-
-  def step00(self, stocks: list[str]) -> list[str]:
-    """Filter candidate stocks"""
-    ...
-
-class Strategy(mbt.Strategy):
-  def __init__(self, ma_period: int = 20):
-    super().__init__()
-    self.ma_period = ma_period
-
-  def prepare(self, ctx: mbt.Context):
-    self.ma = al.MA(ctx.close, self.ma_period)
-
-  def execute(self, ctx: mbt.Context):
-    ctx.buy(ctx.close > self.ma)
-    ctx.sell(ctx.close < self.ma)
-```
-- When running `mbt.run.cli <STRATEGY_PATH>` without `-s`, it automatically runs the `Selector` in the file first to select the stock pool, then runs `Strategy` on the selected stocks.
-- Arguments passed via `-a key=value` are automatically matched and dispatched to `Selector.__init__` and `Strategy.__init__` by parameter name.
-
-## basic logic
+## Basic logic
 
 `mbt` is optimized to run a strategy for multiple stocks's parallel, this will huge improve the backtest performance, it use
 - `alpha-lib` as factor compute library, a parallel factor building algorithms
-- `prepare(self, ctx)` lifecycle hook: called once before the bar-by-bar loop with full-range `alpha-lib` context (`start=0, end=bars`). Always pre-compute static technical indicators (such as `al.MA`, `al.MACD`, `al.RSI`) in `prepare()` so they run in `O(N * T)` instead of recomputing them inside `execute()` on every bar (`O(N * T^2)`). Use `execute(self, ctx)` for dynamic signals that depend on account state (such as `ctx.ror_hold`) or to submit precomputed signals.
+- `prepare(self, ctx)` lifecycle hook: called once before the bar-by-bar loop with full-range `alpha-lib` context (`start=0, end=bars`). Always pre-compute static technical indicators (such as `al.MA`) in `prepare()` so they run in `O(N * T)` instead of recomputing them inside `execute()` on every bar (`O(N * T^2)`). Use `execute(self, ctx)` for dynamic signals that depend on account state (such as `ctx.ror_hold`) or to submit precomputed signals.
 - `mbt.Context` hold context of strategy running, including:
   - data (`ctx.data(name)` or `ctx.<name>`)
   - stock list (`ctx.objs()`)
   - current bar index (`ctx.bar` or `ctx.step`, 0-based), total bars per stock (`ctx.bars`), and stock count (`ctx.n_objs`)
   - 2D `Panel` view (`ctx.panel()`) for multi-period resampling (`panel.resample("1W")`) and 2D array slicing (`panel.compute(...)`, `panel.column(...)`)
+- `fin_fields` parameter: MSD `stock_financial` contains hundreds of financial columns. If your strategy accesses financial data (`ctx.f001`, etc.), always define `fin_fields = ["f001", "f004", ...]` on your Strategy class. If not provided, `load_data` queries all fields `*`, which significantly increases memory usage and loading time.
 - when you to implement the `execute`, use any loop carefully, because it may too slow, vector computing should use preferentially.
 
 # Execution
@@ -173,7 +89,8 @@ After writing a strategy, you can run it to verify it works as expected.
   - `limited` used to check whether the bar had reached the daily limit. `0` for no limit, `1` for limit up, `-1` for limit down
   - `total_shares`: total shares, total stock shares, use to calculate total market capitalization etc.
   - `tradable_shares`: tradable shares, tradable stock shares, use to calculate tradable market capitalization, turnover etc.
-  - Financial fields are named like `f001` can be referred to [financial](./references/financial.md) (Note: financial records in MSD are indexed by fiscal period end date such as `03-31`, `06-30`, `09-30`, `12-31` and aligned backward to daily bars).
+  - Financial fields are named like `f001` can be referred to [financial](./financial.md) (Note: financial records in MSD are indexed by fiscal period end date such as `03-31`, `06-30`, `09-30`, `12-31` and aligned backward to daily bars).
+    > **Memory Optimization**: By default, `load_data` queries all financial columns (`*`) when `fin_fields` is not provided. To minimize memory consumption and boost load speed, always declare `fin_fields = ["f001", ...]` in your `Strategy` class.
 - `ctx.bar -> int` (alias `ctx.step -> int`)
   current 0-based bar index during `execute(ctx)`. Also `ctx.bars -> int` (total bars per stock) and `ctx.n_objs -> int` (number of stocks in context).
 - `ctx.objs() -> list[str]`
@@ -191,4 +108,4 @@ After writing a strategy, you can run it to verify it works as expected.
 
 When you need calculate any factor, you may to use alpha-lib first
 
-refer to [algo.md](./references/algo.md) to see what algorithm function supported.
+refer to [algo.md](./algo.md) to see what algorithm function supported.

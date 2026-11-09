@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 from typing import Callable
 import numpy as np
 import polars as pl
@@ -17,6 +18,30 @@ from .data_provider import DataProvider
 from .select.panel import Panel
 from .select.selector import Selector, SelectorDataProvider
 from .strategy import Context, Strategy, PortfolioStrategy
+
+
+@dataclass
+class PortfolioRecord:
+  """Record of an executed trade/rebalance in a PortfolioAccount."""
+
+  bar: int
+  ts: int
+  group: int
+  obj: str
+  action: str  # "BUY" or "SELL"
+  shares: float
+  deal_price: float
+  exec_price: float
+  amount: float
+  fee: float
+  cash: float
+  pos_shares: float
+
+  def __getitem__(self, item: str):
+    return getattr(self, item)
+
+  def to_dict(self) -> dict:
+    return asdict(self)
 
 
 class PortfolioAccount:
@@ -40,6 +65,7 @@ class PortfolioAccount:
     self.slippage = slippage
     self.tradable_start = max(0, int(tradable_start))
     self.deducted = 0.0
+    self.records: list[PortfolioRecord] = []
 
     self.groups = dp.groups
     self.bars = dp.bars
@@ -137,6 +163,25 @@ class PortfolioAccount:
     self.actions[j] = ACTION_SELL
     self.action_shares[j] = actual_shares
 
+    obj = self.dp.objs[g] if (hasattr(self.dp, "objs") and g < len(self.dp.objs)) else str(g)
+    ts_val = int(self.dates[ts]) if (len(self.dates) > 0 and ts < len(self.dates)) else ts
+    self.records.append(
+      PortfolioRecord(
+        bar=ts,
+        ts=ts_val,
+        group=g,
+        obj=obj,
+        action="SELL",
+        shares=actual_shares,
+        deal_price=float(deal_price),
+        exec_price=float(exec_price),
+        amount=float(sell_pos.value),
+        fee=float(fee),
+        cash=float(self.cash),
+        pos_shares=float(self.positions[g].shares),
+      )
+    )
+
   def _buy_group(self, g: int, ts: int, cash_budget: float, deal_price: float):
     if self.cash <= 0 or cash_budget <= 0 or np.isnan(deal_price) or deal_price <= 0:
       return
@@ -158,6 +203,50 @@ class PortfolioAccount:
     j = g * self.bars + ts
     self.actions[j] = ACTION_BUY
     self.action_shares[j] = buy_pos.shares
+
+    obj = self.dp.objs[g] if (hasattr(self.dp, "objs") and g < len(self.dp.objs)) else str(g)
+    ts_val = int(self.dates[ts]) if (len(self.dates) > 0 and ts < len(self.dates)) else ts
+    self.records.append(
+      PortfolioRecord(
+        bar=ts,
+        ts=ts_val,
+        group=g,
+        obj=obj,
+        action="BUY",
+        shares=float(buy_pos.shares),
+        deal_price=float(deal_price),
+        exec_price=float(exec_price),
+        amount=float(buy_pos.value),
+        fee=float(fee),
+        cash=float(self.cash),
+        pos_shares=float(self.positions[g].shares),
+      )
+    )
+
+  def trades_df(self) -> pl.DataFrame:
+    """Return trade and rebalance history as a Polars DataFrame."""
+    if not self.records:
+      return pl.DataFrame(
+        schema={
+          "bar": pl.Int64,
+          "ts": pl.Int64,
+          "group": pl.Int64,
+          "obj": pl.Utf8,
+          "action": pl.Utf8,
+          "shares": pl.Float64,
+          "deal_price": pl.Float64,
+          "exec_price": pl.Float64,
+          "amount": pl.Float64,
+          "fee": pl.Float64,
+          "cash": pl.Float64,
+          "pos_shares": pl.Float64,
+        }
+      )
+    return pl.DataFrame([r.to_dict() for r in self.records])
+
+  def records_df(self) -> pl.DataFrame:
+    """Alias for trades_df()."""
+    return self.trades_df()
 
   def update_mark_to_market(self, ts: int, mark_prices: np.ndarray):
     for g in range(self.groups):

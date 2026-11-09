@@ -1,8 +1,9 @@
+import datetime
+import dataclasses
 from mbt import Account
 from mbt import DataProvider
 import polars as pl
 import numpy as np
-import dataclasses
 
 
 @dataclasses.dataclass
@@ -310,6 +311,9 @@ def build_portfolio_report(
   """Build a Report for a shared-cash PortfolioAccount."""
   r = Report("", None, None)  # type: ignore
   r.obj = obj_name
+  r.account = account
+  r.records = getattr(account, "records", [])
+  r.dp = dp
   bars = dp.bars
   r.date = dp.dates[:bars] if bars > 0 else np.array([], dtype="int64")
 
@@ -485,7 +489,122 @@ SUMMARY_METRICS = [
 ]
 
 
-def build_markdown_summary(reports: list[Report], top_k: int = 10) -> str:
+def _format_date(bar: int, ts: int, dates: np.ndarray | None = None) -> str:
+  if dates is not None and 0 <= bar < len(dates):
+    d = dates[bar]
+    if isinstance(d, np.datetime64):
+      return str(d)[:10]
+    elif isinstance(d, (int, np.integer)):
+      if d > 100000000:
+        try:
+          return datetime.datetime.fromtimestamp(int(d), tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+        except Exception:
+          pass
+      return str(d)
+    return str(d)[:10]
+  if ts > 100000000:
+    try:
+      return datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+    except Exception:
+      pass
+  return str(ts)
+
+
+def extract_portfolio_trades(
+  account=None,
+  dp: DataProvider | None = None,
+  records: list | None = None,
+) -> list[dict]:
+  """Extract holding cycles (调仓记录) from a PortfolioAccount or records list."""
+  if records is None and account is not None:
+    records = getattr(account, "records", None)
+  if not records:
+    return []
+
+  dp_obj = dp or getattr(account, "dp", None)
+  bars = getattr(account, "bars", getattr(dp_obj, "bars", 0))
+  dates = dp_obj.dates[:bars] if dp_obj and hasattr(dp_obj, "dates") else None
+
+  trades_by_obj: dict[str, list] = {}
+  for r in records:
+    trades_by_obj.setdefault(r.obj, []).append(r)
+
+  cycles = []
+  positions = getattr(account, "positions", None)
+
+  for obj, recs in trades_by_obj.items():
+    g = recs[0].group
+    in_pos = False
+    entry_bar = 0
+    entry_ts = 0
+    total_buy_amount = 0.0
+    total_sell_amount = 0.0
+    total_fees = 0.0
+    curr_shares = 0.0
+
+    for r in recs:
+      if r.action == "BUY":
+        if not in_pos or curr_shares <= 0:
+          in_pos = True
+          entry_bar = r.bar
+          entry_ts = r.ts
+          total_buy_amount = 0.0
+          total_sell_amount = 0.0
+          total_fees = 0.0
+          curr_shares = 0.0
+        total_buy_amount += r.amount
+        total_fees += r.fee
+        curr_shares += r.shares
+      elif r.action == "SELL":
+        total_sell_amount += r.amount
+        total_fees += r.fee
+        curr_shares = max(0.0, curr_shares - r.shares)
+
+        if curr_shares <= 0:
+          in_pos = False
+          profit_amount = total_sell_amount - total_buy_amount - total_fees
+          cost = total_buy_amount
+          profit_rate = (profit_amount / cost) if cost > 0 else 0.0
+          cycles.append({
+            "obj": obj,
+            "entry_bar": entry_bar,
+            "entry_date": _format_date(entry_bar, entry_ts, dates),
+            "exit_bar": r.bar,
+            "exit_date": _format_date(r.bar, r.ts, dates),
+            "profit_rate": profit_rate,
+            "profit_amount": profit_amount,
+          })
+          total_buy_amount = 0.0
+          total_sell_amount = 0.0
+          total_fees = 0.0
+
+    if in_pos and curr_shares > 0:
+      pos_price = 0.0
+      if positions and g < len(positions):
+        pos_price = positions[g].price
+      elif recs:
+        pos_price = recs[-1].deal_price
+      mark_val = curr_shares * pos_price
+      profit_amount = total_sell_amount + mark_val - total_buy_amount - total_fees
+      cost = total_buy_amount
+      profit_rate = (profit_amount / cost) if cost > 0 else 0.0
+      cycles.append({
+        "obj": obj,
+        "entry_bar": entry_bar,
+        "entry_date": _format_date(entry_bar, entry_ts, dates),
+        "exit_bar": bars - 1 if bars > 0 else entry_bar,
+        "exit_date": "Holding",
+        "profit_rate": profit_rate,
+        "profit_amount": profit_amount,
+      })
+
+  cycles.sort(key=lambda x: (x["entry_bar"], x["obj"]))
+  return cycles
+
+
+def build_markdown_summary(
+  reports: list[Report], top_k: int = 10, account=None
+) -> str:
   """Build a compact Markdown statistical summary of backtest reports for humans and AI Agents."""
   total = len(reports)
   if total == 0:
@@ -541,12 +660,43 @@ def build_markdown_summary(reports: list[Report], top_k: int = 10) -> str:
       )
 
   k = min(max(1, top_k), total)
-  sorted_desc = sorted(reports, key=lambda x: x.profit, reverse=True)
-  _format_obj_table(f"Top {k} Objs (by profit)", sorted_desc[:k])
 
-  if total > 1:
+  if k > 1:
+    sorted_desc = sorted(reports, key=lambda x: x.profit, reverse=True)
+    _format_obj_table(f"Top {k} Objs (by profit)", sorted_desc[:k])
     sorted_asc = sorted(reports, key=lambda x: x.profit)
     _format_obj_table(f"Bottom {k} Objs (by profit)", sorted_asc[:k])
+
+  # 调仓记录 (Rebalance Records) for Portfolio strategies
+  acc = account
+  if acc is None and len(reports) > 0:
+    acc = getattr(reports[0], "account", None)
+
+  records = getattr(acc, "records", None) if acc else None
+  if records is None and len(reports) > 0:
+    records = getattr(reports[0], "records", None)
+
+  is_portfolio = (total == 1 and reports[0].obj == "PORTFOLIO") or (records is not None)
+  if is_portfolio and (acc is not None or records is not None):
+    dp_ref = getattr(acc, "dp", None) if acc else getattr(reports[0], "dp", None)
+    trades = extract_portfolio_trades(account=acc, dp=dp_ref, records=records)
+    lines.extend([
+      "",
+      "## Rebalance Records",
+      "",
+      "| obj | in | out | hold profit |",
+      "| :--- | :--- | :--- | ---: |",
+    ])
+    if trades:
+      for t in trades:
+        rate_str = f"{t['profit_rate']:+.2%}" if abs(t['profit_rate']) >= 1e-9 else "0.00%"
+        amt_str = f"{t['profit_amount']:+,.2f}" if abs(t['profit_amount']) >= 1e-9 else "0.00"
+        profit_str = f"{rate_str} ({amt_str})"
+        lines.append(
+          f"| {t['obj']} | {t['entry_date']} | {t['exit_date']} | {profit_str} |"
+        )
+    else:
+      lines.append("| - | - | - | - |")
 
   return "\n".join(lines) + "\n"
 

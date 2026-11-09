@@ -165,3 +165,58 @@ def test_build_markdown_summary():
   assert "| SH600000 | 0.2500 |" in md
   assert "| SZ000001 | -0.0500 |" in md
 
+
+def test_portfolio_markdown_summary_with_trades():
+  from mbt import PortfolioAccount, PortfolioContext, PortfolioRunner, Strategy
+  from mbt.run.report import build_portfolio_report, build_markdown_summary, extract_portfolio_trades
+
+  prices_a = np.array([10.0, 20.0, 20.0, 20.0])
+  prices_b = np.array([10.0, 10.0, 10.0, 30.0])
+  prices = np.concatenate([prices_a, prices_b])
+
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(4), 2),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(8),
+      "transfer_shares": np.zeros(8),
+      "right_shares": np.zeros(8),
+      "right_price": np.zeros(8),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class RotateStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):  # type: ignore[override]
+      if ctx.dp.i == 1:
+        ctx.rebalance(np.array([1.0, 0.0]))
+      elif ctx.dp.i == 2:
+        ctx.rebalance(np.array([0.0, 1.0]))
+
+  acc = PortfolioAccount(10000.0, dp)
+  runner = PortfolioRunner(acc)
+  runner.run(RotateStrategy())
+
+  trades = extract_portfolio_trades(account=acc)
+  assert len(trades) == 2
+  assert trades[0]["obj"] == "SH600000"
+  assert trades[0]["entry_bar"] == 1
+  assert trades[0]["exit_bar"] == 2
+  assert np.isclose(trades[0]["profit_rate"], 0.0)
+
+  assert trades[1]["obj"] == "SZ000001"
+  assert trades[1]["entry_bar"] == 2
+  assert trades[1]["exit_date"] == "持仓中"
+  assert np.isclose(trades[1]["profit_rate"], 2.0)
+  assert np.isclose(trades[1]["profit_amount"], 20000.0)
+
+  reports = build_portfolio_report(dp, acc)
+  md = build_markdown_summary(reports)
+
+  assert "## 调仓记录" in md
+  assert "| obj | 调入时间 | 调出时间 | 其持有盈利 |" in md
+  assert "| SH600000 | 1 | 2 | 0.00% (0.00) |" in md
+  assert "| SZ000001 | 2 | 持仓中 | +200.00% (+20,000.00) |" in md
+

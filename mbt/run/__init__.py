@@ -5,6 +5,7 @@ from .report import (
   build_portfolio_report,
   build_json_report,
   build_markdown_summary,
+  extract_portfolio_trades,
 )
 from .backend import RunRequest
 
@@ -14,5 +15,6 @@ __all__ = [
   "build_portfolio_report",
   "build_json_report",
   "build_markdown_summary",
+  "extract_portfolio_trades",
   "RunRequest",
 ]

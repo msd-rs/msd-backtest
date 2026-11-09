@@ -13,6 +13,7 @@ from .select import Selector, StaticSelector, SelectorDataProvider
 from .portfolio import (
   PortfolioAccount,
   PortfolioContext,
+  PortfolioRecord,
   PortfolioRunner,
   SelectorStrategy,
 )
@@ -31,6 +32,7 @@ __all__ = [
   "Operation",
   "PortfolioAccount",
   "PortfolioContext",
+  "PortfolioRecord",
   "PortfolioRunner",
   "PortfolioStrategy",
   "Position",

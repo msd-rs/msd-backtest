@@ -4,6 +4,7 @@ from mbt import (
   DataProvider,
   PortfolioAccount,
   PortfolioContext,
+  PortfolioRecord,
   PortfolioRunner,
   Selector,
   SelectorStrategy,
@@ -171,4 +172,83 @@ class MyPortfolioStrategy(mbt.PortfolioStrategy):
   assert len(reports) == 1
   assert reports[0].obj == "PORTFOLIO"
   assert np.isclose(reports[0].profit, (10000 * 15.0 + 5000 * 24.0) / 200000.0 - 1.0)
+
+
+def test_portfolio_records_and_trades_df():
+  prices_a = np.array([10.0, 20.0, 20.0, 20.0])
+  prices_b = np.array([10.0, 10.0, 10.0, 30.0])
+  prices = np.concatenate([prices_a, prices_b])
+
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(4), 2),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(8),
+      "transfer_shares": np.zeros(8),
+      "right_shares": np.zeros(8),
+      "right_price": np.zeros(8),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class RotateStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):  # type: ignore[override]
+      if ctx.dp.i == 1:
+        ctx.rebalance(np.array([1.0, 0.0]))
+      elif ctx.dp.i == 2:
+        ctx.rebalance(np.array([0.0, 1.0]))
+
+  acc = PortfolioAccount(10000.0, dp)
+  # Empty before run
+  assert len(acc.records) == 0
+  empty_df = acc.trades_df()
+  assert empty_df.shape == (0, 12)
+  assert "obj" in empty_df.columns
+  assert "action" in empty_df.columns
+
+  runner = PortfolioRunner(acc)
+  runner.run(RotateStrategy())
+
+  assert len(acc.records) == 3
+
+  # Trade 1: Buy SH600000 at bar 1
+  r0 = acc.records[0]
+  assert isinstance(r0, PortfolioRecord)
+  assert r0.bar == 1
+  assert r0.obj == "SH600000"
+  assert r0.action == "BUY"
+  assert r0.shares == 500.0
+  assert r0.deal_price == 20.0
+  assert r0.amount == 10000.0
+  assert r0["obj"] == "SH600000"
+
+  # Trade 2: Sell SH600000 at bar 2
+  r1 = acc.records[1]
+  assert r1.bar == 2
+  assert r1.obj == "SH600000"
+  assert r1.action == "SELL"
+  assert r1.shares == 500.0
+  assert r1.deal_price == 20.0
+  assert r1.amount == 10000.0
+
+  # Trade 3: Buy SZ000001 at bar 2
+  r2 = acc.records[2]
+  assert r2.bar == 2
+  assert r2.obj == "SZ000001"
+  assert r2.action == "BUY"
+  assert r2.shares == 1000.0
+  assert r2.deal_price == 10.0
+  assert r2.amount == 10000.0
+
+  df = acc.trades_df()
+  assert df.shape == (3, 12)
+  assert df["action"].to_list() == ["BUY", "SELL", "BUY"]
+  assert df["obj"].to_list() == ["SH600000", "SH600000", "SZ000001"]
+  assert df["shares"].to_list() == [500.0, 500.0, 1000.0]
+
+  # Test alias records_df
+  df_alias = acc.records_df()
+  assert df_alias.equals(df)
 

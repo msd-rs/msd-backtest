@@ -208,15 +208,15 @@ def test_portfolio_markdown_summary_with_trades():
 
   assert trades[1]["obj"] == "SZ000001"
   assert trades[1]["entry_bar"] == 2
-  assert trades[1]["exit_date"] == "持仓中"
+  assert trades[1]["exit_date"] == "Holding"
   assert np.isclose(trades[1]["profit_rate"], 2.0)
   assert np.isclose(trades[1]["profit_amount"], 20000.0)
 
   reports = build_portfolio_report(dp, acc)
   md = build_markdown_summary(reports)
 
-  assert "## 调仓记录" in md
-  assert "| obj | 调入时间 | 调出时间 | 其持有盈利 |" in md
+  assert "## Rebalance Records" in md
+  assert "| obj | Entry | Exit | Hold profit |" in md
   assert "| SH600000 | 1 | 2 | 0.00% (0.00) |" in md
-  assert "| SZ000001 | 2 | 持仓中 | +200.00% (+20,000.00) |" in md
+  assert "| SZ000001 | 2 | Holding | +200.00% (+20,000.00) |" in md
 

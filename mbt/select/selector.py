@@ -82,8 +82,8 @@ class SelectorDataProvider:
       It still unpacks as the legacy triple `(data, objs, bars)`.
 
     Notes:
-      * This method calls `alpha.set_ctx()` internally; if you call alpha
-        functions afterwards, re-enter the context via `panel.ctx()`.
+      * This method manages its calculations with `alpha.Context`; if you call alpha
+        functions on the returned data, enter the context via `panel.ctx()`.
       * For performance, use py-alpha-lib on the whole block; avoid per-obj
         Python loops.
     """

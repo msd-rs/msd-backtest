@@ -33,6 +33,7 @@ class RunRequestModel(BaseModel):
   start: str
   end: str
   args: Optional[List] = None
+  fin_fields: Optional[List[str]] = None
 
 
 
@@ -48,9 +49,14 @@ async def run_backtest(req_model: RunRequestModel):
     # but RunRequest handles it.
 
     with _BACKTEST_LOCK:
+      # Load the strategy using backend logic
+      # RunRequest constructor expects strategy as (str | IO | Strategy)
+      strategy_obj = RunRequest.load_strategy(req_model.strategy, args=req_model.args)
+      fin_fields = req_model.fin_fields or getattr(strategy_obj, "fin_fields", None)
+
       logger.info(f"Loading data from {DEFAULT_MSD_HOST} for {req_model.objs}")
       dp, objs = load_data(
-        DEFAULT_MSD_HOST, req_model.objs, req_model.start, req_model.end
+        DEFAULT_MSD_HOST, req_model.objs, req_model.start, req_model.end, fin_fields=fin_fields
       )
 
       if "ts" not in dp.data or len(dp.dates) == 0:
@@ -63,10 +69,6 @@ async def run_backtest(req_model: RunRequestModel):
       # Initialize Account and Runner
       account = Account(10000.0, dp, fee=DEFAULT_FEE)
       runner = Runner(account)
-
-      # Load the strategy using backend logic
-      # RunRequest constructor expects strategy as (str | IO | Strategy)
-      strategy_obj = RunRequest.load_strategy(req_model.strategy, args=req_model.args)
 
       logger.info("Running strategy...")
       runner.run(strategy_obj)

@@ -115,10 +115,9 @@ class Runner:
       return
 
     # 1. Pre-calculation phase: full bar range so static indicators run in O(N * T)
-    al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars)
-    strategy.prepare(self.ctx)
+    with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
+      strategy.prepare(self.ctx)
     dp.reset()
-    al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
 
     prices = dp.all("price")
     if self.exec_mode == "next_open":
@@ -138,8 +137,11 @@ class Runner:
     buy_percents = self.ctx.buy_percents
     sell_percents = self.ctx.sell_percents
 
-    try:
+    bar_ctx = al.Context(groups=groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
+    with bar_ctx:
       for i in dp:
+        bar_ctx.end = i + 1
+        bar_ctx.apply()
         strategy.execute(self.ctx)
         sig_offset = i - 1 if self.exec_mode == "next_open" else i
         if sig_offset < 0:
@@ -188,5 +190,3 @@ class Runner:
             acc.assets[i] = acc.asset
             acc.ror[i] = acc.asset / acc.assets[0] - 1
             acc.ror_hold[i] = (acc.asset - acc.per_assets) / acc.per_assets if acc.per_assets > 0 else 0.0
-    finally:
-      al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN, start=0, end=0)

@@ -345,10 +345,9 @@ class PortfolioRunner:
     if dp.groups == 0 or dp.bars == 0:
       return
 
-    al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars)
-    strategy.prepare(self.ctx)
+    with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
+      strategy.prepare(self.ctx)
     dp.reset()
-    al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
 
     prices = dp.all("price")
     if self.exec_mode == "next_open":
@@ -367,8 +366,11 @@ class PortfolioRunner:
     # Initialize bar 0 mark-to-market
     acc.update_mark_to_market(0, prices[offsets])
 
-    try:
+    bar_ctx = al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
+    with bar_ctx:
       for i in dp:
+        bar_ctx.end = i + 1
+        bar_ctx.apply()
         strategy.execute(self.ctx)
         acc.apply_corporate_actions(i)
 
@@ -417,8 +419,6 @@ class PortfolioRunner:
             acc._buy_group(g, i, budget, deal_p[g])
 
         acc.update_mark_to_market(i, mark_p)
-    finally:
-      al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN, start=0, end=0)
 
 
 class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
@@ -500,11 +500,12 @@ class SelectorStrategy(PortfolioStrategy):
       return
 
     sub_panel = self._slice_panel(i + 1)
-    if isinstance(self.selector, Selector):
-      dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel)
-      selected = self.selector.execute(dp_slice, list(sub_panel.objs))
-    else:
-      selected = self.selector(sub_panel)
+    with sub_panel.ctx():
+      if isinstance(self.selector, Selector):
+        dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel)
+        selected = self.selector.execute(dp_slice, list(sub_panel.objs))
+      else:
+        selected = self.selector(sub_panel)
 
     if self.max_holdings is not None and len(selected) > self.max_holdings:
       selected = selected[: self.max_holdings]
@@ -517,5 +518,3 @@ class SelectorStrategy(PortfolioStrategy):
           weights[sub_panel.pick(s)] = w
 
     ctx.rebalance(weights)
-    # Restore alpha-lib context for Runner's current bar
-    al.set_ctx(groups=ctx.dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=i + 1)

@@ -288,7 +288,10 @@ def echo_reports(reports: list[Report]):
 def main():
   req, msd_host, output, fee = parse_args()
   logger.info(f"load data from {msd_host}")
-  dp, objs = load_data(msd_host, req.objs, req.start, req.end)
+  fin_fields = getattr(req, "fin_fields", None) or getattr(
+    req.strategy, "fin_fields", None
+  )
+  dp, objs = load_data(msd_host, req.objs, req.start, req.end, fin_fields=fin_fields)
   logger.info(
     f"data loaded, objs: {len(objs)}, bars per obj: {dp.bars}, total_bars: {dp.groups * dp.bars}"
   )

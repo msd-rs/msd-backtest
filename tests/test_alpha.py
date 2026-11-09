@@ -74,9 +74,9 @@ def print_result(dp: DataProvider):
 
 def main():
   dp, objs = load_data_msd(MSD_HOST, objs, "2020-01-01", "2020-12-31")
-  al.set_ctx(groups=dp.groups, flags=al.FLAG_SKIP_NAN)
-  strategy = DoubleMaStrategy(5, 20)
-  run_strategy(dp, strategy)
+  with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN):
+    strategy = DoubleMaStrategy(5, 20)
+    run_strategy(dp, strategy)
   print_result(dp)
 
 

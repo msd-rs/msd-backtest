@@ -177,26 +177,25 @@ class GrowthLargeCapMA15Selector(mbt.Selector):
           last_ma15s[sym] = float(ma15_2d[i, -1])
 
     elif isinstance(klines, dict):
-      # 设置 alpha 库单序列计算上下文
-      al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN)
+      # 设置 alpha 库单序列计算上下文，使用 al.Context 防止状态污染
+      with al.Context(groups=1, flags=al.FLAG_SKIP_NAN):
+        for sym in stocks:
+          df = klines.get(sym)
+          if df is None or len(df) < 15:
+            continue
 
-      for sym in stocks:
-        df = klines.get(sym)
-        if df is None or len(df) < 15:
-          continue
+          close = df["close"].to_numpy()
+          ma15 = al.MA(close, 15)
 
-        close = df["close"].to_numpy()
-        ma15 = al.MA(close, 15)
+          # 跌破信号：前一日收盘 >= 均线，今日收盘 < 均线
+          death_cross = al.RCROSS(close, ma15)
 
-        # 跌破信号：前一日收盘 >= 均线，今日收盘 < 均线
-        death_cross = al.RCROSS(close, ma15)
-
-        # 判断最近 break_days 天内是否有跌破信号
-        lookback = min(self.break_days, len(death_cross))
-        if death_cross[-lookback:].any():
-          selected_stocks.append(sym)
-          last_closes[sym] = close[-1]
-          last_ma15s[sym] = ma15[-1]
+          # 判断最近 break_days 天内是否有跌破信号
+          lookback = min(self.break_days, len(death_cross))
+          if death_cross[-lookback:].any():
+            selected_stocks.append(sym)
+            last_closes[sym] = close[-1]
+            last_ma15s[sym] = ma15[-1]
 
     # 更新 factors DataFrame
     if not self.factors.is_empty():

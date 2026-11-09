@@ -85,31 +85,34 @@ class Panel:
 
   # ---------------------------------------------------------------- alpha 上下文
 
-  def set_ctx(self, flags: int | None = None) -> None:
-    """设置 alpha-lib 分组上下文
-
-    groups 恒等于 n_objs, 由本对象保证, 避免调用方手写 groups 时错配
-    (错配不会报错, 只会把相邻股票串在一起计算)。
-    """
-    al.set_ctx(
+  def context(self, flags: int | None = None) -> al.Context:
+    """返回与当前 Panel 对齐的 alpha.Context 实例"""
+    return al.Context(
       groups=self.n_objs,
       flags=al.FLAG_SKIP_NAN if flags is None else flags,
       start=0,
       end=self.bars,
     )
 
+  def set_ctx(self, flags: int | None = None) -> None:
+    """设置 alpha-lib 分组上下文 (向后兼容，推荐使用 with panel.ctx())
+
+    groups 恒等于 n_objs, 由本对象保证, 避免调用方手写 groups 时错配
+    (错配不会报错, 只会把相邻股票串在一起计算)。
+    """
+    self.context(flags).apply()
+
   @contextlib.contextmanager
   def ctx(self, flags: int | None = None):
     """with panel.ctx(): 把"设置上下文"与"调用 alpha 函数"绑定在同一作用域
 
-    alpha-lib 的分组信息是进程级全局状态, 而 load_kline 会改写它, 因此每次
-    计算前都应显式落在这个上下文里:
+    使用 al.Context 上下文管理器，退出作用域时自动还原外部上下文，防止状态污染。
 
     >>> with panel.ctx():
     ...   ma = al.MA(panel.column("close"), 60)
     """
-    self.set_ctx(flags)
-    yield self
+    with self.context(flags):
+      yield self
 
   def compute(self, fn, *args, **kwargs) -> np.ndarray:
     """在正确的分组上下文里调用 alpha 函数, 并把结果还原成二维视图

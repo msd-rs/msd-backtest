@@ -5,12 +5,14 @@ import alpha as al
 from mbt.run.msd import load_data, objs_where
 
 MSD_HOST = os.environ.get("MSD_HOST", "http://localhost:50511")
+if not os.environ.get("MSD_HOST"):
+  os.environ["MSD_HOST"] = MSD_HOST
 
 
 @pytest.fixture(autouse=True)
 def reset_al_ctx():
-  yield
-  al.set_ctx(groups=1, flags=al.FLAG_SKIP_NAN, start=0, end=0)
+  with al.Context(groups=1, flags=al.FLAG_SKIP_NAN, start=0, end=0):
+    yield
 
 
 def test_objs_where():
@@ -51,3 +53,38 @@ def test_load_data_real():
   assert not np.isnan(dp.data["total_shares"][0])
   assert "f001" in dp.data
   assert not np.isnan(dp.data["f001"][0])
+  # Default (fin_fields=None) queries * so other financial fields are also present
+  assert "f002" in dp.data
+
+
+def test_load_data_with_fin_fields():
+  try:
+    dp, objs = load_data(
+      MSD_HOST, ["SH600000"], "2025-01-01", "2025-01-15", fin_fields=["f001"]
+    )
+  except Exception as e:
+    pytest.skip(f"MSD server not available: {e}")
+
+  if len(objs) == 0:
+    pytest.skip("No data returned from MSD")
+
+  assert objs == ["SH600000"]
+  assert "f001" in dp.data
+  assert not np.isnan(dp.data["f001"][0])
+  # f002 should NOT be loaded when fin_fields=["f001"]
+  assert "f002" not in dp.data
+
+
+def test_run_request_fin_fields():
+  from mbt.run.backend import RunRequest
+  code = """
+import mbt
+
+class MyStrategy(mbt.Strategy):
+  fin_fields = ["f001", "f007"]
+  def execute(self, ctx):
+    pass
+"""
+  req = RunRequest(code, ["SH600000"], start="2025-01-01", end="2025-01-15")
+  assert getattr(req.strategy, "fin_fields", None) == ["f001", "f007"]
+  assert req.fin_fields is None

@@ -67,11 +67,13 @@ class RunRequest:
     start: str,
     end: str,
     args: list | dict[str, Any] | None = None,
+    fin_fields: list[str] | str | None = None,
   ):
     self.strategy = RunRequest.load_strategy(strategy, args=args)
     self.objs = objs
     self.start = start
     self.end = end
+    self.fin_fields = fin_fields
 
   @staticmethod
   def load_strategy(
@@ -137,6 +139,7 @@ class RunRequest:
     start: str | None = None,
     end: str | None = None,
     args: list | None = None,
+    fin_fields: list[str] | str | None = None,
   ) -> "RunRequest":
     import json
 
@@ -154,4 +157,5 @@ class RunRequest:
       start=start if start is not None else config.get("start"),
       end=end if end is not None else config.get("end"),
       args=args if args is not None else config.get("args"),
+      fin_fields=fin_fields if fin_fields is not None else config.get("fin_fields"),
     )

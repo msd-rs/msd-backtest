@@ -97,53 +97,52 @@ class Strategy(mbt.Strategy):
     预计算静态技术指标与基本面估值因子。
     在 prepare 阶段将 alpha-lib 上下文扩展至完整区间 [0, bars)，以 O(N * T) 复杂度批量执行。
     """
-    al.set_ctx(groups=ctx.dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=ctx.dp.bars)
+    with al.Context(groups=ctx.dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=ctx.dp.bars):
+      close = ctx.data("close")
+      price = ctx.data("price")
 
-    close = ctx.data("close")
-    price = ctx.data("price")
+      # 1. 均线系统
+      ma20 = al.MA(close, 20)
+      ma60 = al.MA(close, 60)
+      ma5 = al.MA(close, 5)
 
-    # 1. 均线系统
-    ma20 = al.MA(close, 20)
-    ma60 = al.MA(close, 60)
-    ma5 = al.MA(close, 5)
+      # 2. 财务估值与业绩指标
+      # f003: 每股净资产 (BPS)
+      # f205: 年化净资产收益率 (ROE, %)
+      # f197: 净利润同比增长率 (%)
+      f003 = ctx.data("f003") if "f003" in ctx.dp.data else np.full_like(close, np.nan)
+      f205 = ctx.data("f205") if "f205" in ctx.dp.data else np.full_like(close, np.nan)
+      f197 = ctx.data("f197") if "f197" in ctx.dp.data else np.full_like(close, np.nan)
 
-    # 2. 财务估值与业绩指标
-    # f003: 每股净资产 (BPS)
-    # f205: 年化净资产收益率 (ROE, %)
-    # f197: 净利润同比增长率 (%)
-    f003 = ctx.data("f003") if "f003" in ctx.dp.data else np.full_like(close, np.nan)
-    f205 = ctx.data("f205") if "f205" in ctx.dp.data else np.full_like(close, np.nan)
-    f197 = ctx.data("f197") if "f197" in ctx.dp.data else np.full_like(close, np.nan)
+      # 计算市净率 PB 与市盈率 PE (PE = PB / (ROE / 100))
+      pb = np.where(f003 > 0, price / np.where(f003 > 0, f003, 1.0), np.nan)
+      roe_ratio = f205 / 100.0
+      pe = np.where((roe_ratio > 0) & (pb > 0), pb / np.where(roe_ratio > 0, roe_ratio, 1.0), np.nan)
 
-    # 计算市净率 PB 与市盈率 PE (PE = PB / (ROE / 100))
-    pb = np.where(f003 > 0, price / np.where(f003 > 0, f003, 1.0), np.nan)
-    roe_ratio = f205 / 100.0
-    pe = np.where((roe_ratio > 0) & (pb > 0), pb / np.where(roe_ratio > 0, roe_ratio, 1.0), np.nan)
+      # 3. 德瑞曼核心基本面条件：低市盈率 + 净利润同比大增 + 稳健 ROE
+      val_undervalued = (pe > 0.0) & (pe <= self.max_pe)
+      profit_strong = f197 >= self.min_profit_growth
+      roe_healthy = f205 >= self.min_roe
+      fundamental_buy = val_undervalued & profit_strong & roe_healthy
 
-    # 3. 德瑞曼核心基本面条件：低市盈率 + 净利润同比大增 + 稳健 ROE
-    val_undervalued = (pe > 0.0) & (pe <= self.max_pe)
-    profit_strong = f197 >= self.min_profit_growth
-    roe_healthy = f205 >= self.min_roe
-    fundamental_buy = val_undervalued & profit_strong & roe_healthy
+      # 4. 技术面右侧趋势确认：突破 20 日均线、MA5 上穿 MA20 或多头趋势，且位于 60 日均线上方
+      cross_ma20 = al.CROSS(close, ma20) > 0
+      cross_ma5 = al.CROSS(ma5, ma20) > 0
+      trend_up = (close > ma20) & (ma5 >= ma20)
+      technical_buy = (cross_ma20 | cross_ma5 | trend_up) & (close > ma60)
 
-    # 4. 技术面右侧趋势确认：突破 20 日均线、MA5 上穿 MA20 或多头趋势，且位于 60 日均线上方
-    cross_ma20 = al.CROSS(close, ma20) > 0
-    cross_ma5 = al.CROSS(ma5, ma20) > 0
-    trend_up = (close > ma20) & (ma5 >= ma20)
-    technical_buy = (cross_ma20 | cross_ma5 | trend_up) & (close > ma60)
+      # 综合买入信号
+      self.buy_signals = fundamental_buy & technical_buy
 
-    # 综合买入信号
-    self.buy_signals = fundamental_buy & technical_buy
+      # 5. 静态卖出条件：估值过热、业绩转弱、均线破位
+      pe_overvalued = pe > self.pe_exit
+      profit_deteriorating = f197 < 0.0
+      trend_broken = close < ma60
+      self.static_exit = pe_overvalued | profit_deteriorating | trend_broken
 
-    # 5. 静态卖出条件：估值过热、业绩转弱、均线破位
-    pe_overvalued = pe > self.pe_exit
-    profit_deteriorating = f197 < 0.0
-    trend_broken = close < ma60
-    self.static_exit = pe_overvalued | profit_deteriorating | trend_broken
-
-    # 初始化持仓最高收益率跟踪数组与上次卖出 bar 索引
-    self.peak_rors = np.full(ctx.dp.groups, np.nan)
-    self.last_sell_bars = np.full(ctx.dp.groups, -999, dtype=np.int32)
+      # 初始化持仓最高收益率跟踪数组与上次卖出 bar 索引
+      self.peak_rors = np.full(ctx.dp.groups, np.nan)
+      self.last_sell_bars = np.full(ctx.dp.groups, -999, dtype=np.int32)
 
   def execute(self, ctx: mbt.Context):
     """

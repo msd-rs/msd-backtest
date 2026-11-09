@@ -111,6 +111,7 @@ class Strategy:
   """Base class of a strategy"""
 
   portfolio: bool = False
+  fin_fields: list[str] | None = None
 
   def prepare(self, ctx: Context):
     """

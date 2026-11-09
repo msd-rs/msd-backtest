@@ -153,3 +153,46 @@ class DummyStrategy(mbt.Strategy):
   # Gracefully fell back to default fee
   assert fee.get(0).commission_buy == 0.0015
   assert fee.get(0).min_commission_buy == 5.0
+
+
+def test_fee_apply_overrides():
+  fee = Fee.default()
+  fee.apply_overrides({
+    "commission": 0.0002,
+    "min_commission": 0.0,
+    "tax": 0.0005,
+    "transaction_fee": 0.00002,
+  })
+  item = fee.get(0)
+  assert item.commission_buy == 0.0002
+  assert item.commission_sell == 0.0002
+  assert item.min_commission_buy == 0.0
+  assert item.min_commission_sell == 0.0
+  assert item.transaction_fee_buy == 0.00002
+  assert item.transaction_fee_sell == 0.00002
+  assert (item.tax_buy == 0.0005 or item.tax_sell == 0.0005)
+
+
+def test_cli_parse_args_with_fee_overrides(tmp_path, monkeypatch):
+  import sys
+
+  strat_file = tmp_path / "dummy_strat.py"
+  strat_file.write_text("import mbt\nclass S(mbt.Strategy):\n  pass\n", encoding="utf-8")
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "mbt.run.cli",
+      str(strat_file),
+      "-s",
+      "SH600000",
+      "-a",
+      "commission=0.0003",
+      "min_commission=1.0",
+    ],
+  )
+  _, _, _, fee = parse_args()
+  assert fee.get(0).commission_buy == 0.0003
+  assert fee.get(0).commission_sell == 0.0003
+  assert fee.get(0).min_commission_buy == 1.0
+  assert fee.get(0).min_commission_sell == 1.0

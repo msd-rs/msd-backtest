@@ -10,7 +10,7 @@
 # Notes
 
 - Don't create plan before review, all optimize steps are guided by backtest results.
-- If user had forgot to provide a obj list, ask to provide one, then create or copy it to workspace's `objs.txt`.
+- If user had forgot to provide a obj list or there is no `Selector`, ask to provide one, then create or copy it to workspace's `objs.txt`.
 - All variable like `${var}` in command should be replaced with actual values.
 - Don't read/write files out of the workspace, except reading `.env` file, or files user explicitly point out.
 
@@ -41,8 +41,10 @@
 
 ## Review the metrics 
 
-- Because `backtest_output_file` may be very large, never read the JSON file directly. Start from the Markdown summary printed by `-S` (or re-generate it via `uv run python -m mbt.run.review ${backtest_output_file} summary`), and use `uv run python -m mbt.run.review ${backtest_output_file}` when you need to drill down further. There are 4 sub-commands of `uv run python -m mbt.run.review ${backtest_output_file}`:
+- Because `backtest_output_file` may be very large, never read the JSON file directly. Start from the Markdown summary printed by `-S` (or re-generate it via `uv run python -m mbt.run.review ${backtest_output_file} summary`), and use `uv run python -m mbt.run.review ${backtest_output_file}` when you need to drill down further. There are 6 sub-commands of `uv run python -m mbt.run.review ${backtest_output_file}`:
   - `summary`: `python -m mbt.run.review ${backtest_output_file} summary [-l 10]` to output the Markdown statistical summary and Top/Bottom objs table.
+  - `trades`: `python -m mbt.run.review ${backtest_output_file} trades [-s ${obj}] [-l 10]` to review portfolio trade cycles (holding periods, entry/exit dates, profit rate, and profit amount), optionally filtered by obj.
+  - `attribution`: `python -m mbt.run.review ${backtest_output_file} attribution [-o desc|asc] [-l 10]` to review per-stock contribution ranking (trade count, win rate, total profit amount, capital contribution rate, and avg return), sorted by total profit.
   - `stat`: `python -m mbt.run.review ${backtest_output_file} stat` to review the statistics of the metrics in JSON format.
   - `detail`: `python -m mbt.run.review ${backtest_output_file} detail -s ${obj}` to review the detailed bar-by-bar series and metrics of a specific obj.
   - `sort`: `python -m mbt.run.review ${backtest_output_file} sort -m ${metric} [-o desc|asc] [-l 10]` to show a specific metric sorted. the metric can be any of:
@@ -58,12 +60,15 @@
     - `treynor` : the treynor ratio of the strategy.
     - `max_drawdown` : the maximum drawdown of the strategy.
     - `calmar` : the calmar ratio of the strategy.
-    - `win_rate` : the win rate of the strategy.
+    - `win_rate` : the win rate of the strategy (trade-level in portfolio mode).
+    - `trade_win_rate` : the win rate across trade cycles / holding periods.
+    - `daily_win_rate` : the bar-level return win rate.
     - `avg_win` : the average win of the strategy.
     - `avg_loss` : the average loss of the strategy.
     - `profit_factor` : the profit factor of the strategy.
     - `fee_rate` : the fee rate of the strategy.
     - `trade_count` : the trade count of the strategy.
+    - `rebalance_count` : the rebalance bar count of the strategy.
 - All review result are JSON format and printed to stdout.
 - You may run the review commands multiple times to explore the data.
 - Write a report to analyze the metrics to `report.${round_id}.md` using chinese, mention the key findings and insights.

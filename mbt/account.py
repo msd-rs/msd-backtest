@@ -207,6 +207,56 @@ class Fee:
     if len(self.config) == 0:
       self.config = [FeeItem()]
 
+  def apply_overrides(self, overrides: dict[str, Any] | None) -> None:
+    """Apply fee parameter overrides from a dict (e.g. from CLI -a arguments)."""
+    if not overrides:
+      return
+
+    applied: dict[str, float] = {}
+    for item in self.config:
+      if "commission" in overrides:
+        c = float(overrides["commission"])
+        item.commission_buy = c
+        item.commission_sell = c
+        applied["commission"] = c
+      if "min_commission" in overrides:
+        mc = float(overrides["min_commission"])
+        item.min_commission_buy = mc
+        item.min_commission_sell = mc
+        applied["min_commission"] = mc
+      if "tax" in overrides:
+        t = float(overrides["tax"])
+        if getattr(item, "tax_buy", 0.0) > 0 and getattr(item, "tax_sell", 0.0) == 0.0:
+          item.tax_buy = t
+        elif getattr(item, "tax_sell", 0.0) > 0 and getattr(item, "tax_buy", 0.0) == 0.0:
+          item.tax_sell = t
+        else:
+          item.tax_sell = t
+        applied["tax"] = t
+      if "transaction_fee" in overrides:
+        tf = float(overrides["transaction_fee"])
+        item.transaction_fee_buy = tf
+        item.transaction_fee_sell = tf
+        applied["transaction_fee"] = tf
+
+      for field in (
+        "commission_buy",
+        "commission_sell",
+        "min_commission_buy",
+        "min_commission_sell",
+        "tax_buy",
+        "tax_sell",
+        "transaction_fee_buy",
+        "transaction_fee_sell",
+      ):
+        if field in overrides:
+          val = float(overrides[field])
+          setattr(item, field, val)
+          applied[field] = val
+
+    if applied:
+      logger.info("Fee configuration overridden by parameters: %s", applied)
+
   @classmethod
   def default(cls) -> "Fee":
     """
@@ -225,53 +275,61 @@ class Fee:
     return cls([FeeItem(**item) for item in DEFAULT_FEE_CONFIG])
 
   @classmethod
-  def load(cls, config: str | Path | None = None) -> "Fee":
+  def load(
+    cls,
+    config: str | Path | None = None,
+    overrides: dict[str, Any] | None = None,
+  ) -> "Fee":
     """
-    Load Fee from a given file path or JSON string.
+    Load Fee from a given file path or JSON string, optionally applying overrides.
     If config is empty/None or file not found, fall back to default fee configuration.
     """
+    fee: "Fee"
     if not config:
-      return cls.default()
+      fee = cls.default()
+    else:
+      p = Path(config)
+      if p.is_file():
+        try:
+          fee = cls(p)
+        except Exception as e:
+          logger.warning(
+            "Failed to load fee config from %s: %s, falling back to default fee",
+            p,
+            e,
+          )
+          fee = cls.default()
+      else:
+        project_p = Path(__file__).resolve().parent.parent / p
+        if project_p.is_file():
+          try:
+            fee = cls(project_p)
+          except Exception as e:
+            logger.warning(
+              "Failed to load fee config from %s: %s, falling back to default fee",
+              project_p,
+              e,
+            )
+            fee = cls.default()
+        elif isinstance(config, str) and config.strip().startswith(("{", "[")):
+          try:
+            fee = cls(config)
+          except Exception as e:
+            logger.warning(
+              "Failed to parse fee JSON config: %s, falling back to default fee",
+              e,
+            )
+            fee = cls.default()
+        else:
+          logger.warning(
+            "Fee config '%s' not found, falling back to default fee configuration",
+            config,
+          )
+          fee = cls.default()
 
-    p = Path(config)
-    if p.is_file():
-      try:
-        return cls(p)
-      except Exception as e:
-        logger.warning(
-          "Failed to load fee config from %s: %s, falling back to default fee",
-          p,
-          e,
-        )
-        return cls.default()
-
-    project_p = Path(__file__).resolve().parent.parent / p
-    if project_p.is_file():
-      try:
-        return cls(project_p)
-      except Exception as e:
-        logger.warning(
-          "Failed to load fee config from %s: %s, falling back to default fee",
-          project_p,
-          e,
-        )
-        return cls.default()
-
-    if isinstance(config, str) and config.strip().startswith(("{", "[")):
-      try:
-        return cls(config)
-      except Exception as e:
-        logger.warning(
-          "Failed to parse fee JSON config: %s, falling back to default fee",
-          e,
-        )
-        return cls.default()
-
-    logger.warning(
-      "Fee config '%s' not found, falling back to default fee configuration",
-      config,
-    )
-    return cls.default()
+    if overrides:
+      fee.apply_overrides(overrides)
+    return fee
 
   def get(self, ts: int) -> FeeItem:
     """

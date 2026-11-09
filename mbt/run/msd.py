@@ -33,6 +33,7 @@ def load_data(
   end: str,
   fin_fields: list[str] | str | None = None,
   fin_only_year: bool = False,
+  warmup_bars: int = 0,
 ) -> tuple[DataProvider, list[str]]:
   """
   create a DataProvider for backtesting from msd database.
@@ -45,6 +46,7 @@ def load_data(
     fin_fields: financial fields to query from stock_financial. If not provided,
       queries all fields '*' by default. Specifying needed fields reduces memory consumption.
     fin_only_year: if True, only queries annual reports (ts.month=12) from stock_financial.
+    warmup_bars: number of warmup bars to load before start date for indicator initialization.
 
   Returns:
     DataProvider and objs
@@ -54,6 +56,16 @@ def load_data(
 
   client = pymsd.MsdConnection(msd_host)
 
+  target_start = start
+  query_start = start
+  if warmup_bars > 0 and start and not isinstance(start, int):
+    lookback_days = int(warmup_bars * 1.8) + 15
+    try:
+      d = datetime.date.fromisoformat(str(start)[:10])
+      query_start = (d - datetime.timedelta(days=lookback_days)).isoformat()
+    except ValueError:
+      query_start = str(start)
+
   ts_where = []
   fin_ts_where = []
   limit = ""
@@ -61,14 +73,14 @@ def load_data(
   if isinstance(start, int):
     limit = f"limit -{start}"
     fin_limit = f"limit -{max(start // 50, 8)}"
-  elif start:
-    ts_where.append(f"ts >= '{start}'")
+  elif query_start:
+    ts_where.append(f"ts >= '{query_start}'")
     try:
       fin_start = (
-        datetime.date.fromisoformat(str(start)[:10]) - datetime.timedelta(days=400)
+        datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=400)
       ).isoformat()
     except ValueError:
-      fin_start = str(start)
+      fin_start = str(query_start)
     fin_ts_where.append(f"ts >= '{fin_start}'")
 
   if end:
@@ -123,6 +135,28 @@ SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin
 
   dp = DataProvider(data, objs=objs, next_hook=next_hook_al)
   dp.fin_only_year = fin_only_year
+  dp.warmup_bars = 0
+  if warmup_bars > 0 and target_start and not isinstance(target_start, int) and dp.bars > 0:
+    first_dates = dp.dates[:dp.bars]
+    try:
+      target_str = str(target_start)[:10]
+      if isinstance(first_dates[0], (str, bytes)):
+        idx = int(np.searchsorted(first_dates, target_str))
+      else:
+        v0 = float(first_dates[0])
+        dt = datetime.datetime.fromisoformat(target_str)
+        if v0 > 1e17:
+          target_val = int(dt.timestamp() * 1e9)
+        elif v0 > 1e11:
+          target_val = int(dt.timestamp() * 1000)
+        elif v0 > 1e8:
+          target_val = int(dt.timestamp())
+        else:
+          target_val = int(target_str.replace("-", ""))
+        idx = int(np.searchsorted(first_dates, target_val))
+      dp.warmup_bars = max(0, min(idx, dp.bars))
+    except Exception:
+      dp.warmup_bars = max(0, min(int(warmup_bars), dp.bars))
 
   data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)
 

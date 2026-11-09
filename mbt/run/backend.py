@@ -43,6 +43,9 @@ def instantiate_class(cls: type, args: list | dict[str, Any] | None = None):
     isinstance(args, list)
     and all(isinstance(x, str) and "=" in x for x in args)
   ):
+    if cls.__init__ is object.__init__:
+      return cls()
+
     kwargs = parse_kv_args(args)
     sig = inspect.signature(cls.__init__)
     has_var_kw = any(

@@ -216,10 +216,106 @@ def test_portfolio_markdown_summary_with_trades():
   assert reports[0].trade_count == len(acc.records) == 3
   assert reports[0].rebalance_count == 2
   assert "rebalance_count" in reports[0].metrics()
+  assert hasattr(reports[0], "trades") and len(reports[0].trades) == 2
+  assert hasattr(reports[0], "attribution") and len(reports[0].attribution) == 2
+  assert reports[0].attribution[0]["obj"] == "SZ000001"
+  assert np.isclose(reports[0].attribution[0]["total_profit"], 20000.0)
+
+  # Check win rate separation
+  assert reports[0].trade_win_rate == 0.5  # 1 win, 1 flat (0 win) -> 1/2
+  assert reports[0].daily_win_rate > 0
+
   md = build_markdown_summary(reports)
 
+  # Single portfolio mode should produce compact Strategy Metrics without std=0 distribution noise
+  assert "## Strategy Metrics" in md
+  assert "## Metrics Statistics" not in md
+  assert "trade_win_rate (Single-Trade)" in md
+  assert "daily_win_rate (Bar-Level)" in md
+
+  # Stock Attribution section
+  assert "## Stock Attribution" in md
+  assert "| SZ000001 | 1 | 100.00% | +20,000.00 |" in md
+
+  # Rebalance Records section
   assert "## Rebalance Records" in md
   assert "| obj | Entry | Exit | Hold profit |" in md
   assert "| SH600000 | 1 | 2 | 0.00% (0.00) |" in md
   assert "| SZ000001 | 2 | Holding | +200.00% (+20,000.00) |" in md
+
+
+def test_review_cli_trades_and_attribution(tmp_path, monkeypatch, capsys):
+  import orjson
+  from mbt.run.review import main as review_main
+  from mbt.run.report import build_json_report, Report
+
+  r = Report.from_dict(
+    "PORTFOLIO",
+    {
+      "profit": 0.20,
+      "benchmark_profit": 0.05,
+      "trade_count": 2,
+      "rebalance_count": 2,
+      "trades": [
+        {
+          "obj": "SH600000",
+          "entry_bar": 0,
+          "entry_date": "2024-01-01",
+          "exit_bar": 10,
+          "exit_date": "2024-01-15",
+          "profit_rate": 0.05,
+          "profit_amount": 5000.0,
+        },
+        {
+          "obj": "SZ000001",
+          "entry_bar": 10,
+          "entry_date": "2024-01-15",
+          "exit_bar": 20,
+          "exit_date": "2024-01-30",
+          "profit_rate": -0.02,
+          "profit_amount": -2000.0,
+        },
+      ],
+      "attribution": [
+        {
+          "obj": "SH600000",
+          "trade_count": 1,
+          "win_rate": 1.0,
+          "total_profit": 5000.0,
+          "capital_contribution": 0.005,
+          "avg_return": 0.05,
+        },
+        {
+          "obj": "SZ000001",
+          "trade_count": 1,
+          "win_rate": 0.0,
+          "total_profit": -2000.0,
+          "capital_contribution": -0.002,
+          "avg_return": -0.02,
+        },
+      ],
+    },
+  )
+
+  json_file = tmp_path / "report.json"
+  json_data = build_json_report([r])
+  assert "trades" in json_data["PORTFOLIO"]
+  assert "attribution" in json_data["PORTFOLIO"]
+  json_file.write_bytes(orjson.dumps(json_data, option=orjson.OPT_SERIALIZE_NUMPY))
+
+  import sys
+  # Test review trades
+  monkeypatch.setattr(sys, "argv", ["review.py", str(json_file), "trades"])
+  review_main()
+  out_trades = capsys.readouterr().out
+  assert "SH600000" in out_trades
+  assert "5000" in out_trades
+
+  # Test review attribution
+  monkeypatch.setattr(sys, "argv", ["review.py", str(json_file), "attribution"])
+  review_main()
+  out_attrib = capsys.readouterr().out
+  assert "SH600000" in out_attrib
+  assert "SZ000001" in out_attrib
+
 

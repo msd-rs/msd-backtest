@@ -121,6 +121,7 @@ class Strategy:
   portfolio: bool = False
   fin_fields: list[str] | None = None
   fin_only_year: bool = False
+  warmup_bars: int = 0
 
   def prepare(self, ctx: Context):
     """

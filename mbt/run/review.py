@@ -1,4 +1,4 @@
-from mbt.run.report import Report, build_markdown_summary
+from mbt.run.report import Report, build_markdown_summary, compute_stock_attribution
 import orjson
 import sys
 import argparse
@@ -28,6 +28,16 @@ def parse_args():
   detail_parser = sub_commands.add_parser("detail", help="Show detail for a obj")
   detail_parser.add_argument("-s", "--obj", type=str, help="obj to show")
   detail_parser.set_defaults(func=do_detail)
+
+  trades_parser = sub_commands.add_parser("trades", help="Show trade cycles / holding periods")
+  trades_parser.add_argument("-s", "--obj", type=str, default=None, help="Filter by obj")
+  trades_parser.add_argument("-l", "--limit", type=int, default=None, help="Limit number of rows")
+  trades_parser.set_defaults(func=do_trades)
+
+  attrib_parser = sub_commands.add_parser("attribution", help="Show stock attribution / contribution ranking")
+  attrib_parser.add_argument("-l", "--limit", type=int, default=None, help="Limit number of objs")
+  attrib_parser.add_argument("-o", "--order", type=str, default="desc", choices=["desc", "asc"], help="Sort order by profit (desc/asc)")
+  attrib_parser.set_defaults(func=do_attribution)
   
   return parser.parse_args()
 
@@ -67,6 +77,38 @@ def do_sort(args):
   res = {args.metric: {r["obj"]: r["val"] for r in records}}
   print(orjson.dumps(res).decode())
   
+def do_trades(args):
+  reports = load_reports(args.report)
+  all_trades = []
+  for obj, r in reports.items():
+    trades = getattr(r, "trades", None)
+    if trades:
+      all_trades.extend(trades)
+  if args.obj:
+    all_trades = [t for t in all_trades if t.get("obj") == args.obj]
+  if args.limit:
+    all_trades = all_trades[:args.limit]
+  print(orjson.dumps(all_trades, option=orjson.OPT_INDENT_2).decode())
+
+
+def do_attribution(args):
+  reports = load_reports(args.report)
+  all_attrib = []
+  for obj, r in reports.items():
+    attrib = getattr(r, "attribution", None)
+    if attrib:
+      all_attrib.extend(attrib)
+  if not all_attrib:
+    for obj, r in reports.items():
+      trades = getattr(r, "trades", None)
+      if trades:
+        all_attrib.extend(compute_stock_attribution(trades))
+  all_attrib.sort(key=lambda x: x.get("total_profit", 0.0), reverse=args.order != "asc")
+  if args.limit:
+    all_attrib = all_attrib[:args.limit]
+  print(orjson.dumps(all_attrib, option=orjson.OPT_INDENT_2).decode())
+
+
 def load_reports(report_path: str) -> dict[str, Report]:
   with open(report_path, "r", encoding='utf-8') as f:
     data = orjson.loads(f.read())

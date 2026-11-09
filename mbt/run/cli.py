@@ -18,6 +18,7 @@ from mbt.run import (
   build_portfolio_report,
   build_json_report,
   build_markdown_summary,
+  build_multi_start_summary,
   RunRequest,
 )
 from mbt.run.msd import load_data
@@ -113,7 +114,11 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   )
   parser.add_argument("-B", "--benchmark", type=str, default=os.environ.get("MSD_BT_BENCHMARK", "SH000300"), help="Benchmark obj, env $MSD_BT_BENCHMARK")
   parser.add_argument(
-    "-b", "--begin", type=str, default=os.environ.get("MSD_BT_BEGIN", "2020-01-01"), help="Start date, env $MSD_BT_BEGIN"
+    "-b",
+    "--begin",
+    action="append",
+    default=None,
+    help="Start date(s), can be specified multiple times or comma-separated (e.g. -b 2023-01-01 -b 2024-01-01 or -b 2023-01-01,2024-01-01), env $MSD_BT_BEGIN",
   )
   parser.add_argument("-e", "--end", type=str, default=os.environ.get("MSD_BT_END", "2020-12-31"), help="End date, env $MSD_BT_END")
   parser.add_argument(
@@ -164,6 +169,24 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     default=False,
     help="only query annual financial reports (ts.month=12) from stock_financial",
   )
+  parser.add_argument(
+    "--warmup-bars",
+    type=int,
+    default=0,
+    help="warmup bars loaded before start date for indicators only (no trading)",
+  )
+  parser.add_argument(
+    "--starts",
+    type=str,
+    default=None,
+    help="comma-separated list of start dates for multi-start evaluation (deprecated, use -b instead)",
+  )
+  parser.add_argument(
+    "--holdout",
+    type=str,
+    default=None,
+    help="holdout date or duration (e.g. 2025-07-01, 180d, 1y) to evaluate In-Sample vs Out-of-Sample",
+  )
   parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
 
@@ -173,6 +196,28 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   if args.msd and not os.environ.get("MSD_HOST"):
     os.environ["MSD_HOST"] = args.msd
 
+  raw_starts: list[str] = []
+  if args.begin:
+    for item in args.begin:
+      raw_starts.extend([s.strip() for s in item.split(",") if s.strip()])
+  if args.starts:
+    raw_starts.extend([s.strip() for s in args.starts.split(",") if s.strip()])
+
+  if not raw_starts:
+    if os.environ.get("MSD_BT_BEGIN"):
+      raw_starts.extend([s.strip() for s in os.environ["MSD_BT_BEGIN"].split(",") if s.strip()])
+    else:
+      raw_starts = ["2020-01-01"]
+
+  seen_starts = set()
+  deduped_starts = []
+  for s in raw_starts:
+    if s not in seen_starts:
+      seen_starts.add(s)
+      deduped_starts.append(s)
+  raw_starts = deduped_starts
+
+  primary_start = raw_starts[0]
   kv_kwargs = parse_kv_args(args.args) if args.args else None
 
   if args.strategy.endswith(".json"):
@@ -180,7 +225,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
       req = RunRequest.from_json(
         f,
         objs=args.objs if len(args.objs) > 0 else None,
-        start=args.begin,
+        start=primary_start,
         end=args.end,
         args=kv_kwargs if kv_kwargs else args.args,
       )
@@ -189,7 +234,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
       req = RunRequest(
         f,
         args.objs,
-        start=args.begin,
+        start=primary_start,
         end=args.end,
         args=kv_kwargs if kv_kwargs else args.args,
       )
@@ -224,8 +269,15 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     or getattr(req.strategy, "fin_only_year", False)
     or getattr(req, "fin_only_year", False)
   )
+  req.warmup_bars = int(args.warmup_bars or getattr(req.strategy, "warmup_bars", 0))
+  req.starts = raw_starts if len(raw_starts) > 1 else None
+  req.holdout = args.holdout
+  req.raw_objs = raw_objs
+  req.kv_kwargs = kv_kwargs
+  req.strategy_path = args.strategy
+  req.benchmark = args.benchmark
 
-  fee = Fee.load(args.fee)
+  fee = Fee.load(args.fee, overrides=kv_kwargs)
 
   return req, args.msd, args.output, fee
 
@@ -276,6 +328,12 @@ def build_output(reports: list[Report], output: str):
       data['bw_price'] = report.bw_price
       df = pl.DataFrame(data)
       df.write_excel(workbook=wb, worksheet=report.obj)
+      if hasattr(report, "attribution") and report.attribution:
+        df_attrib = pl.DataFrame(report.attribution)
+        df_attrib.write_excel(workbook=wb, worksheet="attribution")
+      if hasattr(report, "trades") and report.trades:
+        df_trades = pl.DataFrame(report.trades)
+        df_trades.write_excel(workbook=wb, worksheet="trades")
     wb.close()
   elif ext == "json":
     data = build_json_report(reports)
@@ -296,17 +354,49 @@ def echo_reports(reports: list[Report]):
   print(orjson.dumps(metrics_list, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY).decode())
 
 
-def main():
-  req, msd_host, output, fee = parse_args()
-  logger.info(f"load data from {msd_host}")
+def run_single_period(
+  req: RunRequest,
+  msd_host: str,
+  fee: Fee,
+  start: str,
+  end: str,
+  warmup_bars: int = 0,
+) -> tuple[list[Report], DataProvider, Any]:
   fin_fields = getattr(req, "fin_fields", None) or getattr(
     req.strategy, "fin_fields", None
   )
   fin_only_year = getattr(req, "fin_only_year", False) or getattr(
     req.strategy, "fin_only_year", False
   )
+
+  selected_objs = req.objs
+  if getattr(req, "strategy_path", None) and getattr(req, "starts", None):
+    try:
+      selector, init_objs = build_selector(
+        req.raw_objs,
+        selector_kwargs=req.kv_kwargs,
+        strategy_path=req.strategy_path,
+      )
+      selector_dp = MsdSelectorDataProvider(msd_host, date=start)
+      cur_objs = list(selector.execute(selector_dp, init_objs))
+      if len(cur_objs) > 0:
+        try:
+          cur_objs.remove(req.benchmark)
+        except ValueError:
+          pass
+        cur_objs.insert(0, req.benchmark)
+        selected_objs = cur_objs
+    except Exception as e:
+      logger.warning(f"Failed to re-execute selector for start={start}: {e}")
+
   dp, objs = load_data(
-    msd_host, req.objs, req.start, req.end, fin_fields=fin_fields, fin_only_year=fin_only_year
+    msd_host,
+    selected_objs,
+    start,
+    end,
+    fin_fields=fin_fields,
+    fin_only_year=fin_only_year,
+    warmup_bars=warmup_bars,
   )
   logger.info(
     f"data loaded, objs: {len(objs)}, bars per obj: {dp.bars}, total_bars: {dp.groups * dp.bars}"
@@ -325,6 +415,7 @@ def main():
     p_runner.run(req.strategy)
     logger.info("portfolio strategy finished")
     reports = build_portfolio_report(dp, p_account)
+    return reports, dp, p_account
   else:
     init_cash = custom_cash if custom_cash is not None else 10000.0
     account = Account(init_cash, dp, fee=fee)
@@ -334,16 +425,54 @@ def main():
     runner.run(req.strategy)
     logger.info("strategy finished")
     reports = build_report(dp, runner.ctx.accounts)[1:]
+    return reports, dp, account
 
-  logger.info("report built")
+
+def main():
+  req, msd_host, output, fee = parse_args()
+  starts = getattr(req, "starts", None)
+  warmup_bars = getattr(req, "warmup_bars", 0)
+  holdout = getattr(req, "holdout", None)
   show_summary = getattr(req, "summary", False)
+
+  if starts and len(starts) > 1:
+    logger.info(f"running multi-start backtest across {len(starts)} starts: {starts}")
+    multi_runs = []
+    for st in starts:
+      logger.info(f"evaluating start: {st}")
+      reports, dp, acc = run_single_period(
+        req, msd_host, fee, st, req.end, warmup_bars=warmup_bars
+      )
+      if reports:
+        multi_runs.append({
+          "start": st,
+          "end": req.end,
+          "report": reports[0],
+          "objs": req.objs,
+        })
+
+    summary_md = build_multi_start_summary(multi_runs)
+    if len(output) > 0:
+      with open(output, "w", encoding="utf-8") as f:
+        f.write(summary_md)
+      logger.info(f"multi-start summary saved to {output}")
+    print(summary_md, end="")
+    return
+
+  logger.info(f"load data from {msd_host}")
+  reports, dp, acc = run_single_period(
+    req, msd_host, fee, req.start, req.end, warmup_bars=warmup_bars
+  )
+  logger.info("report built")
+
+  summary_text = build_markdown_summary(reports, account=acc, holdout=holdout)
   if len(output) > 0:
     build_output(reports, output)
     if show_summary:
-      print(build_markdown_summary(reports), end="")
+      print(summary_text, end="")
   else:
     if show_summary:
-      print(build_markdown_summary(reports), end="")
+      print(summary_text, end="")
     else:
       echo_reports(reports)
 

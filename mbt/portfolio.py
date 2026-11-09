@@ -685,7 +685,8 @@ class PortfolioRunner:
           deal_p = deal_prices_all[idx_now]
           lim_now = limited_all[idx_now] if limited_all is not None else None
 
-          if sig_i < 0:
+          warmup_b = getattr(dp, "warmup_bars", 0)
+          if sig_i < 0 or i < warmup_b:
             acc.update_mark_to_market(i, mark_p)
             continue
 

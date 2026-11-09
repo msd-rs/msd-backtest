@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - lookahead prevention: calling `ctx.panel()` during `execute()` warns of future bar access; added `ctx.slice_panel()` and `ctx.panel(sliced=True)`
 - portfolio report metrics: `trade_count` now reflects actual executed trade records, added `rebalance_count` for rebalance bars, and clarified benchmark vs pool buy-and-hold returns
 - portfolio rebalance tolerance: added `tolerance` parameter to `rebalance()` and `PortfolioAccount` to suppress micro-trades within tolerance band
+- warmup bars: support `--warmup-bars` (and `Strategy.warmup_bars`) to load N history bars before start date for indicator initialization without trading, reporting performance strictly from target start date
+- multi-start evaluation: support specifying multiple `-b` / `--begin` flags or comma-separated start dates (e.g. `-b 2023-01-01 -b 2024-01-01` or `-b 2023-01-01,2024-01-01`, with `--starts` preserved as a backward-compatible alias) to run batch backtests across multiple start dates and generate comparison summary tables
+- holdout guard: support `--holdout` to evaluate In-Sample vs Out-of-Sample metrics and overfit ratio
+- stock attribution & trade cycles: structured `trades` and `attribution` persisted in JSON and Excel exports; added `## Stock Attribution` table in Markdown report
+- review cli: added `trades` and `attribution` subcommands to `mbt.run.review` for easy trade history and stock contribution inspection
+- win rate clarity & adaptive summary: disambiguated `daily_win_rate` (bar-level) from `trade_win_rate` (single holding period); removed 15-row `std=0` distribution table when `total == 1` in favor of a clean 2-column `Strategy Metrics` table
+- dynamic fee override: support overriding fee parameters dynamically via `-a` (e.g. `commission=0.0002 min_commission=0 tax=0.001`) without needing temporary JSON files
 
 ## [0.1.17] - 2026-11-09
 

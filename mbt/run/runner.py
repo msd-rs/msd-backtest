@@ -171,7 +171,8 @@ class Runner:
           bar_ctx.apply()
           strategy.execute(self.ctx)
           sig_offset = i - 1 if self.exec_mode == "next_open" else i
-          if sig_offset < 0:
+          warmup_b = getattr(dp, "warmup_bars", 0)
+          if sig_offset < 0 or i < warmup_b:
             for g in range(groups):
               j = g * bars + i
               accounts[g].do_operation(i, Operation.keep(prices[j]))

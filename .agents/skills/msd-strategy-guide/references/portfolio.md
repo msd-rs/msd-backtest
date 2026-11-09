@@ -24,10 +24,12 @@ class Strategy(mbt.PortfolioStrategy):
 ## 1. Execution Flow & Rebalance Mechanism
 
 During portfolio backtesting (`PortfolioRunner`):
-1. **Target Weights**: The strategy calls `ctx.rebalance(weights)` where `weights` is an array of target percentages for each stock. If sum of weights exceeds 1.0, it is normalized to 1.0.
+1. **Target Weights & Allocation**:
+   - The strategy can call `ctx.rebalance(weights)` with target weights across stocks.
+   - Or call `ctx.buy` / `ctx.sell` with individual stock symbols or percentage signals. Cash is dynamically allocated based on available cash (`min(1.0, total_req) * cash`).
 2. **Two-Pass Execution**:
-   - **Pass 1 (Sell / 调出)**: Stocks whose current holding value exceeds the target value (or target value is 0) are sold first. Selling proceeds (minus transaction fees) immediately return to the shared `cash` pool.
-   - **Pass 2 (Buy / 调入)**: Available cash is allocated across stocks needing to increase positions. If total cash is insufficient to meet all target buys, allocations are scaled proportionally (`min(1.0, cash / deficit)`).
+   - **Pass 1 (Sell / 调出)**: Sells are executed first. Selling proceeds (minus transaction fees) immediately return to the shared `cash` pool.
+   - **Pass 2 (Buy / 调入)**: Available cash is allocated across stocks needing to increase positions. If total cash requested exceeds available cash, budgets are scaled proportionally.
 3. **Execution Constraints**:
    - **Slippage & Fees**: Buy price is adjusted up by `+slippage`, sell price down by `-slippage`. Fees are calculated dynamically based on date rules.
    - **Trading Unit**: Orders are rounded down to multiples of `unit` (default `100` shares).
@@ -35,7 +37,71 @@ During portfolio backtesting (`PortfolioRunner`):
 
 ---
 
-## 2. Trade & Rebalance History (`PortfolioRecord`)
+## 2. Dynamic Universe & Natural Liquidation (自然平仓 / Runoff Mode)
+
+In a two-layer architecture, a `Selector` periodically filters a broad universe into an active whitelist (e.g. Top 30 fundamental/momentum stocks), while daily strategy logic runs tactical trading within this dynamic pool.
+
+### Core Primitives
+
+- **Set Active Whitelist**:
+  ```python
+  ctx.set_universe(["SH600000", "SZ000001", ...])
+  ```
+- **Execute Selector Safely (No-Lookahead)**:
+  ```python
+  # Executes selector on historical slice up to current bar i (inclusive)
+  new_whitelist = ctx.run_selector(self.selector, lastN=120)
+  ctx.set_universe(new_whitelist)
+  ```
+- **Symbol-Based Trading (No Boolean Mask Required)**:
+  ```python
+  ctx.buy("SH600000", percent=0.2)             # Buy single stock with 20% budget
+  ctx.buy(["SH600000", "SZ000001"], percent=0.2)
+  ctx.sell("SH600000")                         # Sell 100% of held shares
+  ctx.sell(["SH600000", "SZ000001"])
+  ```
+- **Automatic Whitelist Guard**:
+  - `ctx.buy(...)` automatically shields any stock not in `ctx.universe` from being bought.
+  - `ctx.sell(...)` does **not** filter by whitelist, allowing stocks dropped from the universe to be gracefully liquidated.
+- **Account State Probes**:
+  ```python
+  ctx.account.held_objs                         # List of all currently held stocks: ['SH600000', ...]
+  ctx.account.has_position("SH600000")         # True if shares > 0
+  ctx.account.position("SH600000")             # Position object (shares, price, value)
+  ctx.account.runoff_objs(ctx.universe)         # Stocks held but no longer in active universe (Runoff)
+  ```
+
+### Dual-Layer Strategy Template
+
+```python
+class DualLayerStrategy(mbt.PortfolioStrategy):
+
+  def __init__(self, selector: mbt.Selector, reselect_period: int = 20):
+    super().__init__()
+    self.selector = selector
+    self.reselect_period = reselect_period
+
+  def execute(self, ctx: mbt.PortfolioContext):
+    # 1. Macro layer: Periodically refresh active whitelist
+    if ctx.bar % self.reselect_period == 0 or not ctx.universe:
+      new_pool = ctx.run_selector(self.selector, lastN=120)
+      ctx.set_universe(new_pool)
+
+    # 2. Micro layer: Daily exit & risk control (monitors ALL held stocks, including Runoff stocks)
+    for obj in ctx.account.held_objs:
+      if self.should_sell(ctx, obj):
+        ctx.sell(obj)
+
+    # 3. Micro layer: Daily entry (automatically guarded by active whitelist)
+    for obj in ctx.universe:
+      if not ctx.account.has_position(obj):
+        if self.should_buy(ctx, obj):
+          ctx.buy(obj, percent=0.2)  # Hard cash budget + Soft dynamic slots
+```
+
+---
+
+## 3. Trade & Rebalance History (`PortfolioRecord`)
 
 `PortfolioAccount` tracks every individual stock trade during rebalancing and signal execution.
 
@@ -67,7 +133,25 @@ Each `PortfolioRecord` contains the following fields:
 
 ---
 
-## 3. Analysis Examples
+## 4. Analysis & Summary Reporting
+
+### Markdown Summary Report (`## Rebalance Records`)
+
+When running with CLI `-S/--summary` or calling `build_markdown_summary(reports)` on a portfolio strategy, a dedicated **`## Rebalance Records`** section is automatically included, sorting all holding cycles by entry date:
+
+```markdown
+## Rebalance Records
+
+| obj | entry | exit | hold profit |
+| :--- | :--- | :--- | ---: |
+| SH600000 | 2020-01-06 | 2020-02-10 | +12.34% (+12,345.00) |
+| SZ000001 | 2020-02-10 | Holding | -2.50% (-2,500.00) |
+```
+
+- **Entry Time**: Position opening/portfolio inclusion date (if you continue adding to the position during the holding period, use the first purchase time).
+- **Exit Time**: Date of full liquidation/removal; if still held at the end of the backtest, display as `Holding`.
+- **Holding P&L**: Return rate and realized/unrealized P&L amount `+12.34% (+12,345.00)`, net of buy/sell commissions on both sides and slippage.
+- **Sorting**: Strictly ascending by **Entry Time**.
 
 ### Inspecting Trades as a DataFrame
 
@@ -81,43 +165,6 @@ trades = acc.trades_df()
 print(trades)
 ```
 
-Example output:
-```text
-shape: (4, 12)
-┌─────┬────────────┬───────┬──────────┬────────┬────────┬────────────┬────────────┬──────────┬──────┬──────────┬────────────┐
-│ bar ┆ ts         ┆ group ┆ obj      ┆ action ┆ shares ┆ deal_price ┆ exec_price ┆ amount   ┆ fee  ┆ cash     ┆ pos_shares │
-│ --- ┆ ---        ┆ ---   ┆ ---      ┆ ---    ┆ ---    ┆ ---        ┆ ---        ┆ ---      ┆ ---  ┆ ---      ┆ ---        │
-│ i64 ┆ i64        ┆ i64   ┆ str      ┆ str    ┆ f64    ┆ f64        ┆ f64        ┆ f64      ┆ f64  ┆ f64      ┆ f64        │
-╞═════╪════════════╪═══════╪══════════╪════════╪════════╪════════════╪════════════╪══════════╪══════╪══════════╪════════════╡
-│ 1   ┆ 1704153600 ┆ 0     ┆ SH600000 ┆ BUY    ┆ 500.0  ┆ 20.0       ┆ 20.0       ┆ 10000.0  ┆ 5.0  ┆ 899995.0 ┆ 500.0      │
-│ 2   ┆ 1704240000 ┆ 0     ┆ SH600000 ┆ SELL   ┆ 500.0  ┆ 22.0       ┆ 22.0       ┆ 11000.0  ┆ 5.0  ┆ 910990.0 ┆ 0.0        │
-│ 2   ┆ 1704240000 ┆ 1     ┆ SZ000001 ┆ BUY    ┆ 1000.0 ┆ 10.0       ┆ 10.0       ┆ 10000.0  ┆ 5.0  ┆ 900985.0 ┆ 1000.0     │
-└─────┴────────────┴───────┴──────────┴────────┴────────┴────────────┴────────────┴──────────┴──────┴──────────┴────────────┘
-```
-
-### Filtering In/Out Flow and Turnover Analysis
-
-```python
-import polars as pl
-
-# 1. Separate Inflow (调入) and Outflow (调出)
-buys = trades.filter(pl.col("action") == "BUY")
-sells = trades.filter(pl.col("action") == "SELL")
-
-# 2. Total turnover and fees per stock
-obj_summary = trades.group_by("obj").agg([
-  pl.col("amount").sum().alias("total_turnover"),
-  pl.col("fee").sum().alias("total_fees"),
-  pl.len().alias("trade_count"),
-])
-
-# 3. Bar-level rebalance turnover (换手金额与手续费)
-rebalance_summary = trades.group_by("bar").agg([
-  pl.col("amount").sum().alias("rebalance_amount"),
-  pl.col("fee").sum().alias("rebalance_fees"),
-  pl.col("obj").n_unique().alias("stocks_adjusted"),
-])
-```
-
+---
 
 Apart from the different base class and calling `rebalance` at the appropriate time, everything else can be referenced from [How to build a trading strategy](./trading.md).

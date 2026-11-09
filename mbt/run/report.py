@@ -593,7 +593,7 @@ def extract_portfolio_trades(
         "entry_bar": entry_bar,
         "entry_date": _format_date(entry_bar, entry_ts, dates),
         "exit_bar": bars - 1 if bars > 0 else entry_bar,
-        "exit_date": "Holding",
+        "exit_date": "持仓中",
         "profit_rate": profit_rate,
         "profit_amount": profit_amount,
       })
@@ -684,7 +684,7 @@ def build_markdown_summary(
       "",
       "## Rebalance Records",
       "",
-      "| obj | in | out | hold profit |",
+      "| obj | Entry | Exit | hold profit |",
       "| :--- | :--- | :--- | ---: |",
     ])
     if trades:

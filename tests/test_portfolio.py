@@ -252,3 +252,120 @@ def test_portfolio_records_and_trades_df():
   df_alias = acc.records_df()
   assert df_alias.equals(df)
 
+
+def test_portfolio_dynamic_universe_and_runoff_mode():
+  prices_a = np.array([10.0, 10.0, 12.0, 14.0])
+  prices_b = np.array([20.0, 20.0, 25.0, 30.0])
+  prices_c = np.array([5.0, 5.0, 5.0, 5.0])
+  prices = np.concatenate([prices_a, prices_b, prices_c])
+
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(4), 3),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(12),
+      "transfer_shares": np.zeros(12),
+      "right_shares": np.zeros(12),
+      "right_price": np.zeros(12),
+    },
+    objs=["SH600000", "SZ000001", "SZ000002"],
+  )
+
+  class DynamicUniverseStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):
+      if ctx.bar == 1:
+        # Bar 1: whitelist contains only A and B
+        ctx.set_universe(["SH600000", "SZ000001"])
+        assert ctx.universe == {"SH600000", "SZ000001"}
+
+        # Attempt to buy C (not in universe) -> should be blocked by guard
+        ctx.buy("SZ000002", percent=0.2)
+        # Buy A (in universe)
+        ctx.buy("SH600000", percent=0.5)
+
+      elif ctx.bar == 2:
+        # After Bar 1 execution: A was bought, C was blocked
+        assert ctx.account.has_position("SH600000")
+        assert not ctx.account.has_position("SZ000002")
+        assert "SH600000" in ctx.account.held_objs
+
+        # Bar 2: Universe rotates to only B and C (A is dropped -> becomes Runoff!)
+        ctx.set_universe(["SZ000001", "SZ000002"])
+        assert "SH600000" in ctx.account.runoff_objs(ctx.universe)
+
+        # Attempt to buy A again -> blocked because it's no longer in universe
+        ctx.buy("SH600000", percent=0.5)
+        # But buy B (now in universe)
+        ctx.buy("SZ000001", percent=0.5)
+
+      elif ctx.bar == 3:
+        # Both A and B are held
+        assert ctx.account.has_position("SH600000")
+        assert ctx.account.has_position("SZ000001")
+        assert "SH600000" in ctx.account.runoff_objs(ctx.universe)
+
+        # Natural liquidation (Runoff mode): sell A even though it is not in current universe!
+        ctx.sell("SH600000", percent=1.0)
+
+  acc = PortfolioAccount(20000.0, dp)
+  runner = PortfolioRunner(acc)
+  runner.run(DynamicUniverseStrategy())
+
+  # At end of backtest (Bar 3 execution finished):
+  # A was sold (0 shares), B is still held
+  assert not acc.has_position("SH600000")
+  assert acc.has_position("SZ000001")
+  assert not acc.has_position("SZ000002")
+  assert acc.runoff_objs(runner.ctx.universe) == []
+  assert acc.held_objs == ["SZ000001"]
+
+
+def test_portfolio_context_run_selector():
+  prices_a = np.array([10.0, 12.0, 15.0, 20.0])
+  prices_b = np.array([10.0, 10.0, 10.0, 10.0])
+  prices = np.concatenate([prices_a, prices_b])
+
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(4), 2),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(8),
+      "transfer_shares": np.zeros(8),
+      "right_shares": np.zeros(8),
+      "right_price": np.zeros(8),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class TopMoverSelector(Selector):
+    def step00(self, stocks: list[str]) -> list[str]:
+      panel = self.dp.load_kline(stocks, lastN=2)
+      ret = panel.last("close") / panel.offset("close", -2) - 1.0
+      df = panel.cross_section(ret=ret).sort("ret", descending=True)
+      return df["obj"].head(1).to_list()
+
+  class AdaptiveStrategy(Strategy):
+    def __init__(self):
+      super().__init__()
+      self.selector = TopMoverSelector()
+
+    def execute(self, ctx: PortfolioContext):
+      if ctx.bar == 1:
+        picked = ctx.run_selector(self.selector, lastN=2)
+        assert picked == ["SH600000"]
+        ctx.set_universe(picked)
+        for s in ctx.universe:
+          ctx.buy(s, percent=1.0)
+
+  acc = PortfolioAccount(10000.0, dp)
+  runner = PortfolioRunner(acc)
+  runner.run(AdaptiveStrategy())
+
+  assert acc.has_position("SH600000")
+  assert not acc.has_position("SZ000001")
+  assert acc.positions[0].shares == 800.0  # 10000 / 12.0 = 833.3 -> 800 shares @ 12.0
+

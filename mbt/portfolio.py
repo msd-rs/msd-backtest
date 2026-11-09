@@ -70,6 +70,9 @@ class PortfolioAccount:
     self.groups = dp.groups
     self.bars = dp.bars
     self.positions = [Position.zero() for _ in range(self.groups)]
+    self._obj_to_group: dict[str, int] = (
+      {s: i for i, s in enumerate(dp.objs)} if hasattr(dp, "objs") else {}
+    )
     self.dates = (
       dp.dates[: self.bars].astype("datetime64[s]").astype(int)
       if self.bars > 0
@@ -119,6 +122,50 @@ class PortfolioAccount:
     if total <= 0:
       return np.zeros(self.groups, dtype=np.float64)
     return np.array([p.value / total for p in self.positions], dtype=np.float64)
+
+  @property
+  def held_groups(self) -> list[int]:
+    """List of group indices that currently have held shares (> 0)."""
+    return [
+      g
+      for g in range(self.tradable_start, self.groups)
+      if self.positions[g].shares > 0
+    ]
+
+  @property
+  def held_objs(self) -> list[str]:
+    """List of obj symbols that currently have held shares (> 0)."""
+    objs = self.dp.objs
+    return [objs[g] for g in self.held_groups if g < len(objs)]
+
+  def has_position(self, obj: str | int) -> bool:
+    """Check whether the account currently holds shares in obj or group."""
+    if isinstance(obj, str):
+      g = self._obj_to_group.get(obj)
+      return g is not None and self.positions[g].shares > 0
+    elif isinstance(obj, (int, np.integer)):
+      return 0 <= obj < self.groups and self.positions[obj].shares > 0
+    return False
+
+  def position(self, obj: str | int) -> Position:
+    """Get the current Position object for an obj or group index."""
+    if isinstance(obj, str):
+      g = self._obj_to_group.get(obj)
+      if g is not None and 0 <= g < len(self.positions):
+        return self.positions[g]
+      return Position.zero()
+    elif isinstance(obj, (int, np.integer)):
+      if 0 <= obj < len(self.positions):
+        return self.positions[obj]
+      return Position.zero()
+    return Position.zero()
+
+  def runoff_objs(self, universe: set[str] | list[str] | None = None) -> list[str]:
+    """Held stocks that are no longer in the active universe whitelist."""
+    if universe is None:
+      return []
+    u_set = set(universe)
+    return [s for s in self.held_objs if s not in u_set]
 
   def apply_corporate_actions(self, ts: int):
     for g in range(self.groups):
@@ -325,17 +372,104 @@ class PortfolioAccount:
     self.update_mark_to_market(ts, mark_prices)
 
 
+class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
+  """In-memory SelectorDataProvider sliced at current backtest bar for SelectorStrategy."""
+
+  def __init__(self, panel_slice: Panel):
+    super().__init__()
+    self._panel = panel_slice
+
+  def load_kline(
+    self,
+    objs: list[str],
+    lastN: int | list[int] = 100,
+    fin_fields: list[str] = [],
+    fin_only_year: bool = True,
+    baseline: str | None = None,
+  ) -> Panel:
+    n_bars = lastN if isinstance(lastN, int) else int(lastN[0])
+    n_bars = min(n_bars, self._panel.bars)
+    start_bar = self._panel.bars - n_bars
+
+    target_set = set(objs) if objs else set(self._panel.objs)
+    selected_indices = [
+      idx for idx, s in enumerate(self._panel.objs) if s in target_set
+    ]
+    selected_objs = [self._panel.objs[idx] for idx in selected_indices]
+    if not selected_objs:
+      raise ValueError("no matching objs in historical panel")
+
+    new_cols = {}
+    for col in self._panel.frame.columns:
+      arr_2d = self._panel.column(col)[selected_indices, start_bar:]
+      new_cols[col] = arr_2d.ravel()
+    return Panel(pl.DataFrame(new_cols), selected_objs, n_bars)
+
+  def load_snapshot(
+    self,
+    objs: list[str],
+    fin_fields: list[str] = [],
+    fin_only_year: bool = True,
+  ) -> pl.DataFrame:
+    p = self.load_kline(objs, lastN=1)
+    cols = {col: p.last(col) for col in p.frame.columns}
+    return p.cross_section(**cols)
+
+
 class PortfolioContext(Context):
   """Strategy context for shared-cash portfolio backtesting."""
 
   def __init__(self, account: PortfolioAccount):
     self.account = account
     self.dp = account.dp
+    self._obj_to_group = account._obj_to_group
+    self.universe: set[str] | None = None
+    self._full_panel: Panel | None = None
     n = len(self.dp.dates)
     self.buy_percents = np.zeros(n, dtype=np.float64)
     self.sell_percents = np.zeros(n, dtype=np.float64)
     self.target_weights = np.full((self.dp.bars, self.dp.groups), np.nan, dtype=np.float64)
     self._group_offsets = np.arange(self.dp.groups, dtype=np.int64) * self.dp.bars
+
+  def set_universe(self, objs: list[str] | set[str] | None):
+    """Set the active universe whitelist for buying."""
+    if objs is None:
+      self.universe = None
+    else:
+      self.universe = set(objs)
+
+  @property
+  def universe_objs(self) -> list[str]:
+    """List of objs in the active universe whitelist, or all objs if universe is not set."""
+    if self.universe is not None:
+      return [s for s in self.dp.objs if s in self.universe]
+    return list(self.dp.objs)
+
+  def slice_panel(self, lastN: int = 100) -> Panel:
+    """Return a Panel sliced up to current bar (inclusive, no lookahead)."""
+    if self._full_panel is None:
+      self._full_panel = self.dp.to_panel()
+    end_bar = self.dp.i + 1
+    n_bars = min(end_bar, max(1, int(lastN)))
+    start_bar = end_bar - n_bars
+    new_cols = {}
+    for col in self._full_panel.frame.columns:
+      arr_2d = self._full_panel.column(col)[:, start_bar:end_bar]
+      new_cols[col] = arr_2d.ravel()
+    return Panel(pl.DataFrame(new_cols), list(self._full_panel.objs), n_bars)
+
+  def run_selector(
+    self,
+    selector: Selector | Callable[[Panel], list[str]],
+    lastN: int = 100,
+  ) -> list[str]:
+    """Execute a Selector on historical data up to current bar without lookahead."""
+    sub_panel = self.slice_panel(lastN=lastN)
+    with sub_panel.ctx():
+      if isinstance(selector, Selector):
+        dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel)
+        return selector.execute(dp_slice, list(sub_panel.objs))
+      return selector(sub_panel)
 
   def objs(self) -> list[str]:
     return self.dp.objs
@@ -364,25 +498,55 @@ class PortfolioContext(Context):
       return self.dp.all(name, obj=obj)
     raise ValueError(f"data '{name}' not found")
 
-  def _resolve_bar_flags(self, flags: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+  def _resolve_bar_flags(self, flags) -> tuple[np.ndarray, np.ndarray]:
     idx = self._group_offsets + self.dp.i
+    if isinstance(flags, str):
+      mask = np.zeros(self.dp.groups, dtype=bool)
+      g = self._obj_to_group.get(flags)
+      if g is not None:
+        mask[g] = True
+      return idx, mask
+    if isinstance(flags, (int, np.integer)):
+      mask = np.zeros(self.dp.groups, dtype=bool)
+      if 0 <= flags < self.dp.groups:
+        mask[flags] = True
+      return idx, mask
+    if isinstance(flags, (list, set, tuple)):
+      mask = np.zeros(self.dp.groups, dtype=bool)
+      for item in flags:
+        if isinstance(item, str):
+          g = self._obj_to_group.get(item)
+          if g is not None:
+            mask[g] = True
+        elif isinstance(item, (int, np.integer)):
+          if 0 <= item < self.dp.groups:
+            mask[item] = True
+      return idx, mask
     arr = np.asarray(flags, dtype=bool)
     if arr.ndim == 1 and len(arr) == self.dp.groups:
       return idx, arr
     return idx, arr[idx]
 
-  def buy(self, flags: np.ndarray, percent: float = 1.0):
+  def buy(self, flags, percent: float = 1.0):
     if self.dp.groups == 0:
       return
     idx, mask = self._resolve_bar_flags(flags)
+    # Apply universe whitelist guard for buying
+    if self.universe is not None:
+      u_mask = np.array(
+        [self.dp.objs[g] in self.universe for g in range(self.dp.groups)],
+        dtype=bool,
+      )
+      mask = mask & u_mask
     active = idx[mask]
     if len(active) > 0:
       self.buy_percents[active] = percent
 
-  def sell(self, flags: np.ndarray, percent: float = 1.0):
+  def sell(self, flags, percent: float = 1.0):
     if self.dp.groups == 0:
       return
     idx, mask = self._resolve_bar_flags(flags)
+    # Sell does NOT filter by universe (supports Runoff natural liquidation)
     active = idx[mask]
     if len(active) > 0:
       self.sell_percents[active] = percent
@@ -502,56 +666,12 @@ class PortfolioRunner:
         ]
         if len(buy_groups) > 0 and acc.cash > 0:
           total_req = sum(buy_p[g] for g in buy_groups)
-          alloc_cash = acc.cash * min(1.0, total_req / len(buy_groups))
+          alloc_cash = acc.cash * min(1.0, total_req)
           for g in buy_groups:
             budget = alloc_cash * (buy_p[g] / total_req)
             acc._buy_group(g, i, budget, deal_p[g])
 
         acc.update_mark_to_market(i, mark_p)
-
-
-class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
-  """In-memory SelectorDataProvider sliced at current backtest bar for SelectorStrategy."""
-
-  def __init__(self, panel_slice: Panel):
-    super().__init__()
-    self._panel = panel_slice
-
-  def load_kline(
-    self,
-    objs: list[str],
-    lastN: int | list[int] = 100,
-    fin_fields: list[str] = [],
-    fin_only_year: bool = True,
-    baseline: str | None = None,
-  ) -> Panel:
-    n_bars = lastN if isinstance(lastN, int) else int(lastN[0])
-    n_bars = min(n_bars, self._panel.bars)
-    start_bar = self._panel.bars - n_bars
-
-    target_set = set(objs) if objs else set(self._panel.objs)
-    selected_indices = [
-      idx for idx, s in enumerate(self._panel.objs) if s in target_set
-    ]
-    selected_objs = [self._panel.objs[idx] for idx in selected_indices]
-    if not selected_objs:
-      raise ValueError("no matching objs in historical panel")
-
-    new_cols = {}
-    for col in self._panel.frame.columns:
-      arr_2d = self._panel.column(col)[selected_indices, start_bar:]
-      new_cols[col] = arr_2d.ravel()
-    return Panel(pl.DataFrame(new_cols), selected_objs, n_bars)
-
-  def load_snapshot(
-    self,
-    objs: list[str],
-    fin_fields: list[str] = [],
-    fin_only_year: bool = True,
-  ) -> pl.DataFrame:
-    p = self.load_kline(objs, lastN=1)
-    cols = {col: p.last(col) for col in p.frame.columns}
-    return p.cross_section(**cols)
 
 
 class SelectorStrategy(PortfolioStrategy):

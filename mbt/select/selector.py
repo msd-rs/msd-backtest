@@ -51,7 +51,11 @@ class SelectorDataProvider:
 
     Column semantics
     ----------------
-    * `open/high/low/close`: forward-adjusted (split/bonus/dividend applied).
+    * `open/high/low/close`: forward-adjusted (split/bonus/dividend applied). Use for technical indicators.
+    * `raw_open/raw_high/raw_low/raw_close` (and `price` alias for `raw_close`): UNADJUSTED raw prices.
+      Always use `raw_close` when computing valuation multiples with per-share financials (e.g. PB = raw_close / f004)
+      or total market capitalization (raw_close * total_shares).
+    * `raw_vwap`: unadjusted volume-weighted average price (amount / volume).
     * `dividend`, `transfer_shares`, `right_shares`, `right_price`: RAW
       corporate-action values, NOT adjusted. Mixing them with adjusted prices
       (e.g. computing yield from an old DPS after a 10-for-10 transfer) silently

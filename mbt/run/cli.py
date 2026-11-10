@@ -414,7 +414,8 @@ def run_single_period(
     logger.info("portfolio runner created")
     p_runner.run(req.strategy)
     logger.info("portfolio strategy finished")
-    reports = build_portfolio_report(dp, p_account)
+    diag = getattr(p_runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
+    reports = build_portfolio_report(dp, p_account, diagnostics=diag)
     return reports, dp, p_account
   else:
     init_cash = custom_cash if custom_cash is not None else 10000.0
@@ -424,7 +425,8 @@ def run_single_period(
     logger.info("runner created")
     runner.run(req.strategy)
     logger.info("strategy finished")
-    reports = build_report(dp, runner.ctx.accounts)[1:]
+    diag = getattr(runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
+    reports = build_report(dp, runner.ctx.accounts, diagnostics=diag)[1:]
     return reports, dp, account
 
 

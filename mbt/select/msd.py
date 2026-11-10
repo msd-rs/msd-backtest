@@ -99,6 +99,16 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
         (data["close"] >= np.round(ex_ref_price * (1 + limit_ratio), 2)), 1, np.where(
         (data["close"] <= np.round(ex_ref_price * (1 - limit_ratio), 2)), -1, 0))
 
+      # Preserve unadjusted raw prices before forward adjustment
+      data["raw_open"] = data["open"].copy()
+      data["raw_high"] = data["high"].copy()
+      data["raw_low"] = data["low"].copy()
+      data["raw_close"] = data["close"].copy()
+      data["price"] = data["close"].copy()
+      if "volume" in data and "amount" in data:
+        with np.errstate(divide="ignore", invalid="ignore"):
+          data["raw_vwap"] = np.where(data["volume"] > 0, data["amount"] / data["volume"], np.nan)
+
       # Apply forward adjustment factor to price related columns
       data["open"] = al.FW_SPLIT(data["open"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
       data["high"] = al.FW_SPLIT(data["high"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
@@ -161,6 +171,19 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     ], objs, self.date)
 
     df = to_pl(table)
+    raw_cols = []
+    for col in ["open", "high", "low", "close"]:
+      if col in df.columns and f"raw_{col}" not in df.columns:
+        raw_cols.append(pl.col(col).alias(f"raw_{col}"))
+    if "amount" in df.columns and "volume" in df.columns and "raw_vwap" not in df.columns:
+      raw_cols.append(
+        pl.when(pl.col("volume") > 0)
+        .then(pl.col("amount") / pl.col("volume"))
+        .otherwise(None)
+        .alias("raw_vwap")
+      )
+    if raw_cols:
+      df = df.with_columns(raw_cols)
 
     if len(fin_fields) > 0:
       fin_df = self.load_financial(objs, fin_fields, fin_only_year, 1)

@@ -196,6 +196,9 @@ SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin
 
   # keep original unadjusted prices for realistic execution & limit calculation
   data["raw_open"] = data["open"].copy()
+  data["raw_high"] = data["high"].copy()
+  data["raw_low"] = data["low"].copy()
+  data["raw_close"] = data["close"].copy()
   data["price"] = data["close"].copy()
 
   with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN):

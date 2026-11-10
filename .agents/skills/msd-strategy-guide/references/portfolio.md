@@ -17,6 +17,12 @@ class Strategy(mbt.PortfolioStrategy):
   def execute(self, ctx: mbt.Context):
     # Call ctx.rebalance(weights) on rebalance bars; sells are executed first to free cash for buys
     ...
+
+  def finalize(self, ctx: mbt.Context) -> dict | None:
+    # Post-backtest diagnostics (e.g. exit reasons: stop_loss, discount_closed, leverage_up)
+    return {
+      "exit_reasons": self.exit_reasons,
+    }
 ```
 
 ---

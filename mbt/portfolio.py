@@ -447,6 +447,8 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
       fin_only_year=fin_only_year,
     )
     cols = {col: p.last(col) for col in p.frame.columns}
+    if "raw_close" in cols:
+      cols["close"] = cols["raw_close"]
     return p.cross_section(**cols)
 
 
@@ -641,6 +643,7 @@ class PortfolioRunner:
     self.ctx = PortfolioContext(account)
     self.exec_mode = exec_mode
     self.check_limit = check_limit
+    self.diagnostics: dict | None = None
 
   def run(self, strategy: Strategy):
     dp = self.ctx.dp
@@ -729,6 +732,14 @@ class PortfolioRunner:
           acc.update_mark_to_market(i, mark_p)
     finally:
       self.ctx._in_execute = False
+
+    # Post-execution phase: finalize hook with full bar range
+    with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
+      diag = strategy.finalize(self.ctx)
+      if diag is not None:
+        self.diagnostics = diag
+        setattr(strategy, "diagnostics", diag)
+        setattr(acc, "diagnostics", diag)
 
 
 class SelectorStrategy(PortfolioStrategy):

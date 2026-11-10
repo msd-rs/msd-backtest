@@ -82,7 +82,8 @@ async def run_backtest(req_model: RunRequestModel):
       logger.info("Strategy run completed")
 
       # Build report
-      reports = build_report(dp, runner.ctx.accounts)[1:]
+      diag = getattr(runner, "diagnostics", None) or getattr(strategy_obj, "diagnostics", None)
+      reports = build_report(dp, runner.ctx.accounts, diagnostics=diag)[1:]
       report = build_json_report(reports)
       return report
 

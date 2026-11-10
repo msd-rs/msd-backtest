@@ -53,15 +53,28 @@ class MySelector(mbt.Selector):
 - **Recommended**: pass `baseline="SH000001"` to `load_kline` so a full-calendar index defines the shared time axis (the baseline block itself is automatically removed from the returned `Panel`).
 - **Legacy compatibility**: `data, objs, bars = self.dp.load_kline(...)` triple unpacking is still supported.
 
+### Price & Adjustment Semantics (复权与估值规范)
+
+> [!WARNING] 复权口径与财务估值规则
+> - **前复权价 (`close`, `open`, `high`, `low`)**: 仅用于连续时序与技术指标（如均线 `al.MA`、动量收益率、MACD）。
+> - **未复权真实价格 (`raw_close`, `raw_open`, `raw_high`, `raw_low`, `price`)**: **必须**用于财务估值指标计算（如 PB、PE、真实市值）。
+>   - 严禁使用前复权 `close` 计算 PB/PE/市值！例如某高送转股票真实股价为 50 元，每股净资产 `f004` 为 10 元，真实 PB 为 5.0；但前复权价可能缩放到 5 元，若错误计算 `close / f004` 将得到 0.5（严重失真的虚假低估）。
+>   - **正确做法**：在 `load_kline` (Panel) 中使用 `panel.column("raw_close")` 或 `panel.last("raw_close")`；在 `load_snapshot` 中使用 `raw_close`（或 `close`，snapshot 中两者相同）。
+
+- `load_kline` 提供完整的原始未复权价格：
+  - `raw_open`, `raw_high`, `raw_low`, `raw_close`（以及兼容别名 `price`）
+  - `raw_vwap`（成交金额 / 成交量）
+- `load_snapshot` 同样提供：
+  - `close` / `raw_close`, `open` / `raw_open`, `high` / `raw_high`, `low` / `raw_low`, `raw_vwap`
+- **财务数据口径**:
+  - Financial records in MSD are indexed by report period end date (`03-31`, `06-30`, `09-30`, `12-31`). When `fin_only_year=False` is used on dates between `01-01` and `04-30`, companies that have not yet published their annual report will naturally return their latest available Q3 (`09-30`) report. Do not confuse cumulative Q3 income/profit figures with full-year figures.
+
 ### Attributes & Metadata
 - `panel.frame`: underlying `pl.DataFrame` of length `n_objs * bars`.
 - `panel.objs`: `list[str]`, stock objs corresponding to the row order.
 - `panel.bars`: `int`, number of K-line bars per obj. Note: when `self.dp.date` is near the start of database history, `panel.bars` may be smaller than the requested `lastN`; use `min(window, panel.bars)` when setting rolling windows or minimum valid bar thresholds.
 - `panel.n_objs` / `len(panel)`: number of objs.
 - `panel.pick(obj) -> int`: maps a stock obj to its row index in `(n_objs, bars)` (raises `KeyError` if not found).
-- **Price & Financial Semantics**:
-  - In `load_snapshot`, `close` is the unadjusted raw price on `self.dp.date`, so it can be directly compared with per-share financial fields (e.g. `f004` BVPS for PB) or multiplied by `total_shares` for market cap. In `load_kline`, `open`/`high`/`low`/`close` are forward-adjusted for technical indicator calculation.
-  - Financial records in MSD are indexed by report period end date (`03-31`, `06-30`, `09-30`, `12-31`). When `fin_only_year=False` is used on dates between `01-01` and `04-30`, companies that have not yet published their annual report will naturally return their latest available Q3 (`09-30`) report. Do not confuse cumulative Q3 income/profit figures with full-year figures.
 
 ### 2D & 1D Views
 - `panel.buffer(name) -> np.ndarray`: 1D contiguous array `(n_objs * bars,)` in block layout, directly consumed by `alpha-lib`.
@@ -84,6 +97,20 @@ Avoid per-obj Python loops; compute over the entire panel at once:
     ma15 = al.MA(close, 15)
     cross = al.RCROSS(close, ma15)  # shape: (n_objs, bars)
   ```
+
+### Valuation Factors & Market Cap (估值与市值计算)
+计算估值与市值时，**务必使用未复权价 `raw_close`**，切勿使用 `close`（前复权价）：
+```python
+# 1. PB (市净率): 最新未复权收盘价 / 每股净资产 (f004)
+pb = panel.last("raw_close") / panel.last("f004")
+
+# 2. Total Market Cap (总市值): 最新未复权收盘价 * 总股本 (total_shares)
+market_cap = panel.last("raw_close") * panel.last("total_shares")
+
+# 3. Dividend Yield TTM (股息率): 近一年未复权每股分红 / 最新未复权收盘价
+div_ttm = panel.compute(al.SUM, "dividend", 250)[:, -1]
+div_yield = div_ttm / panel.last("raw_close")
+```
 
 ### Multi-Period Resampling (`panel.resample`)
 Convert daily K-line panels into weekly, monthly, quarterly, or yearly panels directly:

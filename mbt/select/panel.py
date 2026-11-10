@@ -214,18 +214,18 @@ class Panel:
         valid = ~np.isnan(sub) if is_float else np.ones(sub.shape, dtype=bool)
         has_valid = valid.any(axis=1)
 
-        if name == "open":
+        if name in ("open", "raw_open"):
           idx = np.where(has_valid, valid.argmax(axis=1), 0)
           res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
-        elif name == "close":
+        elif name in ("close", "raw_close", "price"):
           idx = (e - s) - 1 - np.where(has_valid, valid[:, ::-1].argmax(axis=1), 0)
           res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
-        elif name == "high":
+        elif name in ("high", "raw_high"):
           if is_float:
             res_2d[:, k] = np.where(has_valid, np.nanmax(np.where(valid, sub, -np.inf), axis=1), np.nan)
           else:
             res_2d[:, k] = np.max(sub, axis=1)
-        elif name == "low":
+        elif name in ("low", "raw_low"):
           if is_float:
             res_2d[:, k] = np.where(has_valid, np.nanmin(np.where(valid, sub, np.inf), axis=1), np.nan)
           else:

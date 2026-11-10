@@ -40,6 +40,15 @@ class Strategy(mbt.Strategy):
     """
     # TODO: implement strategy, building buy/sell signals then call ctx.buy/ctx.sell
     pass
+
+  def finalize(self, ctx: mbt.Context) -> dict | None:
+    """
+    optional: called once after the backtest finishes.
+    Use for exit reason counting, custom diagnostics, or performance summaries.
+    Returning a dict merges it into report.diagnostics, Markdown summary, and JSON export.
+    """
+    # return {"exit_reasons": self.exit_reasons}
+    pass
 ```
 
 
@@ -48,6 +57,7 @@ class Strategy(mbt.Strategy):
 `mbt` is optimized to run a strategy for multiple stocks's parallel, this will huge improve the backtest performance, it use
 - `alpha-lib` as factor compute library, a parallel factor building algorithms
 - `prepare(self, ctx)` lifecycle hook: called once before the bar-by-bar loop with full-range `alpha-lib` context (`start=0, end=bars`). Always pre-compute static technical indicators (such as `al.MA`) in `prepare()` so they run in `O(N * T)` instead of recomputing them inside `execute()` on every bar (`O(N * T^2)`). Use `execute(self, ctx)` for dynamic signals that depend on account state (such as `ctx.ror_hold`) or to submit precomputed signals.
+- `finalize(self, ctx)` lifecycle hook: called once after the backtest completes with full-range `alpha-lib` context (`start=0, end=bars`) and fully-settled accounts. Use this to count exit/rebalance reasons, log summary diagnostics, or return a structured dict of custom metrics to appear under `## Strategy Diagnostics` in Markdown summaries and JSON exports.
 - `mbt.Context` hold context of strategy running, including:
   - data (`ctx.data(name)` or `ctx.<name>`)
   - stock list (`ctx.objs()`)

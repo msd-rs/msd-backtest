@@ -67,30 +67,35 @@ uv run python -m mbt.run.cli strategy/double_avg.py -s 000001.SZ 600000.SH --beg
 
 ## 💡 编写你的策略
 
-编写策略非常简单，只需要继承 `mbt.Strategy` 并实现 `execute` 方法：
+编写策略非常简单，只需要继承 `mbt.Strategy`（或组合调仓的 `mbt.PortfolioStrategy`）并实现相应的生命周期钩子：
 
 ```python
 from mbt import Strategy, Context
+import alpha as al
 
 class MyStrategy(Strategy):
     def __init__(self, fast_period=5, slow_period=20):
+        super().__init__()
         self.fast_period = fast_period
         self.slow_period = slow_period
 
+    def prepare(self, ctx: Context):
+        # 1. 预计算阶段：全量时间跨度，支持 O(N*T) 预计算静态技术指标
+        self.fast_ma = al.MA(ctx.close, self.fast_period)
+        self.slow_ma = al.MA(ctx.close, self.slow_period)
+
     def execute(self, ctx: Context):
-        # 获取当前收盘价序列
-        close = ctx.close 
-        
-        # 计算移动平均线
-        # 注意：ctx 提供的是 NumPy 数组，支持向量化操作
-        # 这里仅为示意，实际开发中建议预计算指标
-        
-        # 买入逻辑示例
+        # 2. 逐步执行阶段：严格单向时间步，获取当前 Bar 信号并下单
         # ctx.buy(buy_flags, percent=1.0)
-        
-        # 卖出逻辑示例
         # ctx.sell(sell_flags, percent=1.0)
         pass
+
+    def finalize(self, ctx: Context) -> dict | None:
+        # 3. 收尾回调阶段：回测结束时输出诊断信息或自定义业务统计
+        # 返回字典将自动并入 Markdown 摘要与 JSON 报告
+        return {
+            "custom_metrics": "sample_value",
+        }
 ```
 
 ## 🧠 AI 辅助策略编写

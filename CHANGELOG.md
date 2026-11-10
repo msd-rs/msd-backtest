@@ -5,9 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.19] - 2026-11-09
+## [0.1.19] - 2026-11-10
 
-- Fix warm bars issue
+- raw price unification: unified `raw_open`, `raw_high`, `raw_low`, `raw_close`, `raw_vwap` across `load_kline` (Panel), `load_snapshot` (DataFrame), and `load_data` (DataProvider). `close` remains forward-adjusted for technical indicators, while `raw_close` provides the unadjusted raw price for fundamental valuation (PB = raw_close / f004, market cap = raw_close * total_shares), preventing distorted valuation multiples from split-adjusted prices
+- strategy lifecycle: added `finalize(self, ctx)` hook to `Strategy` and `PortfolioStrategy`, called after the backtest loop completes with settled accounts and full `alpha-lib` range `[0, bars)`. Any dict returned by `finalize()` is attached to `Report.diagnostics` and rendered in Markdown summaries (`## Strategy Diagnostics`) and JSON reports
+- warmup bars: fixed `load_data` date binary search (`find_date_index`) to natively support `datetime64` (including `[us]`, `[ns]`, `[ms]`, `[s]`, `[D]`) and microseconds, preventing `TypeError: float() argument must be a string or a real number` and ensuring exact warmup bar calculation without trading start delay
+- holdout guard: improved date lookup in `compute_holdout_split` to support `datetime64` and microsecond timestamps
 
 ## [0.1.18] - 2026-11-09
 

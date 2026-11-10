@@ -37,6 +37,7 @@ class Report:
   fee_rate: float
   trade_count: int
   rebalance_count: int = 0
+  diagnostics: dict | None = None
   
 
   def __init__(self, obj: str, dp: DataProvider , account: Account ):
@@ -117,6 +118,7 @@ class Report:
     r.trade_profit_factor = d.get('trade_profit_factor', r.profit_factor)
     r.trades = d.get('trades', [])
     r.attribution = d.get('attribution', [])
+    r.diagnostics = d.get('diagnostics', None)
 
     return r    
     
@@ -339,9 +341,15 @@ def uniform_ror(a: np.ndarray) -> np.ndarray:
   return ((a - base) / base)
 
 
-def build_report(dp: DataProvider, accounts: list[Account]) -> list[Report]:
+def build_report(
+  dp: DataProvider,
+  accounts: list[Account],
+  diagnostics: dict | None = None,
+) -> list[Report]:
   reports = [Report(obj, dp, accounts[i]) for i, obj in enumerate(dp.objs)]
-
+  if diagnostics is not None:
+    for rep in reports:
+      rep.diagnostics = diagnostics
   return reports
 
 
@@ -491,12 +499,16 @@ def compute_stock_attribution(
 
 
 def build_portfolio_report(
-  dp: DataProvider, account, obj_name: str = "PORTFOLIO"
+  dp: DataProvider,
+  account,
+  obj_name: str = "PORTFOLIO",
+  diagnostics: dict | None = None,
 ) -> list[Report]:
   """Build a Report for a shared-cash PortfolioAccount."""
   r = Report("", None, None)  # type: ignore
   r.obj = obj_name
   r.account = account
+  r.diagnostics = diagnostics or getattr(account, "diagnostics", None)
   r.records = getattr(account, "records", [])
   r.dp = dp
   bars = dp.bars
@@ -702,6 +714,8 @@ def build_json_report(reports: list[Report]) -> dict:
       d["trades"] = report.trades
     if hasattr(report, "attribution") and report.attribution:
       d["attribution"] = report.attribution
+    if getattr(report, "diagnostics", None):
+      d["diagnostics"] = report.diagnostics
     data[report.obj] = d
   return data
 
@@ -893,6 +907,37 @@ def build_markdown_summary(
         )
     else:
       lines.append("| - | - | - | - |")
+
+  # Strategy Diagnostics
+  diag = None
+  if len(reports) > 0:
+    diag = getattr(reports[0], "diagnostics", None)
+  if not diag and account is not None:
+    diag = getattr(account, "diagnostics", None)
+
+  if diag and isinstance(diag, dict):
+    lines.extend([
+      "",
+      "## Strategy Diagnostics",
+      "",
+    ])
+    for k, v in diag.items():
+      if isinstance(v, dict):
+        lines.append(f"### {k}")
+        lines.append("")
+        lines.append("| Item | Value |")
+        lines.append("| :--- | ---: |")
+        for sub_k, sub_v in v.items():
+          lines.append(f"| {sub_k} | {sub_v} |")
+        lines.append("")
+      elif isinstance(v, (list, tuple)):
+        lines.append(f"### {k}")
+        lines.append("")
+        for item in v:
+          lines.append(f"- {item}")
+        lines.append("")
+      else:
+        lines.append(f"- **{k}**: {v}")
 
   return "\n".join(lines) + "\n"
 

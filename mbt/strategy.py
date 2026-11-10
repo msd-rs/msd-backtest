@@ -144,6 +144,21 @@ class Strategy:
     """
     pass
 
+  def finalize(self, ctx: Context) -> dict | None:
+    """
+    finalize and summarize strategy execution after the bar-by-bar loop completes.
+    During finalize(), alpha-lib context is set to the full bar range [0, bars),
+    and the account history (records, assets, ror) is fully populated.
+
+    Args:
+      ctx: context of the strategy
+
+    Returns:
+      Optional dict of custom metrics/diagnostics (e.g. exit reason counts)
+      to be recorded in Report.diagnostics and included in summaries.
+    """
+    pass
+
 
 class PortfolioStrategy(Strategy):
   """Base class for multi-stock portfolio rebalancing strategies sharing a single cash pool."""

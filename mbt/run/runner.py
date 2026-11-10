@@ -133,6 +133,7 @@ class Runner:
     self.ctx = RunnerContext(account)
     self.exec_mode = exec_mode
     self.check_limit = check_limit
+    self.diagnostics: dict | None = None
 
   def run(self, strategy: Strategy):
     dp = self.ctx.dp
@@ -220,3 +221,10 @@ class Runner:
               acc.ror_hold[i] = (acc.asset - acc.per_assets) / acc.per_assets if acc.per_assets > 0 else 0.0
     finally:
       self.ctx._in_execute = False
+
+    # 3. Post-execution phase: finalize hook with full bar range
+    with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
+      diag = strategy.finalize(self.ctx)
+      if diag is not None:
+        self.diagnostics = diag
+        setattr(strategy, "diagnostics", diag)

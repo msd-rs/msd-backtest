@@ -2,6 +2,7 @@ import datetime
 import time
 import logging
 import numpy as np
+import polars as pl
 import alpha as al
 import pymsd
 from mbt import DataProvider
@@ -73,6 +74,35 @@ def find_date_index(
   return int(np.searchsorted(dates, target_val))
 
 
+def to_statutory_disclosure_date(ts_series: pl.Series) -> pl.Series:
+  """Convert report period dates to A-share statutory disclosure deadlines.
+
+  Statutory Deadlines:
+  - Q1 (month == 3): year-04-30
+  - Semi-annual / Q2 (month == 6): year-08-31
+  - Q3 (month == 9): year-10-31
+  - Annual / Q4 (month == 12): (year+1)-04-30
+  - Non-standard: end of month (28th fallback)
+  """
+  y = ts_series.dt.year()
+  m = ts_series.dt.month()
+  df = pl.DataFrame({"report_ts": ts_series})
+  ann = df.select(
+    pl.when(m == 3).then(
+      pl.date(y, 4, 30)
+    ).when(m == 6).then(
+      pl.date(y, 8, 31)
+    ).when(m == 9).then(
+      pl.date(y, 10, 31)
+    ).when(m == 12).then(
+      pl.date(y + 1, 4, 30)
+    ).otherwise(
+      pl.date(y, m, 28)
+    ).cast(pl.Datetime("us")).alias("ts")
+  )["ts"]
+  return ann
+
+
 def load_data(
   msd_host: str,
   objs: list[str],
@@ -82,21 +112,28 @@ def load_data(
   fin_only_year: bool = False,
   warmup_bars: int = 0,
 ) -> tuple[DataProvider, list[str]]:
-  """
-  create a DataProvider for backtesting from msd database.
+  """Create a DataProvider for backtesting from MSD database.
+
+  Lookahead Bias Protection for Financial Data:
+  Financial reporting dates (e.g. 12-31 for annual reports) are NOT actual disclosure dates.
+  This function automatically converts report period dates to legal statutory announcement
+  deadlines (04-30, 08-31, 10-31) and renames the period end date to `report_ts`.
+  Market bars are aligned with financial data strictly on or after statutory disclosure deadlines,
+  preventing lookahead bias.
 
   Args:
-    msd_host: msd server host
-    objs: objs to backtest
-    start: start date
-    end: end date
-    fin_fields: financial fields to query from stock_financial. If not provided,
-      queries all fields '*' by default. Specifying needed fields reduces memory consumption.
-    fin_only_year: if True, only queries annual reports (ts.month=12) from stock_financial.
-    warmup_bars: number of warmup bars to load before start date for indicator initialization.
+    msd_host: MSD server host URL.
+    objs: List of stock symbols to load.
+    start: Backtest start date (e.g. '2024-01-01').
+    end: Backtest end date (e.g. '2025-01-01').
+    fin_fields: List of financial fields to query from stock_financial (e.g. ['f001', 'f205']).
+      If None or empty (default), NO financial data is loaded, avoiding memory explosion.
+      To load all fields, pass fin_fields=['*'] (warning: high memory usage).
+    fin_only_year: If True, only query annual reports (ts.month=12) from stock_financial.
+    warmup_bars: Number of warmup bars loaded prior to `start` date for indicator initialization.
 
   Returns:
-    DataProvider and objs
+    tuple of (DataProvider, loaded_objs).
   """
   if not objs:
     return DataProvider({"ts": np.array([])}, objs=[]), []
@@ -123,8 +160,9 @@ def load_data(
   elif query_start:
     ts_where.append(f"ts >= '{query_start}'")
     try:
+      lookback_days = 750 if fin_only_year else 450
       fin_start = (
-        datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=400)
+        datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=lookback_days)
       ).isoformat()
     except ValueError:
       fin_start = str(query_start)
@@ -147,12 +185,22 @@ def load_data(
   fin_limit_cond = f" {fin_limit}" if fin_limit else ""
 
   where_ = objs_where(objs)
-  fin_cols = db_fields(fin_fields) if fin_fields else "*"
+
+  # Check financial fields requested
+  fin_requested = fin_fields is not None and (
+    isinstance(fin_fields, str) or len(fin_fields) > 0
+  )
+  if fin_requested:
+    if fin_fields == "*" or fin_fields == ["*"]:
+      logger.warning("fin_fields=['*'] requested: querying 180+ financial columns may consume significant memory.")
+      fin_cols = "*"
+    else:
+      fin_cols = db_fields(fin_fields)
+
   sql = f"""
 SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_dividend WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_shares WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond};
-SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond};
 """
   logger.debug(f"start load data for {len(objs)} objs")
   t1 = time.time()
@@ -176,12 +224,61 @@ SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin
   if data is None or "ts" not in data or len(data["ts"]) == 0:
     return DataProvider({"ts": np.array([])}, objs=[]), []
 
+  # Query and align stock_financial with statutory disclosure date fallback
+  financial_frame = None
+  if fin_requested:
+    fin_sql = f"SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond};"
+    try:
+      res = client.query_concat(fin_sql)
+      if "stock_financial" in res:
+        table_fin, ranges = res["stock_financial"]
+        d_fin = table_fin.to_dict()
+        if len(d_fin.get("ts", [])) > 0:
+          rep_ts_raw = d_fin["ts"]
+          ann_ts_raw = to_statutory_disclosure_date(pl.Series("report_ts", rep_ts_raw)).to_numpy()
+          
+          # Build structured quarterly financial frame
+          fin_objs_arr = np.repeat([r[0] for r in ranges], [r[2] - r[1] for r in ranges])
+          ff_dict = {"obj": fin_objs_arr, "report_ts": rep_ts_raw, "ts": ann_ts_raw}
+          fin_metric_cols = [c for c in d_fin.keys() if c != "ts"]
+          for col in fin_metric_cols:
+            ff_dict[col] = d_fin[col]
+          financial_frame = pl.DataFrame(ff_dict)
+
+          # Initialize metric columns in data
+          for col in fin_metric_cols:
+            data[col] = np.full(len(objs) * bars, np.nan, dtype=np.float64)
+          data["report_ts"] = np.full(len(objs) * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+
+          # Align per object using statutory disclosure date
+          range_map = {r[0]: (r[1], r[2]) for r in ranges}
+          for g, obj in enumerate(objs):
+            kline_slice = slice(g * bars, (g + 1) * bars)
+            if obj not in range_map:
+              continue
+            st, end_idx = range_map[obj]
+            obj_ann_ts = ann_ts_raw[st:end_idx]
+            obj_rep_ts = rep_ts_raw[st:end_idx]
+            kline_ts = data["ts"][kline_slice]
+
+            idx = np.searchsorted(obj_ann_ts, kline_ts, side="right") - 1
+            valid = idx >= 0
+            safe_idx = np.maximum(idx, 0)
+
+            for col in fin_metric_cols:
+              val = d_fin[col][st:end_idx]
+              data[col][kline_slice] = np.where(valid, val[safe_idx], np.nan)
+            data["report_ts"][kline_slice] = np.where(valid, obj_rep_ts[safe_idx], np.datetime64("NaT", "us"))
+    except Exception as e:
+      logger.warning(f"failed to load stock_financial from msd: {e}")
+
   for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
     if col not in data:
       data[col] = np.zeros_like(data["close"])
 
   dp = DataProvider(data, objs=objs, next_hook=next_hook_al)
   dp.fin_only_year = fin_only_year
+  dp.financial_frame = financial_frame
   dp.warmup_bars = 0
   if warmup_bars > 0 and target_start and not isinstance(target_start, int) and dp.bars > 0:
     first_dates = dp.dates[:dp.bars]

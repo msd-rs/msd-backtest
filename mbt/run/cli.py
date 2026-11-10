@@ -1,9 +1,17 @@
+from __future__ import annotations
+
+"""Command line interface for executing backtests.
+
+Supports single-stock independent execution and multi-stock shared-cash portfolio execution.
+"""
+
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
 import datetime
 from mbt import (
+  DataProvider,
   Runner,
   Account,
   Fee,
@@ -362,6 +370,19 @@ def run_single_period(
   end: str,
   warmup_bars: int = 0,
 ) -> tuple[list[Report], DataProvider, Any]:
+  """Execute a backtest run for a single time period [start, end].
+
+  Args:
+    req: RunRequest containing strategy, objs, benchmark, and config.
+    msd_host: MSD server host URL.
+    fee: Fee configuration.
+    start: Start date of trading.
+    end: End date of trading.
+    warmup_bars: Number of warmup bars prior to start date for indicator initialization.
+
+  Returns:
+    tuple of (reports, data_provider, account).
+  """
   fin_fields = getattr(req, "fin_fields", None) or getattr(
     req.strategy, "fin_fields", None
   )
@@ -406,9 +427,10 @@ def run_single_period(
   )
   custom_cash = getattr(req, "cash", None)
 
+  bench_obj = getattr(req, "benchmark", None)
   if use_portfolio:
     init_cash = custom_cash if custom_cash is not None else 1000000.0
-    p_account = PortfolioAccount(init_cash, dp, fee=fee, tradable_start=1)
+    p_account = PortfolioAccount(init_cash, dp, fee=fee, benchmark=bench_obj)
     logger.info(f"portfolio account created, initial_cash={init_cash}")
     p_runner = PortfolioRunner(p_account)
     logger.info("portfolio runner created")
@@ -426,7 +448,13 @@ def run_single_period(
     runner.run(req.strategy)
     logger.info("strategy finished")
     diag = getattr(runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
-    reports = build_report(dp, runner.ctx.accounts, diagnostics=diag)[1:]
+    all_reports = build_report(dp, runner.ctx.accounts, diagnostics=diag)
+    if bench_obj:
+      reports = [r for r in all_reports if r.obj != bench_obj]
+      if not reports:
+        reports = all_reports
+    else:
+      reports = all_reports[1:] if len(all_reports) > 1 else all_reports
     return reports, dp, account
 
 

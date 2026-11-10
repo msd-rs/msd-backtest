@@ -440,8 +440,11 @@ def test_portfolio_context_panel_warning_and_slice(caplog):
   class InspectStrategy(Strategy):
     def execute(self, ctx: PortfolioContext):
       if ctx.bar == 2:
-        # Calling ctx.panel() without allow_future should log a warning
-        p_full = ctx.panel()
+        # Calling ctx.panel() without allow_future should return sliced panel (no lookahead)
+        p_def = ctx.panel()
+        assert p_def.bars == 3
+        # Calling ctx.panel(allow_future=True) should return full panel and log a warning
+        p_full = ctx.panel(allow_future=True)
         assert p_full.bars == 10
         # Calling ctx.panel(sliced=True) should return sliced panel
         p_sliced = ctx.panel(sliced=True)
@@ -455,7 +458,7 @@ def test_portfolio_context_panel_warning_and_slice(caplog):
   with caplog.at_level(logging.WARNING):
     runner.run(InspectStrategy())
 
-  assert any("Calling ctx.panel() during execute()" in rec.message for rec in caplog.records)
+  assert any("Calling ctx.panel(allow_future=True) during execute()" in rec.message for rec in caplog.records)
 
 
 def test_historical_panel_selector_fin_only_year_warning(caplog):

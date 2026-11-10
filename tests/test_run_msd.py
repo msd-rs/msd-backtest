@@ -48,13 +48,12 @@ def test_load_data_real():
   assert "bw_price" in dp.data
   assert "limited" in dp.data
   assert "limit_ratio" in dp.data
-  # Verify 400-day lookback populates financial & share fields at bar 0 of Jan 2025
+  # Verify lookback populates share fields at bar 0 of Jan 2025
   assert "total_shares" in dp.data
   assert not np.isnan(dp.data["total_shares"][0])
-  assert "f001" in dp.data
-  assert not np.isnan(dp.data["f001"][0])
-  # Default (fin_fields=None) queries * so other financial fields are also present
-  assert "f002" in dp.data
+  # Default (fin_fields=None) does NOT load stock_financial, preventing memory explosion
+  assert "f001" not in dp.data
+  assert "f002" not in dp.data
 
 
 def test_load_data_with_fin_fields():

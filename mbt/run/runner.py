@@ -73,14 +73,23 @@ class RunnerContext(Context):
     from mbt.select.panel import Panel
     return Panel(pl.DataFrame(new_cols), list(self._full_panel.objs), n_bars)
 
-  def panel(self, allow_future: bool = False, sliced: bool = False):
-    if sliced:
+  def panel(self, allow_future: bool = False, sliced: bool | None = None):
+    """Return a Panel view of the data provider.
+
+    During strategy execute(), defaults to returning a strictly sliced Panel
+    up to the current bar (`sliced=True`) to prevent lookahead bias.
+    To explicitly obtain the full-range panel with future bars, pass `allow_future=True`.
+
+    Args:
+      allow_future: If True, allows returning full-range panel during execute().
+      sliced: If True, returns sliced panel. If None, defaults to True during execute().
+    """
+    if sliced is True or (sliced is None and self._in_execute and not allow_future):
       return self.slice_panel(lastN=self.dp.i + 1)
-    if self._in_execute and not allow_future:
+    if self._in_execute and allow_future:
       logger.warning(
-        "Calling ctx.panel() during execute() returns the full-range panel with future bars. "
-        "To avoid lookahead bias, use ctx.slice_panel(...) or ctx.panel(sliced=True), "
-        "or pass allow_future=True."
+        "Calling ctx.panel(allow_future=True) during execute() returns the full-range panel with future bars. "
+        "Lookahead risk present."
       )
     return self.dp.to_panel()
 

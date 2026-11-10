@@ -160,14 +160,12 @@ def main():
   logger.info("selector finished")
   factors = getattr(selector, 'factors', None)
   if args.factors and factors is not None and isinstance(factors, pl.DataFrame):
-    # 因子表的股票代码列名历史上为 obj, 部分文档写作 obj, 两者都兼容
-    for key in ("obj", "obj"):
-      if key in factors.columns:
-        try:
-          factors = factors.sort(key)
-        except Exception:
-          pass
-        break
+    # 因子表的股票代码列名规范为 obj
+    if "obj" in factors.columns:
+      try:
+        factors = factors.sort("obj")
+      except Exception:
+        pass
     with pl.Config(tbl_rows=-1, tbl_cols=-1, tbl_width_chars=240):
       print(factors)
   else:

@@ -70,9 +70,12 @@ class Context:
     """total number of stocks/groups in the context"""
     return 0
 
-  def panel(self, allow_future: bool = False, sliced: bool = False):
-    """
-    return a Panel view of the underlying data provider
+  def panel(self, allow_future: bool = False, sliced: bool | None = None):
+    """Return a Panel view of the underlying data provider.
+
+    During strategy execute(), defaults to returning a strictly sliced Panel
+    (up to the current bar) to prevent lookahead bias.
+    To explicitly obtain the full-range panel with future bars, pass allow_future=True.
     """
     pass
 
@@ -116,7 +119,27 @@ class Context:
 
 
 class Strategy:
-  """Base class of a strategy"""
+  """Base class of a trading strategy.
+
+  Attributes:
+    portfolio: If True, indicates this strategy operates in shared-cash portfolio mode
+      using `PortfolioRunner` and `PortfolioAccount`. Default False.
+    fin_fields: List of financial field names (e.g. ['f001', 'f205']) to query from
+      `stock_financial`. If None or empty (default), financial queries are skipped
+      to save memory and prevent accidental memory exhaustion.
+    fin_only_year: If True, only annual financial reports (ts.month=12) are queried.
+    warmup_bars: Number of warmup bars loaded before the start date for indicator initialization.
+      
+      Warmup Bars Lifecycle:
+      1. Declaration: Set `warmup_bars = N` on the Strategy class or via CLI `--warmup-bars N`.
+      2. Data Extension: `load_data` queries historical data before the target `start` date,
+         locating the start date bar index as `dp.warmup_bars`.
+      3. Execution: During bars `0 <= bar < warmup_bars`, `execute(ctx)` runs normally to allow
+         rolling indicators (EMA, MACD, etc.) to stabilize, but trading execution is suppressed
+         (orders are not matched, holdings and cash remain unchanged).
+      4. Evaluation: `Report` slices out warmup bars, reporting metrics strictly starting
+         from the user's target start date.
+  """
 
   portfolio: bool = False
   fin_fields: list[str] | None = None

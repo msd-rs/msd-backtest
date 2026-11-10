@@ -540,11 +540,27 @@ def build_portfolio_report(
   r.ror_hold = r.ror.copy()
 
   # Compute equal-weight original buy-and-hold ror across tradable stocks
-  start_g = getattr(account, "tradable_start", 0)
-  if dp.groups > start_g and "bw_price" in dp.data:
+  tradable_mask = getattr(account, "tradable_mask", None)
+  if tradable_mask is not None:
+    tradable_indices = [g for g in range(dp.groups) if tradable_mask[g]]
+  else:
+    start_g = getattr(account, "tradable_start", 0)
+    tradable_indices = list(range(start_g, dp.groups))
+
+  bench_idx = getattr(account, "benchmark_idx", None)
+  if bench_idx is None:
+    bench_obj = getattr(account, "benchmark_obj", None)
+    if bench_obj is not None and bench_obj in dp.objs:
+      bench_idx = dp.objs.index(bench_obj)
+    elif tradable_mask is not None and not tradable_mask[0]:
+      bench_idx = 0
+    else:
+      bench_idx = 0
+
+  if len(tradable_indices) > 0 and "bw_price" in dp.data and bars > w:
     orig_rors = [
       uniform_ror(dp.slice("bw_price", g * bars)[w:])
-      for g in range(start_g, dp.groups)
+      for g in tradable_indices
     ]
     r.ror_original = np.round(np.nanmean(orig_rors, axis=0), 4)
   elif "bw_price" in dp.data and bars > w:
@@ -562,8 +578,12 @@ def build_portfolio_report(
 
   # Aggregate portfolio-level actions per bar
   all_actions = account.actions.reshape(dp.groups, bars)[:, w:]
-  has_buy = (all_actions[start_g:] == 1).any(axis=0)
-  has_sell = (all_actions[start_g:] == 2).any(axis=0)
+  if len(tradable_indices) > 0:
+    has_buy = (all_actions[tradable_indices] == 1).any(axis=0)
+    has_sell = (all_actions[tradable_indices] == 2).any(axis=0)
+  else:
+    has_buy = (all_actions == 1).any(axis=0)
+    has_sell = (all_actions == 2).any(axis=0)
   r.actions = np.where(has_buy, 1, np.where(has_sell, 2, 0)).astype(np.int32)
 
   nav = (
@@ -576,8 +596,10 @@ def build_portfolio_report(
   r.fw_price = np.round(nav, 3)
   r.bw_price = np.round(nav, 3)
 
-  # Compute portfolio metrics against benchmark (group 0)
-  if "bw_price" in dp.data and bars > w:
+  # Compute portfolio metrics against benchmark
+  if "bw_price" in dp.data and bars > w and bench_idx is not None and bench_idx < dp.groups:
+    benchmark = uniform_ror(dp.slice("bw_price", bench_idx * bars)[w:])
+  elif "bw_price" in dp.data and bars > w and dp.groups > 0:
     benchmark = uniform_ror(dp.slice("bw_price", 0)[w:])
   else:
     benchmark = np.zeros(eff_bars, dtype=np.float64)

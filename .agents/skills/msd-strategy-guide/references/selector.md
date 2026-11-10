@@ -24,7 +24,7 @@ class MySelector(mbt.Selector):
     # TODO: write select logic here
 ```
 
-- You will build a polars DataFrame named `factors` to select stocks as class member. It has `obj` (or `obj`) column, other columns in `factors` are according to the user's requirements.
+- You will build a polars DataFrame named `factors` to select stocks as class member. It has an `obj` column (stock symbols), and other columns according to the user's requirements.
 - You write several `stepXX` methods according to the user's requirements to gradually narrow down the result set, and update the `factors`. The `stepXX` methods are executed in order, and each method will be called with the result of the previous method as input. You should carefully design each step, there are some rules:
   - Usually, it's a good idea to first filter by snapshot via `load_snapshot`, then do deeper analysis that needs historical series via `load_kline`.
   - Keep the number of stocks in each step as small as possible.

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.19] - 2026-11-10
 
+- financial disclosure statutory fallback: `load_data` automatically shifts financial report period end dates (`report_ts`) to statutory disclosure deadlines (`ts`: 04-30, 08-31, 10-31), completely eliminating lookahead bias where annual/quarterly figures were matched to market bars prior to actual disclosure
+- memory guard on financial fields: `fin_fields` defaults to `None` (does not query `stock_financial` by default), preventing accidental memory exhaustion from loading all 180+ fields; queries only when explicitly requested
+- in-backtest financial screening: implemented `_HistoricalPanelSelectorDataProvider.load_financial`, enabling `SelectorStrategy` to filter by historical financial reports dynamically inside the backtest loop without lookahead
+- rebalance and sell conflict resolution: `PortfolioRunner` prioritizes explicit `ctx.sell()` signals over target weights on the same bar, ensuring stop-loss orders are not silently discarded during rebalancing
+- benchmark position decoupling: decoupled benchmark from hardcoded index 0 (`tradable_start=1`); `PortfolioAccount` and `Report` now match benchmark by symbol name and manage tradability via `tradable_mask`
+- cli bugfix: added `from __future__ import annotations` and explicit `DataProvider` import in `mbt/run/cli.py`, fixing `NameError` on Python 3.12/3.13
+- lookahead prevention default: calling `ctx.panel()` during `execute()` now defaults to `sliced=True` (strictly up to current bar), requiring explicit `allow_future=True` to access future bars
+- docstring & nomenclature standardization: centralized system contracts, life cycles, and parameters directly into DocStrings; cleaned up naming artifacts (`("obj", "obj")`)
+
 - dynamic universe pre-loaded pool clarity: documented Super Universe vs. Dynamic Active Whitelist semantics; `set_universe` and `run_selector` emit explicit warnings if requested stocks are not present in the pre-loaded data pool
 - whitelist guard on rebalance: `rebalance()` and `PortfolioAccount.rebalance_step` now strictly enforce `ctx.universe` whitelist, capping target weights of non-whitelisted stocks at current holdings (`min(w[g], curr_w)`) and disallowing new purchases, aligning behavior with `ctx.buy()` while supporting natural liquidation (Runoff mode)
 - argument typo detection: `instantiate_class` now detects unrecognized kwargs passed via `-a` and logs warnings with fuzzy-match suggestions (e.g. `pb_maxx` -> `did you mean 'pb_max' ?`) against class constructor signatures

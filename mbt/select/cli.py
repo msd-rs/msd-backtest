@@ -127,7 +127,12 @@ def parse_args(args: list[str]) -> dict[str, Any]:
 def main():
   logger.debug(f"msd {os.environ.get('MSD_HOST', '')}")
   parser = argparse.ArgumentParser(description="Run a selector")
-  parser.add_argument("selector", help="Selector Python file")
+  parser.add_argument("selector", nargs="?", default=None, help="Selector Python file")
+  parser.add_argument(
+    "--doctor",
+    action="store_true",
+    help="run environment, MSD database and data coverage diagnostics",
+  )
   parser.add_argument(
     "-a",
     "--arg",
@@ -144,6 +149,13 @@ def main():
   parser.add_argument("-d", "--date", type=str, default=None, help="run selector at date (YYYY-MM-DD), default to last day")
   
   args = parser.parse_args()
+  if args.doctor:
+    import sys
+    from mbt.doctor import run_doctor
+    sys.exit(run_doctor(args.msd))
+
+  if not args.selector:
+    parser.error("the following arguments are required: selector")
   if args.msd and not os.environ.get("MSD_HOST"):
     os.environ["MSD_HOST"] = args.msd
   kwargs = parse_args(args.arg)

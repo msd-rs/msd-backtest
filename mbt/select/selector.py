@@ -53,7 +53,7 @@ class SelectorDataProvider:
     ----------------
     * `open/high/low/close`: forward-adjusted (split/bonus/dividend applied). Use for technical indicators.
     * `raw_open/raw_high/raw_low/raw_close` (and `price` alias for `raw_close`): UNADJUSTED raw prices.
-      Always use `raw_close` when computing valuation multiples with per-share financials (e.g. PB = raw_close / f004)
+      Always use `raw_close` when computing valuation multiples with per-share financials (e.g. PB = raw_close / f003)
       or total market capitalization (raw_close * total_shares).
     * `raw_vwap`: unadjusted volume-weighted average price (amount / volume).
     * `dividend`, `transfer_shares`, `right_shares`, `right_price`: RAW
@@ -104,8 +104,10 @@ class SelectorDataProvider:
     percent (e.g. f205 ROE, f223 debt-to-asset).
 
     Returns:
-      A pl.DataFrame of lastN financial data,
-      DataFrame columns ['obj', 'ts', *fields]; missing objs are absent.
+      A pl.DataFrame of lastN financial data.
+      DataFrame columns ['obj', 'ts', 'report_ts', *fields]; missing objs are absent.
+      `ts` is the statutory disclosure deadline (used for lookahead-free as-of alignment),
+      while `report_ts` is the fiscal period end date (e.g. 12-31).
     """
     pass
 

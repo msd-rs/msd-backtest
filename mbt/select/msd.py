@@ -1,3 +1,4 @@
+from datetime import datetime, date
 import itertools
 import time
 from typing import Tuple
@@ -65,16 +66,12 @@ SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {date_where} limit -{start[
 SELECT * FROM stock_dividend WHERE obj in ({where_}) {date_where} limit -{start[1]};
 SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]};
 """
-    if len(fin_fields) > 0:
-      ts_year_where = "AND ts.month=12" if fin_only_year else ""
-      n = max(start[0] // 100, 1) if fin_only_year else max(start[0] // 50, 4)
-      sql += f"SELECT {','.join(fin_fields)} FROM stock_financial WHERE obj in ({where_}) {date_where} {ts_year_where} LIMIT  -{n};\n"
 
     t1 = time.time()
     table, loaded, bars = self._client.query_join(
       sql,
       'stock_kline_1d',
-      {"stock_dividend": "zero", "stock_shares": "backward", "stock_financial": "backward"},
+      {"stock_dividend": "zero", "stock_shares": "backward"},
       baseline_sym,
     )
     data = table.to_dict()
@@ -83,6 +80,61 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
       logger.warning(
         f"load_kline requested {start[0]} bars, but only {bars} bars available (date={self.date})"
       )
+
+    # Align financial fields with statutory disclosure dates (strictly no lookahead)
+    if len(fin_fields) > 0 and len(loaded) > 0 and bars > 0:
+      ts_year_where = "AND ts.month=12" if fin_only_year else ""
+      n = max(start[0] // 100 + 4, 4) if fin_only_year else max(start[0] // 50 + 4, 8)
+      fin_sql = f"SELECT {','.join(fin_fields)} FROM stock_financial WHERE obj in ({where_}) {date_where} {ts_year_where} LIMIT -{n};"
+      for col in fin_fields:
+        data[col] = np.full(len(loaded) * bars, np.nan, dtype=np.float64)
+      data["report_ts"] = np.full(len(loaded) * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+
+      try:
+        res = self._client.query_concat(fin_sql)
+        if "stock_financial" in res:
+          table_fin, ranges = res["stock_financial"]
+          d_fin = table_fin.to_dict()
+          if len(d_fin.get("ts", [])) > 0:
+            rep_ts_raw = d_fin["ts"]
+            ann_ts_raw = to_statutory_disclosure_date(pl.Series("report_ts", rep_ts_raw)).to_numpy()
+            range_map = {r[0]: (r[1], r[2]) for r in ranges}
+            for g, obj in enumerate(loaded):
+              if obj not in range_map:
+                continue
+              st, end_idx = range_map[obj]
+              if st >= end_idx:
+                continue
+              obj_ann_ts = ann_ts_raw[st:end_idx]
+              if len(obj_ann_ts) == 0:
+                continue
+              obj_rep_ts = rep_ts_raw[st:end_idx]
+              kline_slice = slice(g * bars, (g + 1) * bars)
+              kline_ts = data["ts"][kline_slice]
+
+              idx = np.searchsorted(obj_ann_ts, kline_ts, side="right") - 1
+              valid = idx >= 0
+              safe_idx = np.maximum(idx, 0)
+
+              for col in fin_fields:
+                if col in d_fin:
+                  val = d_fin[col][st:end_idx]
+                  if len(val) == 0:
+                    continue
+                  col_arr = np.full(bars, np.nan, dtype=np.float64)
+                  col_arr[valid] = val[safe_idx[valid]]
+                  data[col][kline_slice] = col_arr
+
+              rep_arr = np.full(bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+              rep_arr[valid] = obj_rep_ts[safe_idx[valid]]
+              data["report_ts"][kline_slice] = rep_arr
+      except Exception as e:
+        logger.warning(f"failed to query and align stock_financial in load_kline: {e}")
+
+    # Ensure corporate action columns exist even if no dividend events occurred
+    for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
+      if col not in data:
+        data[col] = np.zeros_like(data["close"])
 
     # groups 必须等于返回的股票数(而非入参数量: 可能重复/未排序)
     # 使用 al.Context 进行短周期上下文管理，避免污染全局上下文
@@ -178,7 +230,14 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     df = pl.DataFrame(df_data)
 
     if self.date:
-      target_dt = pl.lit(self.date).cast(pl.Datetime("us"))
+      if isinstance(self.date, str):
+        target_dt = datetime.fromisoformat(self.date)
+      elif isinstance(self.date, datetime):
+        target_dt = self.date
+      elif isinstance(self.date, date):
+        target_dt = datetime(self.date.year, self.date.month, self.date.day)
+      else:
+        target_dt = pl.lit(self.date).str.to_datetime(time_unit="us")
       df = df.filter(pl.col("ts") <= target_dt)
 
     if only_year:

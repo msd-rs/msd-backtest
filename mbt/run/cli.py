@@ -39,7 +39,10 @@ import argparse
 import polars as pl
 import orjson
 import os
+import sys
+import inspect
 import numpy as np
+from mbt.run.backend import SYSTEM_ARGS
 
 logging.basicConfig(
   format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
@@ -110,7 +113,14 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   parser = argparse.ArgumentParser(description="Run a strategy")
   parser.add_argument(
     "strategy",
+    nargs="?",
+    default=None,
     help="Strategy to run, can be a JSON file or a Python file",
+  )
+  parser.add_argument(
+    "--doctor",
+    action="store_true",
+    help="run environment, MSD database and data coverage diagnostics",
   )
   parser.add_argument(
     "-s",
@@ -198,6 +208,13 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
 
+  if args.doctor:
+    from mbt.doctor import run_doctor
+    sys.exit(run_doctor(args.msd))
+
+  if not args.strategy:
+    parser.error("the following arguments are required: strategy")
+
   if args.verbose:
     logging.getLogger().setLevel(logging.DEBUG)
 
@@ -260,7 +277,19 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   selected_objs = list(selector.execute(selector_dp, init_objs))
 
   if len(selected_objs) == 0:
-    raise ValueError("No objs provided")
+    if isinstance(selector, StaticSelector):
+      raise ValueError(
+        f"No target stocks provided for strategy '{args.strategy}'. "
+        "Please specify stocks via -s/--objs (e.g. -s SH600000 or -s A_STOCKS), "
+        "or define a Selector subclass in the strategy file."
+      )
+    else:
+      raise ValueError(
+        f"Selector '{selector.__class__.__name__}' returned 0 stocks from "
+        f"{len(init_objs)} candidate stocks on date '{req.start}'. "
+        "Please check if the start date is within the database's available date range, "
+        "or if the selector filter conditions are too restrictive."
+      )
 
   try:
     selected_objs.remove(args.benchmark)
@@ -270,6 +299,30 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   selected_objs.insert(0, args.benchmark)
   req.objs = selected_objs
   req.portfolio = bool(args.portfolio or getattr(req.strategy, "portfolio", False))  # type: ignore[attr-defined]
+
+  # Fail-Fast: validate that all custom -a key=val parameters are recognized
+  if kv_kwargs:
+    valid_keys = set(SYSTEM_ARGS)
+    strat_cls = getattr(req.strategy, "__class__", None)
+    if strat_cls and strat_cls.__init__ is not object.__init__:
+      valid_keys.update(
+        p for p in inspect.signature(strat_cls.__init__).parameters if p != "self"
+      )
+    sel_cls = getattr(selector, "__class__", None)
+    if sel_cls and sel_cls.__init__ is not object.__init__:
+      valid_keys.update(
+        p for p in inspect.signature(sel_cls.__init__).parameters if p != "self"
+      )
+
+    orphan_keys = [k for k in kv_kwargs if k not in valid_keys]
+    if orphan_keys:
+      all_custom = sorted(valid_keys - set(SYSTEM_ARGS))
+      hint = f" Accepted custom parameters: {all_custom}." if all_custom else " Neither component declares custom __init__ parameters."
+      raise ValueError(
+        f"Unrecognized argument(s) passed via -a/--args: {orphan_keys}. "
+        f"Neither Strategy ({strat_cls.__name__ if strat_cls else 'None'}) "
+        f"nor Selector ({sel_cls.__name__ if sel_cls else 'None'}) accepts these arguments.{hint}"
+      )
   if req.portfolio and len(raw_objs) == 0:
     stock_count = len(selected_objs) - (1 if args.benchmark in selected_objs else 0)
     logger.warning(

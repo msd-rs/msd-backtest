@@ -647,9 +647,26 @@ class PortfolioContext(Context):
   def objs(self) -> list[str]:
     return self.dp.objs
 
+  def index_of(self, obj: str) -> int:
+    """Return group index of obj. Raises ValueError if not found."""
+    if obj in self._obj_to_group:
+      return self._obj_to_group[obj]
+    raise ValueError(f"'{obj}' is not in context objs")
+
   @property
   def bar(self) -> int:
     return self.dp.i
+
+  @property
+  def date(self) -> str:
+    """Current bar date as YYYY-MM-DD string."""
+    if self.dp.bars > 0 and 0 <= self.dp.i < self.dp.bars:
+      return str(self.dp.dates[self.dp.i])[:10]
+    return ""
+
+  @property
+  def current_date(self) -> str:
+    return self.date
 
   @property
   def step(self) -> int:
@@ -781,6 +798,31 @@ class PortfolioContext(Context):
             w[g] = min(w[g], curr_w)
 
     self.target_weights[self.dp.i] = w
+
+  def rebalance_objs(self, target_weights: dict[str, float], tolerance: float | None = None):
+    """Rebalance portfolio using a mapping of {symbol: weight}.
+
+    Symbols not present in target_weights are assigned a target weight of 0.0.
+    Symbols not in the pre-loaded pool are logged as warnings and ignored.
+
+    Args:
+      target_weights: dict mapping stock symbol to target weight (e.g. {"SH600000": 0.05}).
+      tolerance: optional tolerance band (e.g. 0.01 for 1%).
+    """
+    weights = np.zeros(self.dp.groups, dtype=np.float64)
+    missing = []
+    for sym, weight in target_weights.items():
+      g = self._obj_to_group.get(sym)
+      if g is not None:
+        weights[g] = max(0.0, float(weight))
+      else:
+        missing.append(sym)
+    if missing:
+      logger.warning(
+        f"rebalance_objs: {len(missing)} obj(s) not in pre-loaded pool and ignored: "
+        f"{missing[:5]}{'...' if len(missing) > 5 else ''}"
+      )
+    self.rebalance(weights, tolerance=tolerance)
 
 
 class PortfolioRunner:

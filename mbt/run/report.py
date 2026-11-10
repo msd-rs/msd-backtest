@@ -558,11 +558,23 @@ def build_portfolio_report(
       bench_idx = 0
 
   if len(tradable_indices) > 0 and "bw_price" in dp.data and bars > w:
-    orig_rors = [
-      uniform_ror(dp.slice("bw_price", g * bars)[w:])
-      for g in tradable_indices
-    ]
-    r.ror_original = np.round(np.nanmean(orig_rors, axis=0), 4)
+    nav_series = []
+    for g in tradable_indices:
+      p = dp.slice("bw_price", g * bars)[w:]
+      valid_mask = ~np.isnan(p) & (p > 0)
+      if np.any(valid_mask):
+        first_idx = np.where(valid_mask)[0][0]
+        # Only include stocks already tradable near start to avoid survivor/IPO extreme skew
+        if first_idx <= max(5, int(0.1 * len(p))):
+          base_p = p[first_idx]
+          ratio = np.where(valid_mask, p / base_p, np.nan)
+          ratio = pl.Series(ratio).fill_null(strategy="forward").fill_null(1.0).to_numpy()
+          nav_series.append(ratio)
+    if len(nav_series) > 0:
+      portfolio_nav = np.nanmean(np.array(nav_series), axis=0)
+      r.ror_original = np.round(portfolio_nav - 1.0, 4)
+    else:
+      r.ror_original = np.zeros(eff_bars, dtype=np.float64)
   elif "bw_price" in dp.data and bars > w:
     r.ror_original = np.round(uniform_ror(dp.slice("bw_price", 0)[w:]), 4)
   else:
@@ -575,6 +587,12 @@ def build_portfolio_report(
     .fill_null(0.0)
     .to_numpy()
   )
+
+  r.pool_size = len(tradable_indices)
+  if hasattr(account, "records"):
+    r.traded_objs_count = len(set(rec.obj for rec in account.records))
+  else:
+    r.traded_objs_count = 0
 
   # Aggregate portfolio-level actions per bar
   all_actions = account.actions.reshape(dp.groups, bars)[:, w:]
@@ -783,10 +801,18 @@ def build_markdown_summary(
   is_portfolio = (total == 1 and reports[0].obj == "PORTFOLIO") or (getattr(reports[0], "records", None) is not None)
   pool_note = " (Pool Buy&Hold)" if is_portfolio else ""
 
+  if is_portfolio:
+    r0 = reports[0]
+    pool_sz = getattr(r0, "pool_size", total)
+    traded_cnt = getattr(r0, "traded_objs_count", active)
+    objs_line = f"- **Mode**: Portfolio (Shared Cash) | **Pool Size**: {pool_sz} | **Active (Traded Objs)**: {traded_cnt} ({traded_cnt / pool_sz * 100:.2f}%)" if pool_sz > 0 else f"- **Total Objs**: {total} | **Active (Traded)**: {active}"
+  else:
+    objs_line = f"- **Total Objs**: {total} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)"
+
   lines = [
     "# Backtest Summary",
     "",
-    f"- **Total Objs**: {total} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)",
+    objs_line,
     f"- **Positive Profit**: {pos_profit} ({pos_profit / total * 100:.2f}%) | **Beat Buy&Hold{pool_note}**: {beat_hold} ({beat_hold / total * 100:.2f}%)",
     f"- **Benchmark Return**: {bench_ret:.4f} ({bench_ret * 100:.2f}%) | **Beat Benchmark**: {beat_bench} ({beat_bench / total * 100:.2f}%)",
   ]

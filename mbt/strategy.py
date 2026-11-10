@@ -56,6 +56,20 @@ class Context:
     return 0
 
   @property
+  def date(self) -> str:
+    """current bar date as YYYY-MM-DD string during execute()"""
+    return ""
+
+  @property
+  def current_date(self) -> str:
+    """alias for current bar date as YYYY-MM-DD string during execute()"""
+    return self.date
+
+  def index_of(self, obj: str) -> int:
+    """return the index of an obj in ctx.objs(). Raises ValueError if not found."""
+    return self.objs().index(obj)
+
+  @property
   def step(self) -> int:
     """alias for current bar index (0-based) during execute()"""
     return self.bar
@@ -114,6 +128,17 @@ class Context:
                Non-negative values; if sum > 1.0, weights are automatically normalized to sum to 1.0.
       tolerance: optional tolerance band (e.g. 0.01 for 1%). If position weight deviation
                  from target is within tolerance, no trade is executed.
+    """
+    pass
+
+  def rebalance_objs(self, target_weights: dict[str, float], tolerance: float | None = None):
+    """
+    rebalance portfolio holdings using a mapping of {symbol: weight} (used in PortfolioStrategy).
+
+    Args:
+      target_weights: dict mapping stock symbol to target weight (e.g. {"SH600000": 0.05}).
+                      Missing symbols receive a weight of 0.0.
+      tolerance: optional tolerance band (e.g. 0.01 for 1%).
     """
     pass
 

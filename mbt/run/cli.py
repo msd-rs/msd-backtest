@@ -270,6 +270,12 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   selected_objs.insert(0, args.benchmark)
   req.objs = selected_objs
   req.portfolio = bool(args.portfolio or getattr(req.strategy, "portfolio", False))  # type: ignore[attr-defined]
+  if req.portfolio and len(raw_objs) == 0:
+    stock_count = len(selected_objs) - (1 if args.benchmark in selected_objs else 0)
+    logger.warning(
+      f"组合策略未通过 -s/--objs 指定候选池，已使用策略内置 Selector 在起始日 ({req.start}) 筛选出的 {stock_count} 只股票作为全周期固定基础回测池。"
+      "注意：回测运行中的动态重选 (run_selector) 仅在此基础池内轮动，无法从全市场选入新标的。若需全市场动态选股，请通过 -s/--objs 显式传入大候选池 (例如 A_STOCKS)。"
+    )
   req.cash = args.cash  # type: ignore[attr-defined]
   req.summary = bool(args.summary)  # type: ignore[attr-defined]
   req.fin_only_year = bool(

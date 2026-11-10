@@ -2,7 +2,7 @@ import itertools
 import time
 from typing import Tuple
 
-from mbt.shared import get_limit_ratio
+from mbt.shared import get_limit_ratio, to_statutory_disclosure_date
 import pymsd
 from mbt.select.panel import Panel
 from mbt.select.selector import SelectorDataProvider
@@ -132,13 +132,19 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
 
   def load_financial(self, objs: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> pl.DataFrame:
     """见 SelectorDataProvider.load_financial"""
-    if not objs:
+    if not objs or not fields:
       return pl.DataFrame()
 
     logger.debug(f"start load financial objs, lastN={lastN}")
+    # Always include ts in query to derive statutory announcement date
+    query_fields = list(fields)
+    if "ts" not in query_fields:
+      query_fields.insert(0, "ts")
+
+    # Fetch extra records to compensate for future reports filtered out by statutory disclosure date
+    fetch_n = max(lastN + 4, lastN * 2)
     date_where = f'AND ts <= "{self.date}"' if self.date else ""
-    year_where = "AND ts.month=12" if only_year else ""
-    sql = f"SELECT {db_fields(fields)}  FROM stock_financial where obj in ({objs_where(objs)}) {date_where} {year_where} limit -{lastN}"
+    sql = f"SELECT {db_fields(query_fields)} FROM stock_financial where obj in ({objs_where(objs)}) {date_where} limit -{fetch_n}"
     res = self._client.query_concat(sql)
 
     if "stock_financial" not in res:
@@ -149,16 +155,43 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
 
     total_rows = table.rows
     if total_rows > 0:
-      objs = np.repeat([r[0] for r in ranges], [r[2] - r[1] for r in ranges])
+      fin_objs = np.repeat([r[0] for r in ranges], [r[2] - r[1] for r in ranges])
     else:
-      objs = np.array([], dtype=str)
+      fin_objs = np.array([], dtype=str)
 
-    cols = [pl.Series("obj", objs, dtype=pl.String)]
     d = table.to_dict()
-    for k, v in d.items():
-      cols.append(pl.Series(k, v))
+    rep_ts = d.get("ts")
+    if rep_ts is None or len(rep_ts) == 0:
+      return pl.DataFrame()
 
-    df = pl.DataFrame(cols)
+    ann_ts = to_statutory_disclosure_date(pl.Series("report_ts", rep_ts))
+
+    df_data = {
+      "obj": fin_objs,
+      "ts": ann_ts,
+      "report_ts": rep_ts,
+    }
+    for f in fields:
+      if f in d:
+        df_data[f] = d[f]
+
+    df = pl.DataFrame(df_data)
+
+    if self.date:
+      target_dt = pl.lit(self.date).cast(pl.Datetime("us"))
+      df = df.filter(pl.col("ts") <= target_dt)
+
+    if only_year:
+      df = df.filter(pl.col("report_ts").dt.month() == 12)
+
+    if len(df) == 0:
+      return pl.DataFrame()
+
+    df = (
+      df.sort(["obj", "report_ts"])
+      .group_by("obj", maintain_order=True)
+      .tail(lastN)
+    )
     logger.debug(f"finish data frame financial for {len(ranges)} objs")
     return df
 

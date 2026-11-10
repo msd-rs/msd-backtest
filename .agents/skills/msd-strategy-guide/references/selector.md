@@ -58,7 +58,7 @@ class MySelector(mbt.Selector):
 > [!WARNING] Split-Adjustment vs. Fundamental Valuation Rule
 > - **Forward-adjusted prices (`close`, `open`, `high`, `low`)**: Use **only** for continuous time series and technical indicators (e.g. `al.MA`, momentum returns, MACD).
 > - **Unadjusted raw prices (`raw_close`, `raw_open`, `raw_high`, `raw_low`, `price`)**: **Must** be used for fundamental valuation and market cap (e.g. PB, PE, market capitalization).
->   - Never calculate PB or market cap with forward-adjusted `close`! For high-transfer stocks, a real share price of 50 CNY with BVPS (`f004`) of 10 CNY gives a real PB of 5.0; forward-adjusted `close` might be scaled down to 5 CNY, yielding a false PB of 0.5 (erroneously indicating severe undervaluation).
+>   - Never calculate PB or market cap with forward-adjusted `close`! For high-transfer stocks, a real share price of 50 CNY with BVPS (`f003`) of 10 CNY gives a real PB of 5.0; forward-adjusted `close` might be scaled down to 5 CNY, yielding a false PB of 0.5 (erroneously indicating severe undervaluation).
 >   - **Correct practice**: In `load_kline` (Panel), use `panel.column("raw_close")` or `panel.last("raw_close")`; in `load_snapshot`, use `raw_close` (or `close`, which is also unadjusted in snapshot).
 
 - `load_kline` provides full raw price series alongside adjusted prices:
@@ -101,8 +101,9 @@ Avoid per-obj Python loops; compute over the entire panel at once:
 ### Valuation Factors & Market Cap
 When computing valuation multiples and capitalization, **always use unadjusted raw price `raw_close`**:
 ```python
-# 1. PB ratio: latest unadjusted close / BVPS (f004)
-pb = panel.last("raw_close") / panel.last("f004")
+# 1. PB ratio: latest unadjusted close / BVPS (f003)
+# Note: Always verify financial column names via `msd shell ".schema stock_financial"`
+pb = panel.last("raw_close") / panel.last("f003")
 
 # 2. Total Market Cap: latest unadjusted close * total shares (total_shares)
 market_cap = panel.last("raw_close") * panel.last("total_shares")

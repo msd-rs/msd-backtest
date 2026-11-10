@@ -15,7 +15,7 @@ import alpha as al
 class Strategy(mbt.Strategy):
 
   # Optional: declare needed financial fields to avoid loading all columns (*)
-  # fin_fields = ["f001", "f004"]
+  # fin_fields = ["f001", "f003"]
 
   def __init__(self):
     super().__init__()
@@ -63,7 +63,7 @@ class Strategy(mbt.Strategy):
   - stock list (`ctx.objs()`)
   - current bar index (`ctx.bar` or `ctx.step`, 0-based), total bars per stock (`ctx.bars`), and stock count (`ctx.n_objs`)
   - 2D `Panel` view (`ctx.panel()`) for multi-period resampling (`panel.resample("1W")`) and 2D array slicing (`panel.compute(...)`, `panel.column(...)`)
-- `fin_fields` parameter: MSD `stock_financial` contains hundreds of financial columns. If your strategy accesses financial data (`ctx.f001`, etc.), always define `fin_fields = ["f001", "f004", ...]` on your Strategy class. If not provided, `load_data` queries all fields `*`, which significantly increases memory usage and loading time.
+- `fin_fields` parameter: MSD `stock_financial` contains hundreds of financial columns. If your strategy accesses financial data (`ctx.f001`, etc.), always define `fin_fields = ["f001", "f003", ...]` on your Strategy class. If not provided, `load_data` queries all fields `*`, which significantly increases memory usage and loading time.
 - when you to implement the `execute`, use any loop carefully, because it may too slow, vector computing should use preferentially.
 
 # Execution
@@ -93,7 +93,7 @@ After writing a strategy, you can run it to verify it works as expected.
 - `ctx.data(name: str, /, obj: str | None = None) -> np.ndarray`
   the primary method to get data, `name` is the data name, `obj` is used only when comparison, keep `None` for no explicit requirements. `name` can be:
   - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level (`open`, `high`, `low`, `close`, `vwap` are forward-adjusted to share a consistent scale for technical indicators)
-  - `price`, `raw_open`, `raw_vwap`: unadjusted raw prices. **Important**: When computing market cap (`ctx.price * ctx.total_shares`) or comparing with per-share financial fields (such as PB = `ctx.price / ctx.f004` or PE), always use unadjusted `ctx.price` rather than forward-adjusted `ctx.close`.
+  - `price`, `raw_open`, `raw_vwap`: unadjusted raw prices. **Important**: When computing market cap (`ctx.price * ctx.total_shares`) or comparing with per-share financial fields (such as PB = `ctx.price / ctx.f003` or PE), always use unadjusted `ctx.price` rather than forward-adjusted `ctx.close`.
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.
   - `limited` used to check whether the bar had reached the daily limit. `0` for no limit, `1` for limit up, `-1` for limit down
@@ -103,6 +103,10 @@ After writing a strategy, you can run it to verify it works as expected.
     > **Memory Optimization**: By default, `load_data` queries all financial columns (`*`) when `fin_fields` is not provided. To minimize memory consumption and boost load speed, always declare `fin_fields = ["f001", ...]` in your `Strategy` class.
 - `ctx.bar -> int` (alias `ctx.step -> int`)
   current 0-based bar index during `execute(ctx)`. Also `ctx.bars -> int` (total bars per stock) and `ctx.n_objs -> int` (number of stocks in context).
+- `ctx.date -> str` (alias `ctx.current_date -> str`)
+  current bar trading date as `YYYY-MM-DD` string (e.g. `'2024-05-06'`), avoiding manual `ctx.data("ts")[ctx.bar]` indexing.
+- `ctx.index_of(obj: str) -> int`
+  return the index of stock `obj` in `ctx.objs()`. Raises `ValueError` if not found.
 - `ctx.objs() -> list[str]`
   return the list of stock objs in the current backtest.
 - `ctx.panel() -> mbt.select.Panel`
@@ -111,8 +115,32 @@ After writing a strategy, you can run it to verify it works as expected.
   `ctx.sell(signals: np.ndarray, percent: float = 1.0)`
   buy/sell a position, `signals` is a boolean array of signals, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.
   - Calling both `ctx.sell` and `ctx.buy` on the same bar is supported without overwriting: sells are executed first to release cash before buys.
-- `ctx.rebalance(weights: np.ndarray)`
+- `ctx.rebalance(weights: np.ndarray, tolerance: float | None = None)`
   rebalance portfolio holdings to target weights (for `mbt.PortfolioStrategy` or `-p` mode). `weights` is a non-negative 1D array of target portfolio weights per stock (either shape `(n_objs,)` or full block length `(n_objs * bars,)`; if the sum exceeds `1.0`, it is normalized automatically). Sells are executed first to release cash before buys.
+- `ctx.rebalance_objs(target_weights: dict[str, float], tolerance: float | None = None)`
+  convenient mapping-based rebalance for portfolio mode (e.g. `ctx.rebalance_objs({"SH600000": 0.05, "SZ000001": 0.05})`). Stocks not in `target_weights` receive `0.0` target weight (liquidated).
+
+## Financial Fields Workflow & Schema Introspection
+
+MSD `stock_financial` contains over 160+ quarterly financial fields (`f000` to `f242`).
+
+> [!IMPORTANT]
+> **Single Source of Truth Rule**:
+> Financial field code names (`f***`) must **never be guessed or hallucinated**. Always query the running MSD instance using `msd shell` before writing strategy factors.
+
+Run the following commands to inspect fields:
+
+```bash
+# Query the full schema with column descriptions:
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial"
+
+# Grep specific fundamental metrics:
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial" | grep "每股净资产"   # -> f003 (BVPS)
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial" | grep "净资产收益率" # -> f205 (ROE)
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial" | grep "增长率"       # -> revenue / profit growth
+```
+
+For full inspection guidance and common indicator mapping, see [financial.md](./financial.md).
 
 ## alpha-lib
 

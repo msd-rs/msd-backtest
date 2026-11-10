@@ -257,7 +257,11 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond}
             if obj not in range_map:
               continue
             st, end_idx = range_map[obj]
+            if st >= end_idx:
+              continue
             obj_ann_ts = ann_ts_raw[st:end_idx]
+            if len(obj_ann_ts) == 0:
+              continue
             obj_rep_ts = rep_ts_raw[st:end_idx]
             kline_ts = data["ts"][kline_slice]
 
@@ -267,10 +271,13 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond}
 
             for col in fin_metric_cols:
               val = d_fin[col][st:end_idx]
+              if len(val) == 0:
+                continue
               data[col][kline_slice] = np.where(valid, val[safe_idx], np.nan)
             data["report_ts"][kline_slice] = np.where(valid, obj_rep_ts[safe_idx], np.datetime64("NaT", "us"))
     except Exception as e:
-      logger.warning(f"failed to load stock_financial from msd: {e}")
+      logger.error(f"failed to load stock_financial from msd: {e}", exc_info=True)
+      raise
 
   for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
     if col not in data:
@@ -288,6 +295,19 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond}
     except Exception as e:
       logger.warning(f"failed to compute exact warmup_bars from dates: {e}")
       dp.warmup_bars = max(0, min(int(warmup_bars), dp.bars))
+
+  if dp.bars > 0 and len(dp.dates) > 0:
+    start_dt_str = str(dp.dates[0])[:10]
+    end_dt_str = str(dp.dates[dp.bars - 1])[:10]
+    logger.info(
+      f"MSD 数据载入完成: 可用历史区间为 {start_dt_str} 至 {end_dt_str} (共 {dp.bars} 根日K线, 预热条数: {dp.warmup_bars})"
+    )
+    if target_start and not isinstance(target_start, int):
+      req_start_str = str(target_start)[:10]
+      if req_start_str < start_dt_str:
+        logger.warning(
+          f"请求的回测起始日 ({req_start_str}) 早于数据源最早可用日期 ({start_dt_str})，回测将自动从 {start_dt_str} 开始执行。"
+        )
 
   data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)
 

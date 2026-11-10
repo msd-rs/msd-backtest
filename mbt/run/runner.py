@@ -42,9 +42,23 @@ class RunnerContext(Context):
   def objs(self) -> list[str]:
     return self.dp.objs
 
+  def index_of(self, obj: str) -> int:
+    return self.dp.objs.index(obj)
+
   @property
   def bar(self) -> int:
     return self.dp.i
+
+  @property
+  def date(self) -> str:
+    """Current bar date as YYYY-MM-DD string."""
+    if self.dp.bars > 0 and 0 <= self.dp.i < self.dp.bars:
+      return str(self.dp.dates[self.dp.i])[:10]
+    return ""
+
+  @property
+  def current_date(self) -> str:
+    return self.date
 
   @property
   def step(self) -> int:

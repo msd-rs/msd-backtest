@@ -484,3 +484,80 @@ def test_historical_panel_selector_fin_only_year_warning(caplog):
   assert not any("requested fin_only_year=True with fin_fields" in rec.message for rec in caplog.records)
 
 
+def test_rebalance_and_buy_universe_whitelist_guard():
+  # 2 stocks, 4 bars
+  prices = np.full(8, 10.0)
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(4), 2),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(8),
+      "transfer_shares": np.zeros(8),
+      "right_shares": np.zeros(8),
+      "right_price": np.zeros(8),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class WhitelistStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):
+      if ctx.bar == 1:
+        # Whitelist ONLY SH600000
+        ctx.set_universe(["SH600000"])
+        # Attempt to rebalance 50% into SH600000 and 50% into SZ000001
+        ctx.rebalance(np.array([0.5, 0.5]))
+      elif ctx.bar == 2:
+        # In bar 2, verify SH600000 was bought, SZ000001 was NOT bought
+        assert ctx.account.positions[0].shares > 0
+        assert ctx.account.positions[1].shares == 0.0
+
+        # Now whitelist ONLY SZ000001; SH600000 drops into Runoff mode
+        ctx.set_universe(["SZ000001"])
+        # Attempt to allocate 80% to SH600000 (outside universe) and 20% to SZ000001
+        ctx.rebalance(np.array([0.8, 0.2]))
+
+  acc = PortfolioAccount(10000.0, dp)
+  runner = PortfolioRunner(acc)
+  runner.run(WhitelistStrategy())
+
+  # Bar 1 result checked in bar 2.
+  # At the end of bar 2:
+  # SH600000 was outside universe in bar 2, so its 80% request was capped at current holding (cannot buy more!)
+  # SZ000001 was inside universe in bar 2, so it was bought!
+  assert acc.positions[1].shares > 0.0
+
+
+def test_set_universe_and_run_selector_missing_objs_warning(caplog):
+  import logging
+  prices = np.full(8, 10.0)
+  dp = DataProvider(
+    {
+      "ts": np.tile(np.arange(4), 2),
+      "open": prices,
+      "close": prices,
+      "price": prices,
+      "dividend": np.zeros(8),
+      "transfer_shares": np.zeros(8),
+      "right_shares": np.zeros(8),
+      "right_price": np.zeros(8),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class MissingObjStrategy(Strategy):
+    def execute(self, ctx: PortfolioContext):
+      if ctx.bar == 1:
+        # Pass an obj not in preloaded pool
+        ctx.set_universe(["SH600000", "SH999999"])
+
+  acc = PortfolioAccount(10000.0, dp)
+  runner = PortfolioRunner(acc)
+  with caplog.at_level(logging.WARNING):
+    runner.run(MissingObjStrategy())
+
+  assert any("set_universe: 1 obj(s) not in pre-loaded pool" in rec.message for rec in caplog.records)
+
+
+

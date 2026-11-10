@@ -53,20 +53,20 @@ class MySelector(mbt.Selector):
 - **Recommended**: pass `baseline="SH000001"` to `load_kline` so a full-calendar index defines the shared time axis (the baseline block itself is automatically removed from the returned `Panel`).
 - **Legacy compatibility**: `data, objs, bars = self.dp.load_kline(...)` triple unpacking is still supported.
 
-### Price & Adjustment Semantics (复权与估值规范)
+### Price & Adjustment Semantics
 
-> [!WARNING] 复权口径与财务估值规则
-> - **前复权价 (`close`, `open`, `high`, `low`)**: 仅用于连续时序与技术指标（如均线 `al.MA`、动量收益率、MACD）。
-> - **未复权真实价格 (`raw_close`, `raw_open`, `raw_high`, `raw_low`, `price`)**: **必须**用于财务估值指标计算（如 PB、PE、真实市值）。
->   - 严禁使用前复权 `close` 计算 PB/PE/市值！例如某高送转股票真实股价为 50 元，每股净资产 `f004` 为 10 元，真实 PB 为 5.0；但前复权价可能缩放到 5 元，若错误计算 `close / f004` 将得到 0.5（严重失真的虚假低估）。
->   - **正确做法**：在 `load_kline` (Panel) 中使用 `panel.column("raw_close")` 或 `panel.last("raw_close")`；在 `load_snapshot` 中使用 `raw_close`（或 `close`，snapshot 中两者相同）。
+> [!WARNING] Split-Adjustment vs. Fundamental Valuation Rule
+> - **Forward-adjusted prices (`close`, `open`, `high`, `low`)**: Use **only** for continuous time series and technical indicators (e.g. `al.MA`, momentum returns, MACD).
+> - **Unadjusted raw prices (`raw_close`, `raw_open`, `raw_high`, `raw_low`, `price`)**: **Must** be used for fundamental valuation and market cap (e.g. PB, PE, market capitalization).
+>   - Never calculate PB or market cap with forward-adjusted `close`! For high-transfer stocks, a real share price of 50 CNY with BVPS (`f004`) of 10 CNY gives a real PB of 5.0; forward-adjusted `close` might be scaled down to 5 CNY, yielding a false PB of 0.5 (erroneously indicating severe undervaluation).
+>   - **Correct practice**: In `load_kline` (Panel), use `panel.column("raw_close")` or `panel.last("raw_close")`; in `load_snapshot`, use `raw_close` (or `close`, which is also unadjusted in snapshot).
 
-- `load_kline` 提供完整的原始未复权价格：
-  - `raw_open`, `raw_high`, `raw_low`, `raw_close`（以及兼容别名 `price`）
-  - `raw_vwap`（成交金额 / 成交量）
-- `load_snapshot` 同样提供：
+- `load_kline` provides full raw price series alongside adjusted prices:
+  - `raw_open`, `raw_high`, `raw_low`, `raw_close` (plus `price` as backward-compatible alias)
+  - `raw_vwap` (`amount / volume`)
+- `load_snapshot` similarly provides:
   - `close` / `raw_close`, `open` / `raw_open`, `high` / `raw_high`, `low` / `raw_low`, `raw_vwap`
-- **财务数据口径**:
+- **Financial reporting timeline**:
   - Financial records in MSD are indexed by report period end date (`03-31`, `06-30`, `09-30`, `12-31`). When `fin_only_year=False` is used on dates between `01-01` and `04-30`, companies that have not yet published their annual report will naturally return their latest available Q3 (`09-30`) report. Do not confuse cumulative Q3 income/profit figures with full-year figures.
 
 ### Attributes & Metadata
@@ -98,16 +98,16 @@ Avoid per-obj Python loops; compute over the entire panel at once:
     cross = al.RCROSS(close, ma15)  # shape: (n_objs, bars)
   ```
 
-### Valuation Factors & Market Cap (估值与市值计算)
-计算估值与市值时，**务必使用未复权价 `raw_close`**，切勿使用 `close`（前复权价）：
+### Valuation Factors & Market Cap
+When computing valuation multiples and capitalization, **always use unadjusted raw price `raw_close`**:
 ```python
-# 1. PB (市净率): 最新未复权收盘价 / 每股净资产 (f004)
+# 1. PB ratio: latest unadjusted close / BVPS (f004)
 pb = panel.last("raw_close") / panel.last("f004")
 
-# 2. Total Market Cap (总市值): 最新未复权收盘价 * 总股本 (total_shares)
+# 2. Total Market Cap: latest unadjusted close * total shares (total_shares)
 market_cap = panel.last("raw_close") * panel.last("total_shares")
 
-# 3. Dividend Yield TTM (股息率): 近一年未复权每股分红 / 最新未复权收盘价
+# 3. Dividend Yield TTM: trailing 1-year unadjusted dividend per share / latest unadjusted close
 div_ttm = panel.compute(al.SUM, "dividend", 250)[:, -1]
 div_yield = div_ttm / panel.last("raw_close")
 ```

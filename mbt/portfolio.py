@@ -319,6 +319,7 @@ class PortfolioAccount:
     mark_prices: np.ndarray,
     limited: np.ndarray | None = None,
     tolerance: float | None = None,
+    universe: set[str] | None = None,
   ):
     tol = self.tolerance if tolerance is None else float(tolerance)
     weights = np.maximum(np.nan_to_num(np.asarray(target_weights, dtype=np.float64), nan=0.0), 0.0)
@@ -374,6 +375,8 @@ class PortfolioAccount:
     # Pass 2: Buys using available cash
     buy_deficits = []
     for g in range(self.tradable_start, self.groups):
+      if universe is not None and self.dp.objs[g] not in universe:
+        continue
       lim = limited[g] if limited is not None else 0
       if lim == 1:
         continue
@@ -475,6 +478,12 @@ class PortfolioContext(Context):
       self.universe = None
     else:
       self.universe = set(objs)
+      missing = [s for s in objs if s not in self._obj_to_group]
+      if missing:
+        logger.warning(
+          f"set_universe: {len(missing)} obj(s) not in pre-loaded pool and will be ignored: "
+          f"{missing[:5]}{'...' if len(missing) > 5 else ''}"
+        )
 
   @property
   def universe_objs(self) -> list[str]:
@@ -507,8 +516,18 @@ class PortfolioContext(Context):
       if isinstance(selector, Selector):
         fin_only_year = getattr(self.dp, "fin_only_year", False)
         dp_slice = _HistoricalPanelSelectorDataProvider(sub_panel, fin_only_year=fin_only_year)
-        return selector.execute(dp_slice, list(sub_panel.objs))
-      return selector(sub_panel)
+        selected = selector.execute(dp_slice, list(sub_panel.objs))
+      else:
+        selected = selector(sub_panel)
+    selected_list = list(selected)
+    missing = [s for s in selected_list if s not in self._obj_to_group]
+    if missing:
+      logger.warning(
+        f"run_selector: {len(missing)} selected obj(s) not in pre-loaded pool: "
+        f"{missing[:5]}{'...' if len(missing) > 5 else ''}. "
+        "In-backtest dynamic selection operates only on the pre-loaded pool."
+      )
+    return selected_list
 
   def objs(self) -> list[str]:
     return self.dp.objs
@@ -618,11 +637,26 @@ class PortfolioContext(Context):
       w = arr[idx].copy()
       if ts_start > 0:
         w[:ts_start] = 0.0
-      self.target_weights[self.dp.i] = w
     else:
       raise ValueError(
         f"weights must have shape ({self.dp.groups},) or ({self.dp.groups * self.dp.bars},)"
       )
+
+    # Apply universe whitelist guard: stocks outside universe cannot be bought or increased
+    if self.universe is not None:
+      total_equity = self.account.asset
+      for g in range(ts_start, self.dp.groups):
+        if self.dp.objs[g] not in self.universe:
+          curr_shares = self.account.positions[g].shares
+          if curr_shares <= 0 or total_equity <= 0:
+            w[g] = 0.0
+          else:
+            dp_g = self.account.positions[g].price
+            curr_val = curr_shares * dp_g
+            curr_w = curr_val / total_equity
+            w[g] = min(w[g], curr_w)
+
+    self.target_weights[self.dp.i] = w
 
 
 class PortfolioRunner:
@@ -698,7 +732,9 @@ class PortfolioRunner:
           if not np.all(np.isnan(tgt_w)):
             step_tol = self.ctx.target_tolerances[sig_i]
             tol_val = None if np.isnan(step_tol) else float(step_tol)
-            acc.rebalance_step(i, tgt_w, deal_p, mark_p, lim_now, tolerance=tol_val)
+            acc.rebalance_step(
+              i, tgt_w, deal_p, mark_p, lim_now, tolerance=tol_val, universe=self.ctx.universe
+            )
             continue
 
           # 2. Otherwise process buy/sell signals on shared cash pool

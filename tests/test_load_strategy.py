@@ -99,3 +99,32 @@ def test_from_json_io():
     
     req = RunRequest.from_json(f)
     assert req.objs == ["AAPL"]
+
+
+def test_instantiate_class_unrecognized_argument_warning(caplog):
+  import logging
+  from mbt.run.backend import instantiate_class
+
+  class ParameterizedStrategy(Strategy):
+    def __init__(self, pb_max: float = 1.0, period: int = 20):
+      super().__init__()
+      self.pb_max = pb_max
+      self.period = period
+
+    def execute(self, ctx):
+      pass
+
+  # Case 1: Typo 'pb_maxx' triggers warning with 'did you mean pb_max'
+  with caplog.at_level(logging.WARNING):
+    inst = instantiate_class(ParameterizedStrategy, ["pb_maxx=1.5", "period=30"])
+  assert inst.period == 30
+  assert inst.pb_max == 1.0  # Default value since pb_maxx was not accepted
+  assert any("Unrecognized argument 'pb_maxx'" in rec.message and "did you mean 'pb_max'" in rec.message for rec in caplog.records)
+
+  # Case 2: System parameter like 'commission' is silently ignored without warning
+  caplog.clear()
+  with caplog.at_level(logging.WARNING):
+    inst2 = instantiate_class(ParameterizedStrategy, ["commission=0.0002", "period=10"])
+  assert inst2.period == 10
+  assert not any("commission" in rec.message for rec in caplog.records)
+

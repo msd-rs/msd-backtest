@@ -34,8 +34,8 @@ During portfolio backtesting (`PortfolioRunner`):
    - The strategy can call `ctx.rebalance(weights)` with target weights across stocks.
    - Or call `ctx.buy` / `ctx.sell` with individual stock symbols or percentage signals. Cash is dynamically allocated based on available cash (`min(1.0, total_req) * cash`).
 2. **Two-Pass Execution**:
-   - **Pass 1 (Sell / 调出)**: Sells are executed first. Selling proceeds (minus transaction fees) immediately return to the shared `cash` pool.
-   - **Pass 2 (Buy / 调入)**: Available cash is allocated across stocks needing to increase positions. If total cash requested exceeds available cash, budgets are scaled proportionally.
+   - **Pass 1 (Sell)**: Sells are executed first. Selling proceeds (minus transaction fees) immediately return to the shared `cash` pool.
+   - **Pass 2 (Buy)**: Available cash is allocated across stocks needing to increase positions. If total cash requested exceeds available cash, budgets are scaled proportionally.
 3. **Execution Constraints**:
    - **Slippage & Fees**: Buy price is adjusted up by `+slippage`, sell price down by `-slippage`. Fees are calculated dynamically based on date rules.
    - **Trading Unit**: Orders are rounded down to multiples of `unit` (default `100` shares).
@@ -43,9 +43,14 @@ During portfolio backtesting (`PortfolioRunner`):
 
 ---
 
-## 2. Dynamic Universe & Natural Liquidation (自然平仓 / Runoff Mode)
+## 2. Dynamic Universe & Natural Liquidation (Runoff Mode)
 
 In a two-layer architecture, a `Selector` periodically filters a broad universe into an active whitelist (e.g. Top 30 fundamental/momentum stocks), while daily strategy logic runs tactical trading within this dynamic pool.
+
+> [!IMPORTANT] Pre-loaded Super Universe vs. Dynamic Active Whitelist
+> - **Pre-loaded Pool (Super Universe)**: In vectorized backtesting, `load_data` pre-allocates a fixed matrix `(groups, bars)` for the initial stock list (`objs`).
+> - **In-Backtest Selection (`run_selector`)**: Slices the historical panel of this pre-loaded pool up to current bar $i$ (strictly without lookahead bias). It is a **filtering/narrowing** operation within the pre-loaded pool.
+> - **Best Practice**: If your strategy rotates dynamically across a broad market (e.g. All A-shares or broad indexes), pass the broad universe (e.g. `*` or index constituent pool) as the initial backtest `--objs`. Stocks outside the initial load cannot be dynamically fetched mid-run.
 
 ### Core Primitives
 
@@ -67,8 +72,9 @@ In a two-layer architecture, a `Selector` periodically filters a broad universe 
   ctx.sell(["SH600000", "SZ000001"])
   ```
 - **Automatic Whitelist Guard**:
-  - `ctx.buy(...)` automatically shields any stock not in `ctx.universe` from being bought.
-  - `ctx.sell(...)` does **not** filter by whitelist, allowing stocks dropped from the universe to be gracefully liquidated.
+  - Both `ctx.buy(...)` and `ctx.rebalance(...)` automatically prevent buying or increasing positions for any stock not in `ctx.universe`.
+  - In `ctx.rebalance(weights)`, target weights for non-whitelist stocks are capped at their current holding weight (`min(w[g], curr_w)`). If not held, weight is forced to `0.0`.
+  - Neither `ctx.sell(...)` nor `rebalance(...)` blocks selling, allowing stocks dropped from the active whitelist to be gracefully held or liquidated (Runoff mode).
 - **Account State Probes**:
   ```python
   ctx.account.held_objs                         # List of all currently held stocks: ['SH600000', ...]
@@ -126,7 +132,7 @@ Each `PortfolioRecord` contains the following fields:
 | `ts` | `int` | Unix timestamp of the transaction date. |
 | `group` | `int` | Group index of the stock in the data provider. |
 | `obj` | `str` | Stock symbol (e.g. `SH600000`, `SZ000001`). |
-| `action` | `str` | `"BUY"` (调入/买入) or `"SELL"` (调出/卖出). |
+| `action` | `str` | `"BUY"` or `"SELL"`. |
 | `shares` | `float` | Executed quantity in shares. |
 | `deal_price` | `float` | Benchmark execution price before slippage. |
 | `exec_price` | `float` | Actual executed price after slippage. |

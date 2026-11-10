@@ -1,6 +1,26 @@
 from mbt.strategy import Strategy, PortfolioStrategy
 from typing import Any, IO
 import inspect
+import difflib
+import logging
+
+logger = logging.getLogger("backend")
+
+SYSTEM_ARGS = {
+  "commission",
+  "min_commission",
+  "tax",
+  "transaction_fee",
+  "slippage",
+  "unit",
+  "tradable_start",
+  "cash",
+  "portfolio",
+  "summary",
+  "fin_only_year",
+  "warmup_bars",
+  "holdout",
+}
 
 
 def parse_kv_args(args: list[str] | dict[str, Any] | None) -> dict[str, Any]:
@@ -48,11 +68,32 @@ def instantiate_class(cls: type, args: list | dict[str, Any] | None = None):
 
     kwargs = parse_kv_args(args)
     sig = inspect.signature(cls.__init__)
+    valid_params = [p for p in sig.parameters if p != "self"]
     has_var_kw = any(
       p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
     )
     if has_var_kw:
+      for k in kwargs:
+        if k not in sig.parameters and k not in SYSTEM_ARGS:
+          matches = difflib.get_close_matches(k, valid_params, n=1, cutoff=0.7)
+          if matches:
+            logger.warning(
+              f"Argument '{k}' passed to {cls.__name__} closely matches parameter '{matches[0]}', "
+              f"possible typo? Valid parameters: {valid_params}"
+            )
       return cls(**kwargs)
+
+    unrecognized = [
+      k for k in kwargs if k not in sig.parameters and k not in SYSTEM_ARGS
+    ]
+    for k in unrecognized:
+      matches = difflib.get_close_matches(k, valid_params, n=1, cutoff=0.6)
+      hint = f" (did you mean '{matches[0]}' ?)" if matches else ""
+      logger.warning(
+        f"Unrecognized argument '{k}' for {cls.__name__}{hint}. "
+        f"Valid parameters: {valid_params}"
+      )
+
     accepted = {
       k: v for k, v in kwargs.items() if k in sig.parameters and k != "self"
     }

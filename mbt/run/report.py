@@ -914,13 +914,18 @@ def compute_holdout_split(report: Report, holdout: str | int) -> dict | None:
   else:
     try:
       d_target = str(holdout)[:10]
-      if len(dates) > 0 and isinstance(dates[0], (str, bytes)):
+      if len(dates) > 0 and hasattr(dates, "dtype") and np.issubdtype(dates.dtype, np.datetime64):
+        target_val = np.datetime64(d_target).astype(dates.dtype)
+        split_idx = int(np.searchsorted(dates, target_val))
+      elif len(dates) > 0 and isinstance(dates[0], (str, bytes)):
         split_idx = int(np.searchsorted(dates, d_target))
       elif len(dates) > 0:
         v0 = float(dates[0])
         dt = datetime.datetime.fromisoformat(d_target)
         if v0 > 1e17:
           target_val = int(dt.timestamp() * 1e9)
+        elif v0 > 1e14:
+          target_val = int(dt.timestamp() * 1e6)
         elif v0 > 1e11:
           target_val = int(dt.timestamp() * 1000)
         elif v0 > 1e8:

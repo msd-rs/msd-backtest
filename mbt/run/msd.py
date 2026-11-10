@@ -26,6 +26,53 @@ def next_hook_al(i: int, groups: int, bars: int):
   ctx.apply()
 
 
+def find_date_index(
+  dates: np.ndarray, target_date: str | datetime.date | datetime.datetime
+) -> int:
+  """Find the first index where dates >= target_date using binary search.
+
+  Supports np.datetime64, strings, bytes, datetime objects, and numeric timestamps.
+  """
+  if len(dates) == 0:
+    return 0
+
+  target_str = str(target_date)[:10]
+  if hasattr(dates, "dtype") and np.issubdtype(dates.dtype, np.datetime64):
+    target_val = np.datetime64(target_str).astype(dates.dtype)
+    return int(np.searchsorted(dates, target_val))
+
+  first = dates[0]
+  if isinstance(first, bytes):
+    return int(np.searchsorted(dates, target_str.encode()))
+
+  if isinstance(first, str) or (
+    hasattr(dates, "dtype") and np.issubdtype(dates.dtype, np.character)
+  ):
+    return int(np.searchsorted(dates, target_str))
+
+  if isinstance(first, datetime.datetime):
+    dt = datetime.datetime.fromisoformat(target_str)
+    return int(np.searchsorted(dates, dt))
+
+  if isinstance(first, datetime.date):
+    d = datetime.date.fromisoformat(target_str)
+    return int(np.searchsorted(dates, d))
+
+  v0 = float(first)
+  dt = datetime.datetime.fromisoformat(target_str)
+  if v0 > 1e17:
+    target_val = int(dt.timestamp() * 1e9)
+  elif v0 > 1e14:
+    target_val = int(dt.timestamp() * 1e6)
+  elif v0 > 1e11:
+    target_val = int(dt.timestamp() * 1000)
+  elif v0 > 1e8:
+    target_val = int(dt.timestamp())
+  else:
+    target_val = int(target_str.replace("-", ""))
+  return int(np.searchsorted(dates, target_val))
+
+
 def load_data(
   msd_host: str,
   objs: list[str],
@@ -139,23 +186,10 @@ SELECT {fin_cols} FROM stock_financial WHERE obj in ({where_}) {fin_ts_cond}{fin
   if warmup_bars > 0 and target_start and not isinstance(target_start, int) and dp.bars > 0:
     first_dates = dp.dates[:dp.bars]
     try:
-      target_str = str(target_start)[:10]
-      if isinstance(first_dates[0], (str, bytes)):
-        idx = int(np.searchsorted(first_dates, target_str))
-      else:
-        v0 = float(first_dates[0])
-        dt = datetime.datetime.fromisoformat(target_str)
-        if v0 > 1e17:
-          target_val = int(dt.timestamp() * 1e9)
-        elif v0 > 1e11:
-          target_val = int(dt.timestamp() * 1000)
-        elif v0 > 1e8:
-          target_val = int(dt.timestamp())
-        else:
-          target_val = int(target_str.replace("-", ""))
-        idx = int(np.searchsorted(first_dates, target_val))
+      idx = find_date_index(first_dates, target_start)
       dp.warmup_bars = max(0, min(idx, dp.bars))
-    except Exception:
+    except Exception as e:
+      logger.warning(f"failed to compute exact warmup_bars from dates: {e}")
       dp.warmup_bars = max(0, min(int(warmup_bars), dp.bars))
 
   data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)

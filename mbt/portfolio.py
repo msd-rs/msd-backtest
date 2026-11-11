@@ -467,8 +467,8 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     self._panel = panel_slice
     self._fin_only_year = fin_only_year
     self._financial_frame = financial_frame
-    if len(panel_slice.frame) > 0 and "ts" in panel_slice.frame.columns:
-      self.date = str(panel_slice.frame["ts"][-1])[:10]
+    if panel_slice.bars > 0 and "ts" in panel_slice.columns:
+      self.date = str(panel_slice.timeline()[-1])[:10]
 
   @property
   def financial_frame(self) -> pl.DataFrame | None:
@@ -502,7 +502,7 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     if not objs or not fields:
       return pl.DataFrame()
 
-    current_date = self._panel.frame["ts"][-1]
+    current_date = self._panel.timeline()[-1] if self._panel.bars > 0 else 0
     target_set = set(objs)
     df = self._financial_frame.filter(
       (pl.col("ts") <= current_date) & (pl.col("obj").is_in(target_set))
@@ -542,20 +542,7 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     n_bars = lastN if isinstance(lastN, int) else int(lastN[0])
     n_bars = min(n_bars, self._panel.bars)
     start_bar = self._panel.bars - n_bars
-
-    target_set = set(objs) if objs else set(self._panel.objs)
-    selected_indices = [
-      idx for idx, s in enumerate(self._panel.objs) if s in target_set
-    ]
-    selected_objs = [self._panel.objs[idx] for idx in selected_indices]
-    if not selected_objs:
-      raise ValueError("no matching objs in historical panel")
-
-    new_cols = {}
-    for col in self._panel.frame.columns:
-      arr_2d = self._panel.column(col)[selected_indices, start_bar:]
-      new_cols[col] = arr_2d.ravel()
-    return Panel(pl.DataFrame(new_cols), selected_objs, n_bars)
+    return self._panel.slice(start_bar, self._panel.bars, objs=objs)
 
   def load_snapshot(
     self,
@@ -569,7 +556,7 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
       fin_fields=fin_fields,
       fin_only_year=fin_only_year,
     )
-    cols = {col: p.last(col) for col in p.frame.columns}
+    cols = {col: p.last(col) for col in p.columns}
     if "raw_close" in cols:
       cols["close"] = cols["raw_close"]
     return p.cross_section(**cols)
@@ -619,11 +606,7 @@ class PortfolioContext(Context):
     end_bar = self.dp.i + 1
     n_bars = min(end_bar, max(1, int(lastN)))
     start_bar = end_bar - n_bars
-    new_cols = {}
-    for col in self._full_panel.frame.columns:
-      arr_2d = self._full_panel.column(col)[:, start_bar:end_bar]
-      new_cols[col] = arr_2d.ravel()
-    return Panel(pl.DataFrame(new_cols), list(self._full_panel.objs), n_bars)
+    return self._full_panel.slice(start_bar, end_bar)
 
   def run_selector(
     self,
@@ -996,11 +979,7 @@ class SelectorStrategy(PortfolioStrategy):
 
   def _slice_panel(self, end_bar: int) -> Panel:
     assert self._full_panel is not None
-    new_cols = {}
-    for col in self._full_panel.frame.columns:
-      arr_2d = self._full_panel.column(col)[:, :end_bar]
-      new_cols[col] = arr_2d.ravel()
-    return Panel(pl.DataFrame(new_cols), list(self._full_panel.objs), end_bar)
+    return self._full_panel.slice(0, end_bar)
 
   def execute(self, ctx: PortfolioContext):  # type: ignore[override]
     i = ctx.bar

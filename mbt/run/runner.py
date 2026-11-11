@@ -87,13 +87,7 @@ class RunnerContext(Context):
     end_bar = self.dp.i + 1
     n_bars = min(end_bar, max(1, int(lastN)))
     start_bar = end_bar - n_bars
-    import polars as pl
-    new_cols = {}
-    for col in self._full_panel.frame.columns:
-      arr_2d = self._full_panel.column(col)[:, start_bar:end_bar]
-      new_cols[col] = arr_2d.ravel()
-    from mbt.select.panel import Panel
-    return Panel(pl.DataFrame(new_cols), list(self._full_panel.objs), n_bars)
+    return self._full_panel.slice(start_bar, end_bar)
 
   def panel(self, allow_future: bool = False, sliced: bool | None = None):
     """Return a Panel view of the data provider.

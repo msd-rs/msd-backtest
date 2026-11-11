@@ -13,33 +13,63 @@ import polars as pl
 class Panel:
   """行情/因子面板
 
-  `SelectorDataProvider.load_kline` 返回的是一维连续缓冲区(块布局), 本对象把它
-  包装成 (n_objs, bars) 的二维视图, 并**始终携带 objs 元数据**: 行号与股票
+  `SelectorDataProvider.load_kline` 返回的是二维/块布局视图, 本对象把它
+  包装成 (n_objs, bars) 的二维矩阵视图, 并**始终携带 objs 元数据**: 行号与股票
   代码绑定, 调用方不再需要用入参顺序去猜行序。
 
   内部布局: block i 占用 [i*bars, (i+1)*bars), 对应 objs[i]。
+  底层支持 2D NumPy Views 零拷贝切片与 Polars DataFrame 惰性物化 (Lazy Materialization)。
 
   Attributes:
-    frame: 底层 pl.DataFrame, 每列长度都等于 n_objs * bars
+    frame: 底层 pl.DataFrame (惰性物化，每列长度等于 n_objs * bars)
     objs: 行序对应的股票代码(实现可能重排, 以本属性为准)
     bars: 每只股票的K线根数
+    columns: 可用特征列名列表
 
   兼容旧签名(仍可解包):
     >>> data, objs, bars = dp.load_kline(objs, 250)
   """
 
-  __slots__ = ("frame", "objs", "bars", "_index")
+  __slots__ = ("_frame", "_views", "objs", "bars", "_index", "_columns")
 
-  def __init__(self, frame: pl.DataFrame, objs: list[str], bars: int):
+  def __init__(
+    self,
+    data: pl.DataFrame | dict[str, np.ndarray],
+    objs: list[str],
+    bars: int,
+    views: dict[str, np.ndarray] | None = None,
+  ):
     n = len(objs)
     if bars <= 0:
       raise ValueError("bars must be positive")
-    if n * bars != len(frame):
-      raise ValueError(f"layout mismatch: {n} objs x {bars} bars != {len(frame)} rows")
-    self.frame = frame
     self.objs = list(objs)
     self.bars = bars
     self._index = {s: i for i, s in enumerate(self.objs)}
+
+    if isinstance(data, pl.DataFrame):
+      if n * bars != len(data):
+        raise ValueError(f"layout mismatch: {n} objs x {bars} bars != {len(data)} rows")
+      self._frame = data
+      self._views = views if views is not None else {}
+      self._columns = list(data.columns)
+    elif isinstance(data, dict):
+      self._frame = None
+      self._columns = list(data.keys())
+      self._views = {}
+      for k, v in data.items():
+        arr = np.asarray(v)
+        if arr.ndim == 2:
+          if arr.shape != (n, bars):
+            raise ValueError(f"view '{k}' shape mismatch: expected ({n}, {bars}), got {arr.shape}")
+          self._views[k] = arr
+        elif arr.ndim == 1:
+          if len(arr) != n * bars:
+            raise ValueError(f"column '{k}' length mismatch: expected {n * bars}, got {len(arr)}")
+          self._views[k] = arr.reshape(n, bars)
+        else:
+          raise ValueError(f"unsupported array dimension for '{k}': {arr.ndim}")
+    else:
+      raise TypeError(f"unsupported data type for Panel: {type(data)}")
 
   # ---------------------------------------------------------------- 元信息
 
@@ -50,8 +80,30 @@ class Panel:
   def __len__(self) -> int:
     return self.n_objs
 
+  @property
+  def columns(self) -> list[str]:
+    """可用字段列名列表"""
+    return list(self._columns)
+
+  @property
+  def frame(self) -> pl.DataFrame:
+    """底层 pl.DataFrame, 延迟按需物化 (Lazy Materialization)"""
+    if self._frame is None:
+      cols = {}
+      for k in self._columns:
+        v = self._views[k]
+        cols[k] = v.reshape(-1) if v.flags.c_contiguous else np.ascontiguousarray(v).reshape(-1)
+      self._frame = pl.DataFrame(cols)
+    return self._frame
+
+  @frame.setter
+  def frame(self, val: pl.DataFrame):
+    self._frame = val
+    self._columns = list(val.columns)
+    self._views = {}
+
   def __repr__(self) -> str:
-    return f"Panel(n_objs={self.n_objs}, bars={self.bars}, columns={self.frame.columns})"
+    return f"Panel(n_objs={self.n_objs}, bars={self.bars}, columns={self.columns})"
 
   def __iter__(self) -> Iterator:
     """兼容旧的三元组解包: data, objs, bars = dp.load_kline(...)"""
@@ -63,25 +115,68 @@ class Panel:
 
   # ---------------------------------------------------------------- 二维视图
 
-  def buffer(self, name: str) -> np.ndarray:
-    """一维连续缓冲区(块布局), 即 alpha-lib 直接消费的形态"""
-    return self.frame.get_column(name).to_numpy()
-
   def column(self, name: str) -> np.ndarray:
-    """(n_objs, bars) 二维视图; 与 buffer() 共享同一块内存"""
-    return self.buffer(name).reshape(self.n_objs, self.bars)
+    """(n_objs, bars) 二维视图; 与底层连续数组或视图共享内存 (零拷贝)"""
+    if self._views is not None and name in self._views:
+      return self._views[name]
+    if self._views is None:
+      self._views = {}
+    col_2d = self.frame.get_column(name).to_numpy().reshape(self.n_objs, self.bars)
+    self._views[name] = col_2d
+    return col_2d
+
+  def buffer(self, name: str) -> np.ndarray:
+    """一维连续缓冲区(块布局), 按需保证连续性"""
+    if self._frame is not None:
+      return self.frame.get_column(name).to_numpy()
+    arr_2d = self.column(name)
+    if arr_2d.flags.c_contiguous:
+      return arr_2d.reshape(-1)
+    return np.ascontiguousarray(arr_2d).reshape(-1)
 
   def last(self, name: str) -> np.ndarray:
-    """每只股票最后一根的值, 形状 (n_objs,)"""
+    """每只股票最后一根的值, 形状 (n_objs,) 零拷贝视图"""
     return self.column(name)[:, -1]
 
   def offset(self, name: str, k: int) -> np.ndarray:
-    """每只股票第 k 根的值(k 可为负), 形状 (n_objs,)"""
+    """每只股票第 k 根的值(k 可为负), 形状 (n_objs,) 零拷贝视图"""
     return self.column(name)[:, k]
 
   def timeline(self) -> np.ndarray:
     """日期轴 (bars,), 由 asof 对齐基准决定; 全市场共享同一条时间轴"""
-    return self.frame.get_column("ts").to_numpy()[: self.bars]
+    if "ts" in self._columns:
+      return self.column("ts")[0, :]
+    return np.array([])
+
+  def slice(
+    self,
+    start_bar: int,
+    end_bar: int,
+    objs: list[str] | None = None,
+    columns: list[str] | None = None,
+  ) -> "Panel":
+    """Zero-copy 2D view slicing without copying memory or building eager DataFrames."""
+    n_bars = max(0, end_bar - start_bar)
+    if n_bars <= 0:
+      raise ValueError(f"invalid slice range: [{start_bar}, {end_bar})")
+
+    if objs is not None:
+      target_set = set(objs)
+      selected_indices = [idx for idx, s in enumerate(self.objs) if s in target_set]
+      selected_objs = [self.objs[idx] for idx in selected_indices]
+      if not selected_objs:
+        raise ValueError("no matching objs in panel")
+      row_indexer = selected_indices
+    else:
+      row_indexer = slice(None)
+      selected_objs = self.objs
+
+    target_cols = columns if columns is not None else self._columns
+    new_views = {}
+    for col in target_cols:
+      new_views[col] = self.column(col)[row_indexer, start_bar:end_bar]
+
+    return Panel(new_views, selected_objs, n_bars)
 
   # ---------------------------------------------------------------- alpha 上下文
 
@@ -126,7 +221,7 @@ class Panel:
     但请确认其输出长度与输入一致。
     """
     def resolve(a):
-      if isinstance(a, str) and a in self.frame.columns:
+      if isinstance(a, str) and a in self.columns:
         return self.buffer(a)
       return a
 
@@ -155,7 +250,7 @@ class Panel:
     Returns:
       新的 Panel 对象, 每只股票包含 new_bars 根重采样后的 K 线。
     """
-    if "ts" not in self.frame.columns:
+    if "ts" not in self.columns:
       raise ValueError("cannot resample Panel without 'ts' column")
 
     freq_norm = freq.strip().lower()
@@ -199,7 +294,7 @@ class Panel:
 
     sum_cols = {"volume", "amount", "dividend", "transfer_shares", "right_shares"}
 
-    for name in self.frame.columns:
+    for name in self.columns:
       if name == "ts":
         continue
       col_series = self.frame.get_column(name)

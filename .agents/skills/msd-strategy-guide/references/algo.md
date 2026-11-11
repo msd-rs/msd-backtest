@@ -4,7 +4,7 @@ The input and output arrays contain multiple stocks/objects. The algorithm imple
 These arrays are organized as follows: let A and B be two stocks, respectively, and let close be the data. Then close = [A0, A1, ..., An, B0, B1, ..., Bn].
 When you need to write your own algorithm, please make sure to preserve this structure.
 
-The algorithm library is an open-source project. The installation package is named `py-alpha-lib`, and after installation, the import package name is `alpha`. You can use Python's Doc mechanism to view its functions list.
+The algorithm library is an open-source project. The installation package is named `py-alpha-lib`, and after installation, the import package name is `alpha`. You can use Python's Doc mechanism to view its functions list. eg. `python -m pydoc alpha`
 
 Its repository addresses are:
 

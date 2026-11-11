@@ -18,8 +18,10 @@ SYSTEM_ARGS = {
   "portfolio",
   "summary",
   "fin_only_year",
+  "fin_lookback_days",
   "warmup_bars",
   "holdout",
+  "exec_mode",
 }
 
 

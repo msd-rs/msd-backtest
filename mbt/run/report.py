@@ -800,14 +800,16 @@ def build_markdown_summary(
 
   is_portfolio = (total == 1 and reports[0].obj == "PORTFOLIO") or (getattr(reports[0], "records", None) is not None)
   pool_note = " (Pool Buy&Hold)" if is_portfolio else ""
+  exec_mode = getattr(account, "exec_mode", "close") if account else "close"
+  exec_info = f" | **Exec Mode**: `{exec_mode}`" if exec_mode != "close" else ""
 
   if is_portfolio:
     r0 = reports[0]
     pool_sz = getattr(r0, "pool_size", total)
     traded_cnt = getattr(r0, "traded_objs_count", active)
-    objs_line = f"- **Mode**: Portfolio (Shared Cash) | **Pool Size**: {pool_sz} | **Active (Traded Objs)**: {traded_cnt} ({traded_cnt / pool_sz * 100:.2f}%)" if pool_sz > 0 else f"- **Total Objs**: {total} | **Active (Traded)**: {active}"
+    objs_line = f"- **Mode**: Portfolio (Shared Cash){exec_info} | **Pool Size**: {pool_sz} | **Active (Traded Objs)**: {traded_cnt} ({traded_cnt / pool_sz * 100:.2f}%)" if pool_sz > 0 else f"- **Total Objs**: {total}{exec_info} | **Active (Traded)**: {active}"
   else:
-    objs_line = f"- **Total Objs**: {total} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)"
+    objs_line = f"- **Total Objs**: {total}{exec_info} | **Active (Traded)**: {active} ({active / total * 100:.2f}%)"
 
   lines = [
     "# Backtest Summary",

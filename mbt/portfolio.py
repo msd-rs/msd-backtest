@@ -463,9 +463,17 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     financial_frame: pl.DataFrame | None = None,
   ):
     super().__init__()
+    self.mode = "backtest_slice"
     self._panel = panel_slice
     self._fin_only_year = fin_only_year
     self._financial_frame = financial_frame
+    if len(panel_slice.frame) > 0 and "ts" in panel_slice.frame.columns:
+      self.date = str(panel_slice.frame["ts"][-1])[:10]
+
+  @property
+  def financial_frame(self) -> pl.DataFrame | None:
+    """Preloaded historical financial reports frame (if available)."""
+    return self._financial_frame
 
   def load_financial(
     self,
@@ -673,6 +681,14 @@ class PortfolioContext(Context):
     return self.dp.i
 
   @property
+  def warmup_bars(self) -> int:
+    return int(getattr(self.dp, "warmup_bars", 0))
+
+  @property
+  def is_warmup(self) -> bool:
+    return self.dp.i < self.warmup_bars
+
+  @property
   def bars(self) -> int:
     return self.dp.bars
 
@@ -840,6 +856,7 @@ class PortfolioRunner:
       raise ValueError(f"unsupported exec_mode: {exec_mode}, expected 'close' or 'next_open'")
     if tolerance > 0.0:
       account.tolerance = float(tolerance)
+    account.exec_mode = exec_mode
     self.ctx = PortfolioContext(account)
     self.exec_mode = exec_mode
     self.check_limit = check_limit

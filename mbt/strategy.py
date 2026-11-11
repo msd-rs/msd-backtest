@@ -75,6 +75,16 @@ class Context:
     return self.bar
 
   @property
+  def warmup_bars(self) -> int:
+    """number of warmup bars prior to the backtest start date"""
+    return 0
+
+  @property
+  def is_warmup(self) -> bool:
+    """True if current bar is in the warmup period before the formal start date"""
+    return self.bar < self.warmup_bars
+
+  @property
   def bars(self) -> int:
     """total number of bars per stock"""
     return 0
@@ -149,10 +159,16 @@ class Strategy:
   Attributes:
     portfolio: If True, indicates this strategy operates in shared-cash portfolio mode
       using `PortfolioRunner` and `PortfolioAccount`. Default False.
+    exec_mode: Execution mode for order matching:
+      - "close" (default): orders are matched against the same bar's close price.
+      - "next_open": signals generated at bar T's close are matched against bar T+1's open price,
+        faithfully simulating real-world next-day market opening execution.
     fin_fields: List of financial field names (e.g. ['f001', 'f205']) to query from
       `stock_financial`. If None or empty (default), financial queries are skipped
       to save memory and prevent accidental memory exhaustion.
     fin_only_year: If True, only annual financial reports (ts.month=12) are queried.
+    fin_lookback_days: Explicit lookback window in calendar days for financial statement history.
+      Defaults to 1200 days (~3.3 years) for annual reports and 500 days for quarterly reports.
     warmup_bars: Number of warmup bars loaded before the start date for indicator initialization.
       
       Warmup Bars Lifecycle:
@@ -162,13 +178,17 @@ class Strategy:
       3. Execution: During bars `0 <= bar < warmup_bars`, `execute(ctx)` runs normally to allow
          rolling indicators (EMA, MACD, etc.) to stabilize, but trading execution is suppressed
          (orders are not matched, holdings and cash remain unchanged).
+         IMPORTANT: If your strategy maintains stateful counters, signal caches, or pending flags,
+         check `if not ctx.is_warmup:` before mutating state, or precompute indicators in `prepare(ctx)`.
       4. Evaluation: `Report` slices out warmup bars, reporting metrics strictly starting
          from the user's target start date.
   """
 
   portfolio: bool = False
+  exec_mode: str = "close"
   fin_fields: list[str] | None = None
   fin_only_year: bool = False
+  fin_lookback_days: int | None = None
   warmup_bars: int = 0
 
   def prepare(self, ctx: Context):

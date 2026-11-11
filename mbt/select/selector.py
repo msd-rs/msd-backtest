@@ -32,8 +32,21 @@ class SelectorDataProvider:
   the appropriate concrete provider into `selector.execute(dp, ...)`.
   """
 
+  mode: str = "standalone"
+  """Execution mode: 'standalone' (initial screening outside backtest) or 'backtest_slice' (dynamic selection inside backtest loop)."""
+
   date: str | None = None
   """Selection date (YYYY-MM-DD); None indicates the latest available trading date."""
+
+  @property
+  def current_date(self) -> str:
+    """Current selection date as YYYY-MM-DD string."""
+    return str(self.date)[:10] if self.date else ""
+
+  @property
+  def is_backtest(self) -> bool:
+    """True if executing inside backtest dynamic slice, False if standalone initial screening."""
+    return self.mode == "backtest_slice"
 
   def load_kline(self, objs: list[str], lastN: int | list[int] = 100,
                  fin_fields: list[str] = [], fin_only_year: bool = True,
@@ -160,14 +173,40 @@ class SelectorDataProvider:
 
 
 class Selector:
-  """选股器基类
+  """Base class for stock selection pipelines.
 
-  子类按 step00, step01, ... 顺序实现选股步骤, 每步接收上一步的结果并返回新
-  的股票列表。约定: **每个 stepXX 必须有 docstring**(会被写入日志), 并把中间
-  因子累积到 `self.factors`(pl.DataFrame, 股票代码列名为 `obj`)。
+  Subclasses define selection steps step00, step01, ... in sequence.
+  Each step receives the output list of stocks from the previous step and returns a new list.
+
+  Convention: Each step method should have an informative docstring describing its selection criteria.
+  Intermediate factors can be accumulated in `self.factors` (pl.DataFrame with 'obj' column).
+
+  Lifecycle & Context:
+    * `self.is_backtest`: True when running dynamically inside backtest loop (`ctx.run_selector`),
+      False when performing standalone initial screening outside backtest. Use this property to
+      cleanly distinguish initial universe creation from in-backtest ranking without relying on
+      heuristics like `if not stocks:`.
+    * `self.current_date`: Current selection date (YYYY-MM-DD).
+    * `self.mode`: Execution mode ('standalone' or 'backtest_slice').
+    * `self.dp`: The underlying `SelectorDataProvider` instance.
   """
 
   dp: SelectorDataProvider
+
+  @property
+  def mode(self) -> str:
+    """Current execution mode ('standalone' or 'backtest_slice')."""
+    return getattr(self.dp, "mode", "standalone")
+
+  @property
+  def is_backtest(self) -> bool:
+    """True if selector is executing inside a backtest dynamic loop, False if standalone initial screening."""
+    return getattr(self.dp, "is_backtest", False)
+
+  @property
+  def current_date(self) -> str:
+    """Current selection date as YYYY-MM-DD string."""
+    return getattr(self.dp, "current_date", "")
 
   def __init__(self):
     pass

@@ -188,10 +188,23 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     help="only query annual financial reports (ts.month=12) from stock_financial",
   )
   parser.add_argument(
+    "--fin-lookback-days",
+    type=int,
+    default=None,
+    help="lookback window in calendar days for financial data (default 1200d for annual, 500d for quarterly)",
+  )
+  parser.add_argument(
     "--warmup-bars",
     type=int,
     default=0,
     help="warmup bars loaded before start date for indicators only (no trading)",
+  )
+  parser.add_argument(
+    "--exec-mode",
+    type=str,
+    choices=["close", "next_open"],
+    default=None,
+    help="execution mode: 'close' (same-bar close) or 'next_open' (next-bar open)",
   )
   parser.add_argument(
     "--starts",
@@ -337,6 +350,16 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     or getattr(req, "fin_only_year", False)
   )
   req.warmup_bars = int(args.warmup_bars or getattr(req.strategy, "warmup_bars", 0))
+  req.exec_mode = (
+    args.exec_mode
+    or (kv_kwargs.get("exec_mode") if kv_kwargs else None)
+    or getattr(req.strategy, "exec_mode", "close")
+  )
+  req.fin_lookback_days = (
+    args.fin_lookback_days
+    or (kv_kwargs.get("fin_lookback_days") if kv_kwargs else None)
+    or getattr(req.strategy, "fin_lookback_days", None)
+  )
   req.starts = raw_starts if len(raw_starts) > 1 else None
   req.holdout = args.holdout
   req.raw_objs = raw_objs
@@ -428,6 +451,8 @@ def run_single_period(
   start: str,
   end: str,
   warmup_bars: int = 0,
+  exec_mode: str = "close",
+  fin_lookback_days: int | None = None,
 ) -> tuple[list[Report], DataProvider, Any]:
   """Execute a backtest run for a single time period [start, end].
 
@@ -438,6 +463,8 @@ def run_single_period(
     start: Start date of trading.
     end: End date of trading.
     warmup_bars: Number of warmup bars prior to start date for indicator initialization.
+    exec_mode: Execution mode ('close' or 'next_open').
+    fin_lookback_days: Lookback window in calendar days for financial data history.
 
   Returns:
     tuple of (reports, data_provider, account).
@@ -448,6 +475,10 @@ def run_single_period(
   fin_only_year = getattr(req, "fin_only_year", False) or getattr(
     req.strategy, "fin_only_year", False
   )
+  if fin_lookback_days is None:
+    fin_lookback_days = getattr(req, "fin_lookback_days", None) or getattr(
+      req.strategy, "fin_lookback_days", None
+    )
 
   selected_objs = req.objs
   if getattr(req, "strategy_path", None) and getattr(req, "starts", None):
@@ -477,6 +508,7 @@ def run_single_period(
     fin_fields=fin_fields,
     fin_only_year=fin_only_year,
     warmup_bars=warmup_bars,
+    fin_lookback_days=fin_lookback_days,
   )
   logger.info(
     f"data loaded, objs: {len(objs)}, bars per obj: {dp.bars}, total_bars: {dp.groups * dp.bars}"
@@ -491,8 +523,8 @@ def run_single_period(
     init_cash = custom_cash if custom_cash is not None else 1000000.0
     p_account = PortfolioAccount(init_cash, dp, fee=fee, benchmark=bench_obj)
     logger.info(f"portfolio account created, initial_cash={init_cash}")
-    p_runner = PortfolioRunner(p_account)
-    logger.info("portfolio runner created")
+    p_runner = PortfolioRunner(p_account, exec_mode=exec_mode)
+    logger.info(f"portfolio runner created, exec_mode={exec_mode}")
     p_runner.run(req.strategy)
     logger.info("portfolio strategy finished")
     diag = getattr(p_runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
@@ -502,8 +534,8 @@ def run_single_period(
     init_cash = custom_cash if custom_cash is not None else 10000.0
     account = Account(init_cash, dp, fee=fee)
     logger.info("account created")
-    runner = Runner(account)
-    logger.info("runner created")
+    runner = Runner(account, exec_mode=exec_mode)
+    logger.info(f"runner created, exec_mode={exec_mode}")
     runner.run(req.strategy)
     logger.info("strategy finished")
     diag = getattr(runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
@@ -521,6 +553,8 @@ def main():
   req, msd_host, output, fee = parse_args()
   starts = getattr(req, "starts", None)
   warmup_bars = getattr(req, "warmup_bars", 0)
+  exec_mode = getattr(req, "exec_mode", "close")
+  fin_lookback_days = getattr(req, "fin_lookback_days", None)
   holdout = getattr(req, "holdout", None)
   show_summary = getattr(req, "summary", False)
 
@@ -530,7 +564,14 @@ def main():
     for st in starts:
       logger.info(f"evaluating start: {st}")
       reports, dp, acc = run_single_period(
-        req, msd_host, fee, st, req.end, warmup_bars=warmup_bars
+        req,
+        msd_host,
+        fee,
+        st,
+        req.end,
+        warmup_bars=warmup_bars,
+        exec_mode=exec_mode,
+        fin_lookback_days=fin_lookback_days,
       )
       if reports:
         multi_runs.append({
@@ -550,7 +591,14 @@ def main():
 
   logger.info(f"load data from {msd_host}")
   reports, dp, acc = run_single_period(
-    req, msd_host, fee, req.start, req.end, warmup_bars=warmup_bars
+    req,
+    msd_host,
+    fee,
+    req.start,
+    req.end,
+    warmup_bars=warmup_bars,
+    exec_mode=exec_mode,
+    fin_lookback_days=fin_lookback_days,
   )
   logger.info("report built")
 

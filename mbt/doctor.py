@@ -11,7 +11,7 @@ from typing import Any
 
 def check_env() -> dict[str, Any]:
   """Check Python runtime and core quantitative dependencies."""
-  packages = ["polars", "numpy", "pymsd", "alpha", "orjson", "pytest"]
+  packages = ["polars", "numpy", "pymsd", "alpha", "orjson"]
   installed = {}
   for pkg in packages:
     try:

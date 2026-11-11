@@ -65,6 +65,14 @@ class RunnerContext(Context):
     return self.dp.i
 
   @property
+  def warmup_bars(self) -> int:
+    return int(getattr(self.dp, "warmup_bars", 0))
+
+  @property
+  def is_warmup(self) -> bool:
+    return self.dp.i < self.warmup_bars
+
+  @property
   def bars(self) -> int:
     return self.dp.bars
 
@@ -153,6 +161,7 @@ class Runner:
   ):
     if exec_mode not in ("close", "next_open"):
       raise ValueError(f"unsupported exec_mode: {exec_mode}, expected 'close' or 'next_open'")
+    account.exec_mode = exec_mode
     self.ctx = RunnerContext(account)
     self.exec_mode = exec_mode
     self.check_limit = check_limit

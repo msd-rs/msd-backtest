@@ -111,6 +111,7 @@ def load_data(
   fin_fields: list[str] | str | None = None,
   fin_only_year: bool = False,
   warmup_bars: int = 0,
+  fin_lookback_days: int | None = None,
 ) -> tuple[DataProvider, list[str]]:
   """Create a DataProvider for backtesting from MSD database.
 
@@ -131,6 +132,8 @@ def load_data(
       To load all fields, pass fin_fields=['*'] (warning: high memory usage).
     fin_only_year: If True, only query annual reports (ts.month=12) from stock_financial.
     warmup_bars: Number of warmup bars loaded prior to `start` date for indicator initialization.
+    fin_lookback_days: Explicit lookback window in calendar days for financial data history.
+      Defaults to 1200 days for annual reports (~3.3 years) and 500 days for quarterly reports.
 
   Returns:
     tuple of (DataProvider, loaded_objs).
@@ -152,6 +155,7 @@ def load_data(
 
   ts_where = []
   fin_ts_where = []
+  shares_ts_where = []
   limit = ""
   fin_limit = ""
   if isinstance(start, int):
@@ -159,10 +163,24 @@ def load_data(
     fin_limit = f"limit -{max(start // 50, 8)}"
   elif query_start:
     ts_where.append(f"ts >= '{query_start}'")
+    # stock_shares: lookback 10 years to find the initial share capital without filtering by ts.month=12
     try:
-      lookback_days = 750 if fin_only_year else 450
+      shares_start = (
+        datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=3650)
+      ).isoformat()
+    except ValueError:
+      shares_start = str(query_start)
+    shares_ts_where.append(f"ts >= '{shares_start}'")
+
+    if fin_lookback_days is not None:
+      fin_lookback = max(1, int(fin_lookback_days))
+    else:
+      # Default: 1200 days (~3.3 years) for annual reports to ensure 3-4 annual periods are covered;
+      # 500 days (~1.4 years) for quarterly reports.
+      fin_lookback = 1200 if fin_only_year else 500
+    try:
       fin_start = (
-        datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=lookback_days)
+        datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=fin_lookback)
       ).isoformat()
     except ValueError:
       fin_start = str(query_start)
@@ -175,14 +193,17 @@ def load_data(
       end_clause = f"ts < '{end}'"
     ts_where.append(end_clause)
     fin_ts_where.append(end_clause)
+    shares_ts_where.append(end_clause)
 
   if fin_only_year:
     fin_ts_where.append("ts.month=12")
 
   ts_cond = f"and {' and '.join(ts_where)}" if ts_where else ""
   fin_ts_cond = f"and {' and '.join(fin_ts_where)}" if fin_ts_where else ""
+  shares_ts_cond = f"and {' and '.join(shares_ts_where)}" if shares_ts_where else ""
   limit_cond = f" {limit}" if limit else ""
   fin_limit_cond = f" {fin_limit}" if fin_limit else ""
+  shares_limit_cond = fin_limit_cond
 
   where_ = objs_where(objs)
 
@@ -196,11 +217,15 @@ def load_data(
       fin_cols = "*"
     else:
       fin_cols = db_fields(fin_fields)
+    if query_start:
+      logger.info(
+        f"financial query lookback: {fin_lookback} days (fin_start={fin_start}, fin_only_year={fin_only_year})"
+      )
 
   sql = f"""
 SELECT * FROM stock_kline_1d WHERE obj in ({where_}) {ts_cond}{limit_cond};
 SELECT * FROM stock_dividend WHERE obj in ({where_}) {ts_cond}{limit_cond};
-SELECT * FROM stock_shares WHERE obj in ({where_}) {fin_ts_cond}{fin_limit_cond};
+SELECT * FROM stock_shares WHERE obj in ({where_}) {shares_ts_cond}{shares_limit_cond};
 """
   logger.debug(f"start load data for {len(objs)} objs")
   t1 = time.time()

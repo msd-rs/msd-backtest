@@ -78,3 +78,85 @@ def test_historical_panel_selector_load_financial():
   assert len(fin_bar4) == 2
   assert all(fin_bar4["report_ts"].to_numpy() == np.datetime64("2023-12-31T00:00:00.000000", "us"))
   assert list(fin_bar4["f001"]) == [5.21, 3.80]
+
+
+def test_historical_panel_selector_fail_fast_on_missing_fields():
+  """Fail-fast: verify ValueError is raised when requested financial fields
+  were not preloaded into backtest data.
+  """
+  import pytest
+
+  objs = ["SH600000"]
+  frame = pl.DataFrame({
+    "ts": np.array(["2024-03-01T00:00:00.000000"], dtype="datetime64[us]"),
+    "close": [10.0],
+    "raw_close": [10.0],
+  })
+  panel = Panel(frame, objs, 1)
+
+  # 1. No financial_frame preloaded -> load_financial raises ValueError
+  dp_no_fin = _HistoricalPanelSelectorDataProvider(panel, financial_frame=None)
+  with pytest.raises(ValueError, match="no financial data was preloaded in backtest"):
+    dp_no_fin.load_financial(objs, fields=["f001"])
+
+  # 2. Some financial fields missing from financial_frame -> raises ValueError
+  partial_fin = pl.DataFrame({
+    "obj": ["SH600000"],
+    "ts": np.array(["2024-01-01T00:00:00.000000"], dtype="datetime64[us]"),
+    "report_ts": np.array(["2023-12-31T00:00:00.000000"], dtype="datetime64[us]"),
+    "f001": [5.0],
+  })
+  dp_partial = _HistoricalPanelSelectorDataProvider(panel, financial_frame=partial_fin)
+  with pytest.raises(ValueError, match="requested field\\(s\\) \\['f205'\\]"):
+    dp_partial.load_financial(objs, fields=["f001", "f205"])
+
+  # 3. Missing fin_fields from panel for load_kline/load_snapshot -> raises ValueError
+  with pytest.raises(ValueError, match="requested financial field\\(s\\) \\['f001'\\]"):
+    dp_no_fin.load_kline(objs, fin_fields=["f001"])
+
+  with pytest.raises(ValueError, match="requested financial field\\(s\\) \\['f001'\\]"):
+    dp_no_fin.load_snapshot(objs, fin_fields=["f001"])
+
+
+def test_cli_merges_selector_and_cli_fin_fields(monkeypatch, tmp_path):
+  """Verify that CLI parse_args automatically merges Selector.fin_fields
+  and CLI --fin-fields into req.fin_fields without manual Strategy duplication.
+  """
+  import sys
+  from mbt.run.cli import parse_args
+
+  # Create a strategy file with a Selector declaring fin_fields
+  strat_file = tmp_path / "strat_with_selector.py"
+  strat_file.write_text(
+    """
+from mbt.select.selector import Selector
+from mbt.strategy import PortfolioStrategy
+
+class MyTestSelector(Selector):
+  fin_fields = ["f001", "f003"]
+  fin_only_year = True
+
+  def step00(self, stocks):
+    return stocks
+
+class MyTestStrategy(PortfolioStrategy):
+  pass
+"""
+  )
+
+  test_args = [
+    "mbt.run.cli",
+    str(strat_file),
+    "-s", "SH600000",
+    "-b", "2023-01-01",
+    "-e", "2023-12-31",
+    "--fin-fields", "f205,f001",
+  ]
+  monkeypatch.setattr(sys, "argv", test_args)
+
+  req, msd_host, output, fee = parse_args()
+  # f001, f205 from CLI + f001, f003 from Selector -> ['f205', 'f001', 'f003']
+  assert req.fin_fields is not None
+  assert set(req.fin_fields) == {"f001", "f003", "f205"}
+  assert req.fin_only_year is True
+

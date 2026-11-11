@@ -117,6 +117,14 @@ class SelectorDataProvider:
         functions on the returned data, enter the context via `panel.ctx()`.
       * For performance, use py-alpha-lib on the whole block; avoid per-obj
         Python loops.
+      * Standalone vs In-Backtest:
+        - In standalone mode (e.g. MsdSelectorDataProvider), financial fields are queried
+          on-the-fly from the MSD database.
+        - In backtesting mode (e.g. _HistoricalPanelSelectorDataProvider), data is sliced
+          from preloaded historical arrays. Any financial fields specified in `fin_fields`
+          MUST be preloaded upfront by declaring `fin_fields` on your Selector or Strategy
+          class, or via CLI `--fin-fields`. Requesting undeclared financial fields in a
+          backtest will immediately raise a `ValueError` (Fail-Fast principle).
     """
     raise NotImplementedError(
       f"{self.__class__.__name__}.load_kline is an abstract interface method. "
@@ -139,6 +147,16 @@ class SelectorDataProvider:
       DataFrame columns ['obj', 'ts', 'report_ts', *fields]; missing objs are absent.
       `ts` is the statutory disclosure deadline (used for lookahead-free as-of alignment),
       while `report_ts` is the fiscal period end date (e.g. 12-31).
+
+    Notes:
+      * Standalone vs In-Backtest:
+        - In standalone mode (MsdSelectorDataProvider), financial statements are queried
+          on-demand directly from the MSD database.
+        - In backtesting mode (_HistoricalPanelSelectorDataProvider), statements are queried
+          from the preloaded backtest financial frame. You MUST declare the required financial
+          fields on your Strategy or Selector class via `fin_fields = ['f001', ...]`, or
+          provide them via CLI `--fin-fields`. If requested fields are missing in backtest,
+          a `ValueError` is raised immediately to prevent silent data loss.
     """
     raise NotImplementedError(
       f"{self.__class__.__name__}.load_financial is an abstract interface method. "
@@ -164,6 +182,14 @@ class SelectorDataProvider:
       `load_kline` and `load_financial` (the financial 'ts' column is renamed to
       'f_ts'). objs without a financial report get NULL financial columns.
       Row order follows the implementation, not the input list; join on `obj`.
+
+    Notes:
+      * Standalone vs In-Backtest:
+        - In standalone mode (MsdSelectorDataProvider), financial fields are queried from MSD.
+        - In backtesting mode (_HistoricalPanelSelectorDataProvider), financial fields are taken
+          from the preloaded panel cross-section. Any requested `fin_fields` must be declared
+          via `fin_fields` on your Strategy/Selector or via CLI `--fin-fields`. Requesting
+          undeclared financial fields will raise a `ValueError`.
     """
     raise NotImplementedError(
       f"{self.__class__.__name__}.load_snapshot is an abstract interface method. "

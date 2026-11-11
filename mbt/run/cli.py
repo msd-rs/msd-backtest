@@ -188,6 +188,12 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     help="only query annual financial reports (ts.month=12) from stock_financial",
   )
   parser.add_argument(
+    "--fin-fields",
+    type=str,
+    default=None,
+    help="comma-separated financial fields (e.g. 'f001,f205') to preload for backtest",
+  )
+  parser.add_argument(
     "--fin-lookback-days",
     type=int,
     default=None,
@@ -342,13 +348,50 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
       f"组合策略未通过 -s/--objs 指定候选池，已使用策略内置 Selector 在起始日 ({req.start}) 筛选出的 {stock_count} 只股票作为全周期固定基础回测池。"
       "注意：回测运行中的动态重选 (run_selector) 仅在此基础池内轮动，无法从全市场选入新标的。若需全市场动态选股，请通过 -s/--objs 显式传入大候选池 (例如 A_STOCKS)。"
     )
+  def _normalize_fields(val: Any) -> list[str]:
+    if not val:
+      return []
+    if isinstance(val, str):
+      return [f.strip() for f in val.split(",") if f.strip()]
+    return [str(f) for f in val]
+
+  cli_fin = None
+  if args.fin_fields:
+    cli_fin = args.fin_fields
+  elif kv_kwargs and "fin_fields" in kv_kwargs:
+    cli_fin = kv_kwargs["fin_fields"]
+
+  embedded_sel = None
+  if isinstance(selector, StaticSelector) and args.strategy and args.strategy.endswith(".py"):
+    try:
+      embedded_sel = try_load_selector(args.strategy, **(kv_kwargs or {}))
+    except Exception:
+      pass
+
+  merged_fin: list[str] = []
+  for src in [
+    cli_fin,
+    getattr(req, "fin_fields", None),
+    getattr(req.strategy, "fin_fields", None),
+    getattr(selector, "fin_fields", None),
+    getattr(embedded_sel, "fin_fields", None),
+  ]:
+    for f in _normalize_fields(src):
+      if f not in merged_fin:
+        merged_fin.append(f)
+  req.fin_fields = merged_fin if merged_fin else None
+
   req.cash = args.cash  # type: ignore[attr-defined]
   req.summary = bool(args.summary)  # type: ignore[attr-defined]
   req.fin_only_year = bool(
     args.fin_only_year
+    or (kv_kwargs.get("fin_only_year") if kv_kwargs else False)
     or getattr(req.strategy, "fin_only_year", False)
+    or getattr(selector, "fin_only_year", False)
+    or getattr(embedded_sel, "fin_only_year", False)
     or getattr(req, "fin_only_year", False)
   )
+  req.selector = selector
   req.warmup_bars = int(args.warmup_bars or getattr(req.strategy, "warmup_bars", 0))
   req.exec_mode = (
     args.exec_mode
@@ -469,11 +512,23 @@ def run_single_period(
   Returns:
     tuple of (reports, data_provider, account).
   """
-  fin_fields = getattr(req, "fin_fields", None) or getattr(
+  strat_fin = getattr(req, "fin_fields", None) or getattr(
     req.strategy, "fin_fields", None
   )
-  fin_only_year = getattr(req, "fin_only_year", False) or getattr(
-    req.strategy, "fin_only_year", False
+  sel_fin = getattr(getattr(req, "selector", None), "fin_fields", None)
+  merged_fin: list[str] = []
+  for src in [strat_fin, sel_fin]:
+    if src:
+      fields = [f.strip() for f in src.split(",")] if isinstance(src, str) else list(src)
+      for f in fields:
+        if f not in merged_fin:
+          merged_fin.append(f)
+  fin_fields = merged_fin if merged_fin else None
+
+  fin_only_year = bool(
+    getattr(req, "fin_only_year", False)
+    or getattr(req.strategy, "fin_only_year", False)
+    or getattr(getattr(req, "selector", None), "fin_only_year", False)
   )
   if fin_lookback_days is None:
     fin_lookback_days = getattr(req, "fin_lookback_days", None) or getattr(

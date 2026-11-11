@@ -496,11 +496,21 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     Returns:
       pl.DataFrame with columns ['obj', 'ts', 'report_ts', *fields].
     """
-    if self._financial_frame is None or len(self._financial_frame) == 0:
-      return pl.DataFrame()
-
     if not objs or not fields:
       return pl.DataFrame()
+
+    if self._financial_frame is None or len(self._financial_frame) == 0:
+      raise ValueError(
+        f"In-backtest load_financial requested field(s) {fields}, but no financial data was preloaded in backtest. "
+        f"Please declare fin_fields on your Strategy or Selector class (e.g. fin_fields={list(fields)}) or pass via CLI."
+      )
+
+    missing = [f for f in fields if f not in self._financial_frame.columns]
+    if missing:
+      raise ValueError(
+        f"In-backtest load_financial requested field(s) {missing}, but only {list(self._financial_frame.columns)} were preloaded. "
+        f"Please include {missing} in your Strategy or Selector fin_fields declaration."
+      )
 
     current_date = self._panel.timeline()[-1] if self._panel.bars > 0 else 0
     target_set = set(objs)
@@ -533,6 +543,14 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
     fin_only_year: bool = True,
     baseline: str | None = None,
   ) -> Panel:
+    if fin_fields:
+      missing = [f for f in fin_fields if f not in self._panel.columns]
+      if missing:
+        raise ValueError(
+          f"In-backtest dynamic selection requested financial field(s) {missing}, but they were not preloaded in backtest data. "
+          f"Please declare fin_fields on your Strategy or Selector class (e.g. fin_fields={list(fin_fields)}) or pass via CLI."
+        )
+
     if len(fin_fields) > 0 and fin_only_year and not self._fin_only_year:
       logger.warning(
         "_HistoricalPanelSelectorDataProvider: load_snapshot/load_kline requested fin_only_year=True with fin_fields, "

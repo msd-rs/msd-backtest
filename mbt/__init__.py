@@ -9,7 +9,7 @@ from .account import (
   ACTION_KEEP,
 )
 from .run.runner import Runner
-from .select import Selector, StaticSelector, SelectorDataProvider
+from .select import Selector, StaticSelector, SelectorDataProvider, MsdSelectorDataProvider
 from .portfolio import (
   PortfolioAccount,
   PortfolioContext,
@@ -29,6 +29,7 @@ __all__ = [
   "Context",
   "DataProvider",
   "Fee",
+  "MsdSelectorDataProvider",
   "Operation",
   "PortfolioAccount",
   "PortfolioContext",

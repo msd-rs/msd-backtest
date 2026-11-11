@@ -12,14 +12,28 @@ logger = logging.getLogger("selector")
 
 
 class SelectorDataProvider:
-  """Provide data to Selector
+  """Abstract interface contract for providing market and financial data to a `Selector`.
 
-  数据提供者的职责是把"按股票组织的时序数据"交给选股器, 并把所有易错的对齐
-  细节(复权、asof join、缺失填充、块布局)封装在内部。
+  The data provider delivers stock-organized time-series and snapshot data to the
+  selector, encapsulating critical alignment details (corporate actions and dividend
+  adjustments, lookahead-free backward as-of joins based on statutory disclosure dates,
+  suspension/missing value padding, and rectangular matrix layouts).
+
+  Concrete Implementations:
+    * `mbt.select.MsdSelectorDataProvider`: Primary implementation for standalone selection
+      and CLI execution, loading data directly from an MSD database service.
+    * `mbt.portfolio._HistoricalPanelSelectorDataProvider`: In-memory implementation used
+      during backtest execution (`SelectorStrategy`), providing strictly lookahead-free
+      slices of the preloaded historical panel at each bar.
+    * Custom mock implementations in unit tests (e.g. `MockSelectorDataProvider`).
+
+  Strategy developers should write selectors against this interface. In both CLI
+  and backtest execution, the framework automatically instantiates and injects
+  the appropriate concrete provider into `selector.execute(dp, ...)`.
   """
 
   date: str | None = None
-  """选股日期(YYYY-MM-DD), None 表示最新交易日。 """
+  """Selection date (YYYY-MM-DD); None indicates the latest available trading date."""
 
   def load_kline(self, objs: list[str], lastN: int | list[int] = 100,
                  fin_fields: list[str] = [], fin_only_year: bool = True,
@@ -91,7 +105,11 @@ class SelectorDataProvider:
       * For performance, use py-alpha-lib on the whole block; avoid per-obj
         Python loops.
     """
-    pass
+    raise NotImplementedError(
+      f"{self.__class__.__name__}.load_kline is an abstract interface method. "
+      "Use a concrete implementation such as MsdSelectorDataProvider (mbt.select.MsdSelectorDataProvider) "
+      "or the backtest execution context's historical slice provider."
+    )
 
   def load_financial(self, objs: list[str], fields: list[str],
                      only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
@@ -109,7 +127,11 @@ class SelectorDataProvider:
       `ts` is the statutory disclosure deadline (used for lookahead-free as-of alignment),
       while `report_ts` is the fiscal period end date (e.g. 12-31).
     """
-    pass
+    raise NotImplementedError(
+      f"{self.__class__.__name__}.load_financial is an abstract interface method. "
+      "Use a concrete implementation such as MsdSelectorDataProvider (mbt.select.MsdSelectorDataProvider) "
+      "or the backtest execution context's historical slice provider."
+    )
 
   def load_snapshot(self, objs: list[str], fin_fields: list[str] = [],
                     fin_only_year: bool = True) -> pl.DataFrame:
@@ -130,7 +152,11 @@ class SelectorDataProvider:
       'f_ts'). objs without a financial report get NULL financial columns.
       Row order follows the implementation, not the input list; join on `obj`.
     """
-    pass
+    raise NotImplementedError(
+      f"{self.__class__.__name__}.load_snapshot is an abstract interface method. "
+      "Use a concrete implementation such as MsdSelectorDataProvider (mbt.select.MsdSelectorDataProvider) "
+      "or the backtest execution context's historical slice provider."
+    )
 
 
 class Selector:

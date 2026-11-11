@@ -28,6 +28,12 @@ def to_pl(table: pymsd.Table) -> pl.DataFrame:
 
 
 class MsdSelectorDataProvider(SelectorDataProvider):
+  """Concrete SelectorDataProvider implementation powered by MSD database service.
+
+  Fetches stock klines, financial reports, snapshots, and corporate actions
+  from an MSD service endpoint, performing dividend adjustments and statutory
+  disclosure alignment.
+  """
 
   def __init__(self, msd_host: str, date: str | None = None):
     super().__init__()
@@ -38,7 +44,10 @@ class MsdSelectorDataProvider(SelectorDataProvider):
   def load_kline(self, objs: list[str], lastN: int | list[int] = 100,
                  fin_fields: list[str] = [], fin_only_year: bool = True,
                  baseline: str | None = None) -> Panel:
-    """见 SelectorDataProvider.load_kline 的布局契约与列语义说明"""
+    """Load klines with corporate action adjustments and financial metrics.
+
+    See SelectorDataProvider.load_kline for layout contract and column semantics.
+    """
     if len(objs) == 0 and baseline is None:
       raise ValueError("objs is empty and no baseline given")
 
@@ -183,7 +192,10 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     return Panel(full_df, loaded, bars)
 
   def load_financial(self, objs: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> pl.DataFrame:
-    """见 SelectorDataProvider.load_financial"""
+    """Load historical financial records aligned by statutory disclosure deadline.
+
+    See SelectorDataProvider.load_financial for schema details.
+    """
     if not objs or not fields:
       return pl.DataFrame()
 
@@ -256,7 +268,10 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
 
 
   def load_snapshot(self, objs: list[str], fin_fields: list[str] = [], fin_only_year: bool = True) -> pl.DataFrame:
-    """见 SelectorDataProvider.load_snapshot: 每只股票一行, 直接可做截面筛选"""
+    """Take a cross-sectional snapshot for screening at the latest trading day.
+
+    See SelectorDataProvider.load_snapshot for return schema details.
+    """
     table = self._client.snapshot([
       "stock_kline_1d",
       "stock_shares",

@@ -132,12 +132,12 @@ Run the following commands to inspect fields:
 
 ```bash
 # Query the full schema with column descriptions:
-msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial"
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50510}" ".schema stock_financial"
 
 # Grep specific fundamental metrics:
-msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial" | grep "每股净资产"   # -> f003 (BVPS)
-msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial" | grep "净资产收益率" # -> f205 (ROE)
-msd shell -s "${MSD_HOST:-http://127.0.0.1:50511}" ".schema stock_financial" | grep "增长率"       # -> revenue / profit growth
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50510}" ".schema stock_financial" | grep "每股净资产"   # -> f003 (BVPS)
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50510}" ".schema stock_financial" | grep "净资产收益率" # -> f205 (ROE)
+msd shell -s "${MSD_HOST:-http://127.0.0.1:50510}" ".schema stock_financial" | grep "增长率"       # -> revenue / profit growth
 ```
 
 For full inspection guidance and common indicator mapping, see [financial.md](./financial.md).

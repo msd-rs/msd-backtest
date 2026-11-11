@@ -142,7 +142,7 @@ def main():
     help="any init arguments with format key=value",
   )
   parser.add_argument(
-    "-m", "--msd", type=str, default=os.environ.get("MSD_HOST", "http://localhost:50511"), help="MSD host, env $MSD_HOST"
+    "-m", "--msd", type=str, default=os.environ.get("MSD_HOST", "http://localhost:50510"), help="MSD host, env $MSD_HOST"
   )
   parser.add_argument("-s", "--objs", nargs="+", action="extend", default=[], help="objs to run")
   parser.add_argument("-f", "--factors", action='store_true', help="show factors if possible")

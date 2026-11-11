@@ -82,7 +82,7 @@ uv sync --with server
 
 ```env
 # MSD 服务端地址（必须）
-MSD_HOST=http://localhost:50511
+MSD_HOST=http://localhost:50510
 
 # 基准指数代码（可选，默认为上证指数 SH000001）
 MSD_BT_BENCHMARK=SH000001

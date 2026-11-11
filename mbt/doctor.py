@@ -119,7 +119,7 @@ def check_fee() -> dict[str, Any]:
 
 def run_doctor(msd_host: str | None = None) -> int:
   """Run full diagnostics and print structured Markdown report."""
-  host = msd_host or os.environ.get("MSD_HOST", "http://localhost:50511")
+  host = msd_host or os.environ.get("MSD_HOST", "http://localhost:50510")
   os.environ.setdefault("MSD_HOST", host)
   env_info = check_env()
   msd_info = check_msd(host)

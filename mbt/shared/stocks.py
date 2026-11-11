@@ -61,7 +61,7 @@ def build_limit_ratio(row: dict[str, str]) -> float:
   return 0.1
 
 def load_stocks_from_db() -> pl.DataFrame:
-  base_url = os.environ.get("MSD_HOST", "")
+  base_url = os.environ.get("MSD_HOST", "http://localhost:50510")
   if base_url == "":
     raise Exception("MSD_HOST env is empty, please set it")
   conn = pymsd.MsdConnection(base_url)

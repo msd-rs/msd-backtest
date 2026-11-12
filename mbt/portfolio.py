@@ -191,16 +191,30 @@ class PortfolioAccount:
       return 0 <= obj < self.groups and self.positions[obj].shares > 0
     return False
 
-  def position(self, obj: str | int) -> Position:
+  def position(self, obj: str | int, current_bar: int | None = None) -> Position:
     """Get the current Position object for an obj or group index."""
     if isinstance(obj, str):
       g = self._obj_to_group.get(obj)
       if g is not None and 0 <= g < len(self.positions):
-        return self.positions[g]
+        pos = self.positions[g]
+        pos.holding_days = self.holding_days(g, current_bar=current_bar)
+        if current_bar is not None and 0 <= current_bar < self.bars:
+          j = g * self.bars + current_bar
+          p = self.dp.all("price")[j]
+          if not np.isnan(p) and p > 0:
+            pos.raw_mark_price = float(p)
+        return pos
       return Position.zero()
     elif isinstance(obj, (int, np.integer)):
       if 0 <= obj < len(self.positions):
-        return self.positions[obj]
+        pos = self.positions[obj]
+        pos.holding_days = self.holding_days(obj, current_bar=current_bar)
+        if current_bar is not None and 0 <= current_bar < self.bars:
+          j = int(obj) * self.bars + current_bar
+          p = self.dp.all("price")[j]
+          if not np.isnan(p) and p > 0:
+            pos.raw_mark_price = float(p)
+        return pos
       return Position.zero()
     return Position.zero()
 
@@ -408,6 +422,10 @@ class PortfolioAccount:
       p = mark_prices[g]
       if not np.isnan(p) and p > 0:
         self.positions[g].raw_mark_price = float(p)
+      if self.positions[g].shares > 0 and self.entry_bars[g] >= 0:
+        self.positions[g].holding_days = max(0, ts - int(self.entry_bars[g]))
+      else:
+        self.positions[g].holding_days = 0
     self.portfolio_cash[ts] = self.cash
     self.portfolio_assets[ts] = self.asset
     self.portfolio_ror[ts] = (
@@ -789,7 +807,7 @@ class PortfolioContext(Context):
 
   def position(self, obj: str | int) -> Position:
     """Get the current Position object for an obj or group index."""
-    return self.account.position(obj)
+    return self.account.position(obj, current_bar=self.dp.i)
 
   def holding_ror(self, obj: str | int) -> float:
     """Return current holding rate of return for obj/group as a float (e.g. -0.05 for -5%)."""

@@ -286,7 +286,6 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
     for i in range(n_objs):
       sym = ctx.objs()[i]
       pos = ctx.position(i)
-      has_pos = pos.shares > 0
 
       flat_idx = i * ctx.bars + current_bar
       close_price = ctx.close[flat_idx]
@@ -294,9 +293,9 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
       is_gold = bool(self.gold_cross[flat_idx])
       is_death = bool(self.death_cross[flat_idx])
 
-      if has_pos:
-        # 【核心规范】：必须通过 ctx.holding_ror(obj) 获取企业行动除权闭环后的真实收益率
-        ror = ctx.holding_ror(i)
+      if pos.is_holding:
+        # 【核心规范】：使用 pos.ror (或 ctx.holding_ror(i)) 获取企业行动除权闭环后的真实收益率
+        ror = pos.ror
         self.peak_rors[i] = max(self.peak_rors[i], ror)
 
         # 规则 A：硬止损保护

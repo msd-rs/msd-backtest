@@ -153,7 +153,15 @@ class Context:
     pass
 
   def position(self, obj: str | int | None = None) -> Position:
-    """Return the Position object for obj or the single stock account."""
+    """Return the Position object for obj or the single stock account.
+
+    The returned Position instance exposes built-in computed properties:
+      - `pos.ror`: rate of return as decimal (e.g. -0.05 for -5% loss).
+      - `pos.unrealized_pnl`: net unrealized profit/loss amount.
+      - `pos.holding_days`: number of bars/trading days this position has been held.
+      - `pos.adj_cost_price`: equivalent forward-adjusted cost basis, safe to compare with `ctx.close`.
+      - `pos.is_holding`: True if currently holding shares (shares > 0).
+    """
     pass
 
   def holding_ror(self, obj: str | int | None = None) -> float:

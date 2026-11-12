@@ -5,9 +5,9 @@ from __future__ import annotations
 Supports single-stock independent execution and multi-stock shared-cash portfolio execution.
 """
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(override=True)
+load_dotenv(find_dotenv(), override=True)
 
 import datetime
 from mbt import (

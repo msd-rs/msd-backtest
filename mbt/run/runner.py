@@ -176,7 +176,16 @@ class RunnerContext(Context):
   def position(self, obj: str | int | None = None) -> 'Position':
     """Get the current Position object."""
     acc = self._get_account(obj)
-    return acc.position if acc is not None else Position.zero()
+    if acc is not None:
+      acc.position.holding_days = acc.holding_days
+      i = self.dp.i
+      if hasattr(self.dp, "data") and "price" in self.dp.data:
+        g = self.accounts.index(acc)
+        p = self.dp.all("price")[g * self.dp.bars + i]
+        if not np.isnan(p) and p > 0:
+          acc.position.raw_mark_price = float(p)
+      return acc.position
+    return Position.zero()
 
   def holding_ror(self, obj: str | int | None = None) -> float:
     """Return holding rate of return as a decimal (e.g. -0.05 for -5%)."""

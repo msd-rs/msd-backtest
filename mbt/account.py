@@ -33,6 +33,12 @@ class Position:
     dividends (float): Accumulated cash dividends received during holding this position.
     holding_ror (float): Rate of return of current position as a decimal (e.g. 0.05 for +5%).
     holding_pnl (float): Net profit/loss amount of current position.
+    ror (float): Alias for holding_ror.
+    unrealized_pnl (float): Alias for holding_pnl.
+    pnl (float): Alias for holding_pnl.
+    holding_days (int): Number of bars/trading days this position has been held.
+    holding_bars (int): Alias for holding_days.
+    is_holding (bool): True if currently holding shares (shares > 0).
   """
 
   def __init__(
@@ -43,6 +49,7 @@ class Position:
     raw_mark_price: float | None = None,
     dividends: float = 0.0,
     adj_cost_price: float | None = None,
+    holding_days: int = 0,
   ):
     self.shares = float(shares)
     init_price = float(price) if price is not None else 0.0
@@ -50,6 +57,7 @@ class Position:
     self.raw_mark_price = float(raw_mark_price) if raw_mark_price is not None else init_price
     self.dividends = float(dividends)
     self._adj_cost_price = float(adj_cost_price) if adj_cost_price is not None else self.raw_cost_price
+    self._holding_days = max(0, int(holding_days)) if holding_days is not None else 0
 
     if self.shares <= 0:
       self.shares = 0.0
@@ -57,6 +65,7 @@ class Position:
       self.raw_mark_price = 0.0
       self.dividends = 0.0
       self._adj_cost_price = 0.0
+      self._holding_days = 0
 
   @property
   def cost_price(self) -> float:
@@ -142,6 +151,40 @@ class Position:
       return 0.0
     return self.holding_pnl / self.cost_basis
 
+  @property
+  def ror(self) -> float:
+    """Holding rate of return as a decimal (alias for holding_ror, e.g. -0.05 for -5% loss)."""
+    return self.holding_ror
+
+  @property
+  def unrealized_pnl(self) -> float:
+    """Unrealized net profit/loss amount of currently held shares (alias for holding_pnl)."""
+    return self.holding_pnl
+
+  @property
+  def pnl(self) -> float:
+    """Alias for holding_pnl / unrealized_pnl."""
+    return self.holding_pnl
+
+  @property
+  def holding_days(self) -> int:
+    """Number of bars/trading days this position has been held."""
+    return getattr(self, "_holding_days", 0)
+
+  @holding_days.setter
+  def holding_days(self, val: int):
+    self._holding_days = max(0, int(val))
+
+  @property
+  def holding_bars(self) -> int:
+    """Alias for holding_days."""
+    return self.holding_days
+
+  @property
+  def is_holding(self) -> bool:
+    """True if currently holding shares (shares > 0)."""
+    return self.shares > 0
+
   @staticmethod
   def zero() -> "Position":
     return Position(0.0, 0.0)
@@ -164,6 +207,8 @@ class Position:
     dividends = self.dividends + other.dividends
     adj_cost_basis = (self.shares * self._adj_cost_price) + (other.shares * other._adj_cost_price)
     adj_cost_price = adj_cost_basis / shares if shares > 0 else 0.0
+    # Retain holding duration from existing holding if present
+    h_days = self._holding_days if self.shares > 0 else other._holding_days
     return Position(
       shares,
       raw_cost_price,
@@ -171,6 +216,7 @@ class Position:
       raw_mark_price=raw_mark_price,
       dividends=dividends,
       adj_cost_price=adj_cost_price,
+      holding_days=h_days,
     )
 
   def __sub__(self, other: "Position") -> "Position":
@@ -183,6 +229,15 @@ class Position:
     ratio = shares / self.shares if self.shares > 0 else 0.0
     dividends = self.dividends * ratio
     adj_cost_price = self._adj_cost_price
+    return Position(
+      shares,
+      raw_cost_price,
+      raw_cost_price=raw_cost_price,
+      raw_mark_price=raw_mark_price,
+      dividends=dividends,
+      adj_cost_price=adj_cost_price,
+      holding_days=self._holding_days,
+    )
     return Position(
       shares,
       raw_cost_price,
@@ -718,8 +773,10 @@ class Account:
     )
     if self.position.shares > 0:
       self._holding_bars += 1
+      self.position.holding_days = self._holding_bars
     else:
       self._holding_bars = 0
+      self.position.holding_days = 0
     logger.debug(
       f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
     )

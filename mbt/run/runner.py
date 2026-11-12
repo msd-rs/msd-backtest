@@ -1,3 +1,4 @@
+from typing import Any
 from mbt.account import Operation, ACTION_BUY_PERCENT, ACTION_SELL_PERCENT
 from mbt.strategy import Context
 from mbt.account import Account
@@ -115,9 +116,25 @@ class RunnerContext(Context):
       return self.dp.all(name, obj=obj)
     raise ValueError(f"data '{name}' not found")
 
-  def _resolve_bar_flags(self, flags: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+  def _resolve_bar_flags(self, flags: Any) -> tuple[np.ndarray, np.ndarray]:
     idx = self._group_offsets + self.dp.i
+    if isinstance(flags, (bool, np.bool_)):
+      mask = np.full(self.dp.groups, bool(flags), dtype=bool)
+      return idx, mask
+    if isinstance(flags, str):
+      mask = np.zeros(self.dp.groups, dtype=bool)
+      if hasattr(self.dp, "objs") and flags in self.dp.objs:
+        mask[self.dp.objs.index(flags)] = True
+      return idx, mask
+    if isinstance(flags, (int, np.integer)):
+      mask = np.zeros(self.dp.groups, dtype=bool)
+      if 0 <= flags < self.dp.groups:
+        mask[flags] = True
+      return idx, mask
     arr = np.asarray(flags, dtype=bool)
+    if arr.ndim == 0:
+      mask = np.full(self.dp.groups, bool(arr.item()), dtype=bool)
+      return idx, mask
     if arr.ndim == 1 and len(arr) == self.dp.groups:
       return idx, arr
     return idx, arr[idx]

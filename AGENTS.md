@@ -93,6 +93,10 @@
     - `msd.py`：交易端 MSD 数据加载与复权处理
     - `server.py`：HTTP REST 回测服务
   - `shared/`：公共常量与金融工具（财务字段定义、股票池预定义常量）
+  - `strategy_templates/`：官方标准策略模版库（涵盖三大典型量化范式，已内置高性能与金融合规最佳实践）
+    - `fundamental_timing.py`：基本面筛选 + 趋势择时模版（双层联动，类费雪/德雷曼/成长价值）
+    - `multifactor_rotation.py`：截面多因子评分全市场定期轮动模版（质量+估值+动量定期换仓）
+    - `cta_momentum.py`：CTA 纯量价均线与通道跟踪模版（唐奇安突破 + ATR 波动率追踪止损）
 - `strategy/`：策略样例目录
 - `tests/`：单元测试与性能基准测试集
 - `etc/`：配置文件（如默认费率配置 `fee.json`）
@@ -117,6 +121,11 @@ uv run python -m mbt.run.cli strategy/davis_double_play.py -b 2023-05-04 -e 2026
 uv run python -m mbt.run.cli strategy/my_strategy.py -s SH600000 -b 2022-01-01 -e 2024-12-31 --holdout 2024-01-01 -S
 uv run python -m mbt.run.cli strategy/my_strategy.py -s SH600000 -b 2022-01-01,2023-01-01,2024-01-01 -e 2024-12-31 -S
 ```
+
+# 运行官方标准模版
+uv run python -m mbt.run.cli mbt/strategy_templates/fundamental_timing.py -b 2023-01-01 -e 2023-12-31 -p -c 1000000 -S
+uv run python -m mbt.run.cli mbt/strategy_templates/multifactor_rotation.py -s SH600000 SZ000001 -p -c 1000000 -b 2023-01-01 -e 2023-12-31 -S
+uv run python -m mbt.run.cli mbt/strategy_templates/cta_momentum.py -s SH600000 -b 2023-01-01 -e 2023-12-31 -S
 
 ### 2. 运行单期选股 (`mbt.select.cli`)
 ```bash

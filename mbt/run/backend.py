@@ -170,6 +170,10 @@ class RunRequest:
       return RunRequest.load_strategy(content, args=args)
 
     if isinstance(strategy, str):
+      if os.path.isfile(strategy) and strategy.endswith(".py"):
+        with open(strategy, "r", encoding="utf-8") as f:
+          return RunRequest.load_strategy(f, args=args)
+
       from .validator import check_strategy_source
       check_strategy_source(strategy, filename="<strategy_source>")
 

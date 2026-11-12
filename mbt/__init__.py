@@ -17,6 +17,7 @@ from .portfolio import (
   PortfolioRunner,
   SelectorStrategy,
 )
+from . import strategy_templates
 
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
   "SelectorStrategy",
   "StaticSelector",
   "Strategy",
+  "strategy_templates",
 ]

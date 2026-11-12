@@ -44,6 +44,15 @@ A single `.py` file can define both a `Selector` (subclass of `mbt.Selector`) an
 - Arguments passed via `-a key=value` are automatically matched and dispatched to `Selector.__init__` and `Strategy.__init__` by parameter name.
 
 
+## Official Strategy Templates (Cookbook)
+
+Before writing a strategy from scratch, check the official verified templates in `mbt/strategy_templates`:
+- `mbt/strategy_templates/fundamental_timing.py`: Fundamental screening + trend timing (combined Selector + PortfolioStrategy, Davis Double Play / Fisher / Dreman style).
+- `mbt/strategy_templates/multifactor_rotation.py`: Cross-sectional multi-factor periodic rotation (Value + Quality + Momentum, periodic rebalancing using `ctx.rebalance_objs`).
+- `mbt/strategy_templates/cta_momentum.py`: CTA pure price-volume momentum and channel tracking (Donchian breakout + ATR trailing stop, zero-overhead in `execute()` using vectorization in `prepare()`).
+
+You can inspect or import templates directly via `from mbt import strategy_templates`.
+
 # Optimize Strategy
 
 When you had written a strategy, user may ask you to need optimize it, such as adjust the parameters, choose time range, etc. You should read the [guide of optimize](./references/optimize.md) to do that.

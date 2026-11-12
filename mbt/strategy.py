@@ -1,4 +1,4 @@
-from mbt.account import Operation
+from mbt.account import Operation, Position
 import numpy as np
 
 
@@ -150,6 +150,36 @@ class Context:
                       Missing symbols receive a weight of 0.0.
       tolerance: optional tolerance band (e.g. 0.01 for 1%).
     """
+    pass
+
+  def position(self, obj: str | int | None = None) -> Position:
+    """Return the Position object for obj or the single stock account."""
+    pass
+
+  def holding_ror(self, obj: str | int | None = None) -> float:
+    """Return holding rate of return as a decimal (e.g. -0.05 for -5%).
+
+    Safe, cross-dimensional and corporate-action-aware holding return calculator.
+    Eliminates forward-adjusted vs raw price mismatch and dividend/split distortions.
+    """
+    pass
+
+  def holding_pnl(self, obj: str | int | None = None) -> float:
+    """Return holding profit/loss amount for obj."""
+    pass
+
+  def cost_price(self, obj: str | int | None = None, adjusted: bool = False) -> float:
+    """Return holding acquisition cost price.
+
+    Args:
+      obj: Symbol or group index.
+      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+        safe to compare with `ctx.close`. If False, returns raw execution cost price.
+    """
+    pass
+
+  def holding_days(self, obj: str | int | None = None) -> int:
+    """Return number of bars since position was first acquired."""
     pass
 
 

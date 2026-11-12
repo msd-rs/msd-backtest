@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.21] - 2026-11-12
+
+- **holding rate of return & PnL first-class API**: implemented `ctx.holding_ror(obj)` (and `pos.holding_ror`), `ctx.holding_pnl(obj)`, `ctx.cost_price(obj, adjusted=...)`, and `ctx.holding_days(obj)` across `PortfolioAccount`, `PortfolioContext`, `RunnerContext`, and `Position`. The closed-loop calculations accurately account for bonus shares (splits), cash dividends, and position dilution without forcing strategies to handcraft dangerous price arithmetic.
+- **position semantic refactoring**: disambiguated `Position` attributes to eliminate cross-dimensional coordinate confusion:
+  - `pos.raw_cost_price` / `pos.cost_price`: weighted average acquisition price per share under unadjusted raw execution scale.
+  - `pos.cost_basis`: total acquisition cash cost of currently held shares (`shares * raw_cost_price`).
+  - `pos.raw_mark_price` / `pos.mark_price`: latest unadjusted mark-to-market price per share.
+  - `pos.adj_cost_price`: forward-adjusted equivalent cost price, directly comparable with forward-adjusted `ctx.close`.
+  - `pos.price`: maintained for backward compatibility, marked with deprecation warnings to prevent mixing with forward-adjusted prices.
+- **corporate actions cost basis auto-dilution**: updated `apply_corporate_actions` in both `PortfolioAccount` and `Account` to automatically dilute `pos.raw_cost_price` and `pos.adj_cost_price` upon bonus shares or stock splits (e.g. 10 送转 10 automatically halves per-share cost basis), preventing false -50% drawdown spikes when market prices adjust downward.
+- **moving weighted average accounting**: refined `Position.__add__` and `Position.__sub__` to follow brokerage moving weighted average standards; partial liquidations retain the unit cost basis instead of distorting remaining share costs.
+- **AST anti-pattern linting**: added `mbt.run.validator.check_strategy_source` into `RunRequest.load_strategy` to automatically detect cross-dimensional arithmetic between forward-adjusted prices (`ctx.close`, `ctx.open`) and raw position execution prices (`pos.price`, `pos.cost_price`), logging immediate actionable guidance and preventing silent backtest miscalculations.
+- **agent-first rule enforcement**: documented anti-pattern hazards and formal holding return conventions in `AGENTS.md` under Rule 2 (Strict Price and Financial Report Semantic Isolation).
 
 ## [0.1.20] - 2026-11-11
 

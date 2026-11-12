@@ -89,6 +89,7 @@ class PortfolioAccount:
     self.groups = dp.groups
     self.bars = dp.bars
     self.positions = [Position.zero() for _ in range(self.groups)]
+    self.entry_bars = np.full(self.groups, -1, dtype=np.int64)
     self._obj_to_group: dict[str, int] = (
       {s: i for i, s in enumerate(dp.objs)} if hasattr(dp, "objs") else {}
     )
@@ -223,17 +224,31 @@ class PortfolioAccount:
 
       if div > 0 and not np.isnan(div):
         self.cash += pos.shares * div
+        pos.dividends += pos.shares * div
       if trans > 0 and not np.isnan(trans):
+        old_shares = pos.shares
         pos.shares += pos.shares * trans
+        if pos.shares > 0:
+          ratio = old_shares / pos.shares
+          pos.raw_cost_price *= ratio
+          pos._adj_cost_price *= ratio
       if r_share > 0 and not np.isnan(r_share):
         max_r = pos.shares * r_share
         if r_price > 0 and not np.isnan(r_price):
           affordable = int(self.cash / r_price) if self.cash > 0 else 0
           actual_r = min(max_r, float(affordable))
           self.cash -= actual_r * r_price
+          right_cost = actual_r * r_price
         else:
           actual_r = max_r
-        pos.shares += actual_r
+          right_cost = 0.0
+        if actual_r > 0:
+          old_cost = pos.cost_basis
+          pos.shares += actual_r
+          if pos.shares > 0:
+            pos.raw_cost_price = (old_cost + right_cost) / pos.shares
+            if pos.raw_cost_price > 0:
+              pos._adj_cost_price = pos.raw_cost_price * (pos._adj_cost_price / pos.raw_cost_price)
 
   def _sell_group(self, g: int, ts: int, shares_to_sell: float, deal_price: float):
     pos = self.positions[g]
@@ -248,6 +263,8 @@ class PortfolioAccount:
     fee = fee_item.sell(sell_pos.value)
     self.cash += sell_pos.value - fee
     self.positions[g] = pos - sell_pos
+    if self.positions[g].shares <= 0:
+      self.entry_bars[g] = -1
     self.deducted += fee
     j = g * self.bars + ts
     self.actions[j] = ACTION_SELL
@@ -286,6 +303,19 @@ class PortfolioAccount:
 
     if buy_pos.shares <= 0:
       return
+
+    # Calculate forward-adjustment ratio if available
+    j = g * self.bars + ts
+    adj_cost = exec_price
+    if hasattr(self.dp, "data") and "close" in self.dp.data and "price" in self.dp.data:
+      raw_p = self.dp.data["price"][j]
+      fw_p = self.dp.data["close"][j]
+      if raw_p > 0 and not np.isnan(raw_p) and not np.isnan(fw_p):
+        adj_cost = exec_price * (fw_p / raw_p)
+    buy_pos._adj_cost_price = float(adj_cost)
+
+    if self.positions[g].shares <= 0:
+      self.entry_bars[g] = ts
 
     self.cash -= buy_pos.value + fee
     self.positions[g] = self.positions[g] + buy_pos
@@ -338,11 +368,46 @@ class PortfolioAccount:
     """Alias for trades_df()."""
     return self.trades_df()
 
+  def holding_ror(self, obj: str | int) -> float:
+    """Return the current holding rate of return for obj/group as a float (e.g. -0.05 for -5%)."""
+    return self.position(obj).holding_ror
+
+  def holding_pnl(self, obj: str | int) -> float:
+    """Return the current holding profit/loss amount for obj/group."""
+    return self.position(obj).holding_pnl
+
+  def cost_price(self, obj: str | int, adjusted: bool = False) -> float:
+    """Return acquisition cost price.
+
+    Args:
+      obj: Symbol or group index.
+      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+        safe to compare with `ctx.close`. If False, returns raw execution cost price.
+    """
+    pos = self.position(obj)
+    return pos.adj_cost_price if adjusted else pos.raw_cost_price
+
+  def holding_days(self, obj: str | int, current_bar: int | None = None) -> int:
+    """Return number of bars since position was first acquired."""
+    g = self._resolve_group_idx(obj)
+    if g is None or self.entry_bars[g] < 0:
+      return 0
+    cur = self.bars if current_bar is None else current_bar
+    return max(0, cur - int(self.entry_bars[g]))
+
+  def _resolve_group_idx(self, obj: str | int) -> int | None:
+    if isinstance(obj, str):
+      return self._obj_to_group.get(obj)
+    elif isinstance(obj, (int, np.integer)):
+      if 0 <= obj < self.groups:
+        return int(obj)
+    return None
+
   def update_mark_to_market(self, ts: int, mark_prices: np.ndarray):
     for g in range(self.groups):
       p = mark_prices[g]
       if not np.isnan(p) and p > 0:
-        self.positions[g].price = float(p)
+        self.positions[g].raw_mark_price = float(p)
     self.portfolio_cash[ts] = self.cash
     self.portfolio_assets[ts] = self.asset
     self.portfolio_ror[ts] = (
@@ -383,7 +448,7 @@ class PortfolioAccount:
         continue
       dp_g = deal_prices[g]
       if not np.isnan(dp_g) and dp_g > 0 and self.positions[g].shares > 0:
-        self.positions[g].price = float(dp_g)
+        self.positions[g].raw_mark_price = float(dp_g)
 
     total_equity = self.asset
     target_values = total_equity * weights
@@ -721,6 +786,32 @@ class PortfolioContext(Context):
     if name in self.dp.data:
       return self.dp.all(name, obj=obj)
     raise ValueError(f"data '{name}' not found")
+
+  def position(self, obj: str | int) -> Position:
+    """Get the current Position object for an obj or group index."""
+    return self.account.position(obj)
+
+  def holding_ror(self, obj: str | int) -> float:
+    """Return current holding rate of return for obj/group as a float (e.g. -0.05 for -5%)."""
+    return self.account.holding_ror(obj)
+
+  def holding_pnl(self, obj: str | int) -> float:
+    """Return current holding profit/loss amount for obj/group."""
+    return self.account.holding_pnl(obj)
+
+  def cost_price(self, obj: str | int, adjusted: bool = False) -> float:
+    """Return acquisition cost price.
+
+    Args:
+      obj: Symbol or group index.
+      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+        safe to compare with `ctx.close`. If False, returns raw execution cost price.
+    """
+    return self.account.cost_price(obj, adjusted=adjusted)
+
+  def holding_days(self, obj: str | int) -> int:
+    """Return number of bars since position was first acquired."""
+    return self.account.holding_days(obj, current_bar=self.dp.i)
 
   def _resolve_bar_flags(self, flags) -> tuple[np.ndarray, np.ndarray]:
     idx = self._group_offsets + self.dp.i

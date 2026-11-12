@@ -142,6 +142,49 @@ class RunnerContext(Context):
       self.actions[active] = ACTION_SELL_PERCENT
       self.action_percents[active] = percent
 
+  def _get_account(self, obj: str | int | None = None) -> Account | None:
+    if not self.accounts:
+      return None
+    if obj is None:
+      return self.accounts[0]
+    if isinstance(obj, str):
+      if obj in self.dp.objs:
+        return self.accounts[self.dp.objs.index(obj)]
+      return None
+    elif isinstance(obj, (int, np.integer)):
+      if 0 <= obj < len(self.accounts):
+        return self.accounts[int(obj)]
+    return None
+
+  def position(self, obj: str | int | None = None) -> Position:
+    """Get the current Position object."""
+    acc = self._get_account(obj)
+    return acc.position if acc is not None else Position.zero()
+
+  def holding_ror(self, obj: str | int | None = None) -> float:
+    """Return holding rate of return as a decimal (e.g. -0.05 for -5%)."""
+    return self.position(obj).holding_ror
+
+  def holding_pnl(self, obj: str | int | None = None) -> float:
+    """Return holding profit/loss amount."""
+    return self.position(obj).holding_pnl
+
+  def cost_price(self, obj: str | int | None = None, adjusted: bool = False) -> float:
+    """Return acquisition cost price.
+
+    Args:
+      obj: Symbol or group index (optional).
+      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price).
+        If False, returns raw execution cost price.
+    """
+    pos = self.position(obj)
+    return pos.adj_cost_price if adjusted else pos.raw_cost_price
+
+  def holding_days(self, obj: str | int | None = None) -> int:
+    """Return number of bars current position has been held."""
+    acc = self._get_account(obj)
+    return acc.holding_days if acc is not None else 0
+
 
 class Runner:
   """Runner is a runner of a strategy"""

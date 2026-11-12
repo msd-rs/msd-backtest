@@ -21,41 +21,176 @@ logger = logging.getLogger(__name__)
 
 
 class Position:
-  """Position is a position of a stock"""
+  """Position represents a stock holding position in an account.
 
-  def __init__(self, shares: float, price: float):
-    self.shares = shares
-    self.price = price
+  Attributes:
+    shares (float): Number of shares held (>= 0).
+    raw_cost_price (float): Average unadjusted acquisition price per share (真实成交未复权加权买入均价).
+    cost_basis (float): Total acquisition cost of currently held shares (shares * raw_cost_price).
+    raw_mark_price (float): Latest unadjusted mark-to-market price per share (最新未复权收盘价/现价).
+    adj_cost_price (float): Forward-adjusted equivalent cost price (前复权等效成本价),
+      which can be directly compared with forward-adjusted prices like `ctx.close`.
+    dividends (float): Accumulated cash dividends received during holding this position.
+    holding_ror (float): Rate of return of current position as a decimal (e.g. 0.05 for +5%).
+    holding_pnl (float): Net profit/loss amount of current position.
+  """
+
+  def __init__(
+    self,
+    shares: float,
+    price: float = 0.0,
+    raw_cost_price: float | None = None,
+    raw_mark_price: float | None = None,
+    dividends: float = 0.0,
+    adj_cost_price: float | None = None,
+  ):
+    self.shares = float(shares)
+    init_price = float(price) if price is not None else 0.0
+    self.raw_cost_price = float(raw_cost_price) if raw_cost_price is not None else init_price
+    self.raw_mark_price = float(raw_mark_price) if raw_mark_price is not None else init_price
+    self.dividends = float(dividends)
+    self._adj_cost_price = float(adj_cost_price) if adj_cost_price is not None else self.raw_cost_price
+
+    if self.shares <= 0:
+      self.shares = 0.0
+      self.raw_cost_price = 0.0
+      self.raw_mark_price = 0.0
+      self.dividends = 0.0
+      self._adj_cost_price = 0.0
+
+  @property
+  def cost_price(self) -> float:
+    """Alias for raw_cost_price."""
+    return self.raw_cost_price
+
+  @cost_price.setter
+  def cost_price(self, val: float):
+    self.raw_cost_price = float(val)
+
+  @property
+  def mark_price(self) -> float:
+    """Alias for raw_mark_price."""
+    return self.raw_mark_price
+
+  @mark_price.setter
+  def mark_price(self, val: float):
+    self.raw_mark_price = float(val)
+
+  @property
+  def price(self) -> float:
+    """[AMBIGUOUS] Backward-compatible price accessor.
+
+    WARNING: Do NOT mix pos.price with forward-adjusted `ctx.close`!
+    - For holding rate of return / stop-loss: use `pos.holding_ror` or `acc.holding_ror(obj)`.
+    - For unadjusted acquisition cost: use `pos.raw_cost_price`.
+    - For forward-adjusted equivalent cost: use `pos.adj_cost_price`.
+    - For current unadjusted market price: use `pos.raw_mark_price`.
+    """
+    if self.raw_mark_price > 0:
+      return self.raw_mark_price
+    return self.raw_cost_price
+
+  @price.setter
+  def price(self, val: float):
+    p = float(val)
+    self.raw_mark_price = p
+    if self.raw_cost_price == 0.0 and p > 0:
+      self.raw_cost_price = p
+
+  @property
+  def cost_basis(self) -> float:
+    """Total acquisition cash cost for currently held shares."""
+    return self.shares * self.raw_cost_price
+
+  @property
+  def market_value(self) -> float:
+    """Current market value based on latest mark price."""
+    p = self.raw_mark_price if self.raw_mark_price > 0 else self.raw_cost_price
+    return self.shares * p
 
   @property
   def value(self) -> float:
-    return self.shares * self.price
+    """Alias for market_value."""
+    return self.market_value
+
+  @property
+  def adj_cost_price(self) -> float:
+    """Forward-adjusted equivalent cost price (前复权等效成本价).
+
+    Safe to compare directly with forward-adjusted prices such as `ctx.close`.
+    """
+    return self._adj_cost_price
+
+  @adj_cost_price.setter
+  def adj_cost_price(self, val: float):
+    self._adj_cost_price = float(val)
+
+  @property
+  def holding_pnl(self) -> float:
+    """Holding profit/loss amount: (market_value + accumulated dividends) - cost_basis."""
+    if self.shares <= 0 or self.cost_basis <= 0:
+      return 0.0
+    return (self.market_value + self.dividends) - self.cost_basis
+
+  @property
+  def holding_ror(self) -> float:
+    """Holding rate of return as a decimal (e.g. -0.05 for -5% loss).
+
+    Accurately accounts for bonus shares (splits), cash dividends, and dilution.
+    """
+    if self.shares <= 0 or self.cost_basis <= 0:
+      return 0.0
+    return self.holding_pnl / self.cost_basis
 
   @staticmethod
   def zero() -> "Position":
-    return Position(0, 0)
+    return Position(0.0, 0.0)
 
   @staticmethod
   def from_cash(cash: float, price: float, unit: int = 100) -> "Position":
-    if price == 0:
+    if price <= 0 or np.isnan(price):
       return Position.zero()
     shares = int(cash / price)
     shares = shares - shares % unit  # round down to unit
-    return Position(float(shares), price)
+    return Position(float(shares), float(price))
 
   def __add__(self, other: "Position") -> "Position":
-    value = self.value + other.value
     shares = self.shares + other.shares
     if shares <= 0:
       return Position.zero()
-    return Position(shares, value / shares)
+    cost_basis = self.cost_basis + other.cost_basis
+    raw_cost_price = cost_basis / shares
+    raw_mark_price = other.raw_mark_price if other.raw_mark_price > 0 else self.raw_mark_price
+    dividends = self.dividends + other.dividends
+    adj_cost_basis = (self.shares * self._adj_cost_price) + (other.shares * other._adj_cost_price)
+    adj_cost_price = adj_cost_basis / shares if shares > 0 else 0.0
+    return Position(
+      shares,
+      raw_cost_price,
+      raw_cost_price=raw_cost_price,
+      raw_mark_price=raw_mark_price,
+      dividends=dividends,
+      adj_cost_price=adj_cost_price,
+    )
 
   def __sub__(self, other: "Position") -> "Position":
-    value = self.value - other.value
     shares = self.shares - other.shares
     if shares <= 0:
       return Position.zero()
-    return Position(shares, value / shares)
+    # Partial liquidation retains same per-share average cost
+    raw_cost_price = self.raw_cost_price
+    raw_mark_price = other.raw_mark_price if other.raw_mark_price > 0 else self.raw_mark_price
+    ratio = shares / self.shares if self.shares > 0 else 0.0
+    dividends = self.dividends * ratio
+    adj_cost_price = self._adj_cost_price
+    return Position(
+      shares,
+      raw_cost_price,
+      raw_cost_price=raw_cost_price,
+      raw_mark_price=raw_mark_price,
+      dividends=dividends,
+      adj_cost_price=adj_cost_price,
+    )
 
   def __str__(self):
     return f"Position(shares={self.shares}, price={self.price})"
@@ -427,6 +562,7 @@ class Account:
     self.unit = unit
     """position of the account"""
     self.position = Position(0, 0)
+    self._holding_bars = 0
     """assets after first buy operation"""
     self.per_assets = 0.0
     """deducted commission and other fees"""
@@ -502,17 +638,33 @@ class Account:
       if dividend > 0 or transfer_shares > 0 or right_share > 0:
         if dividend > 0 and not np.isnan(dividend):
           self.cash += self.position.shares * dividend
+          self.position.dividends += self.position.shares * dividend
         if transfer_shares > 0 and not np.isnan(transfer_shares):
+          old_shares = self.position.shares
           self.position.shares += self.position.shares * transfer_shares
+          if self.position.shares > 0:
+            ratio = old_shares / self.position.shares
+            self.position.raw_cost_price *= ratio
+            self.position._adj_cost_price *= ratio
         if right_share > 0 and not np.isnan(right_share):
           max_right_shares = self.position.shares * right_share
           if right_price > 0 and not np.isnan(right_price):
             affordable = int(self.cash / right_price) if self.cash > 0 else 0
             actual_right = min(max_right_shares, float(affordable))
             self.cash -= actual_right * right_price
+            right_cost = actual_right * right_price
           else:
             actual_right = max_right_shares
-          self.position.shares += actual_right
+            right_cost = 0.0
+          if actual_right > 0:
+            old_cost = self.position.cost_basis
+            self.position.shares += actual_right
+            if self.position.shares > 0:
+              self.position.raw_cost_price = (old_cost + right_cost) / self.position.shares
+              if self.position.raw_cost_price > 0:
+                self.position._adj_cost_price = self.position.raw_cost_price * (
+                  self.position._adj_cost_price / self.position.raw_cost_price
+                )
 
     op_price = operation.position.price
     is_valid_price = not np.isnan(op_price) and op_price > 0
@@ -564,6 +716,10 @@ class Account:
     self.action_shares[ts] = (
       operation.position.shares if operation.position is not None else 0.0
     )
+    if self.position.shares > 0:
+      self._holding_bars += 1
+    else:
+      self._holding_bars = 0
     logger.debug(
       f"group: {self.group}, ts: {ts}, operation: {operation}, cash: {self.cash}, position: {self.position}, asset: {self.asset}, ror: {self.ror[ts]}"
     )
@@ -594,6 +750,16 @@ class Account:
 
     if position.shares <= 0:
       return Operation.buy_no_cash(Position(0, 0)), 0.0
+
+    # Initialize forward-adjusted equivalent price if data available
+    j = self.group * self.dp.bars + ts
+    adj_cost = position.price
+    if hasattr(self.dp, "data") and "close" in self.dp.data and "price" in self.dp.data:
+      raw_p = self.dp.data["price"][j]
+      fw_p = self.dp.data["close"][j]
+      if raw_p > 0 and not np.isnan(raw_p) and not np.isnan(fw_p):
+        adj_cost = position.price * (fw_p / raw_p)
+    position._adj_cost_price = float(adj_cost)
 
     self.cash -= position.value + fee
     self.position += position
@@ -627,3 +793,27 @@ class Account:
     if self.position.shares == 0:
       self.per_assets = 0.0
     return Operation.sell(position), fee
+
+  @property
+  def holding_ror(self) -> float:
+    """Holding rate of return of the current position as a decimal (e.g. -0.05 for -5%)."""
+    return self.position.holding_ror
+
+  @property
+  def holding_pnl(self) -> float:
+    """Holding profit/loss amount of the current position."""
+    return self.position.holding_pnl
+
+  def cost_price(self, adjusted: bool = False) -> float:
+    """Return position acquisition cost price.
+
+    Args:
+      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+        safe to compare with `ctx.close`. If False, returns unadjusted raw execution cost.
+    """
+    return self.position.adj_cost_price if adjusted else self.position.raw_cost_price
+
+  @property
+  def holding_days(self) -> int:
+    """Number of bars current position has been held."""
+    return getattr(self, "_holding_bars", 0)

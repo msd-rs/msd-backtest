@@ -139,6 +139,14 @@ class RunRequest:
       # input is file-like object, read it and import it and return Strategy class instance in it
       if hasattr(strategy, "name") and strategy.name.endswith(".py"):
         path = os.path.abspath(strategy.name)
+        try:
+          with open(path, "r", encoding="utf-8") as f:
+            code_text = f.read()
+          from .validator import check_strategy_source
+          check_strategy_source(code_text, filename=path)
+        except Exception:
+          pass
+
         dir_path = os.path.dirname(path)
         if dir_path not in sys.path:
           sys.path.insert(0, dir_path)
@@ -162,6 +170,9 @@ class RunRequest:
       return RunRequest.load_strategy(content, args=args)
 
     if isinstance(strategy, str):
+      from .validator import check_strategy_source
+      check_strategy_source(strategy, filename="<strategy_source>")
+
       # input is source code, import it and return Strategy class instance in it
       loc = {}
       # Use the same dictionary for globals and locals to avoid NameError in class methods

@@ -156,7 +156,7 @@ class RunnerContext(Context):
         return self.accounts[int(obj)]
     return None
 
-  def position(self, obj: str | int | None = None) -> Position:
+  def position(self, obj: str | int | None = None) -> 'Position':
     """Get the current Position object."""
     acc = self._get_account(obj)
     return acc.position if acc is not None else Position.zero()

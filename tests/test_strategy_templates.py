@@ -76,6 +76,14 @@ def test_fundamental_timing_template_synthetic():
   data["f197"] = np.full(n_bars, 20.0)
 
   dp = DataProvider(data, objs=["SH600000"])
+  dp.financial_frame = pl.DataFrame({
+    "obj": ["SH600000"],
+    "ts": np.array([dates[0]], dtype="datetime64[us]"),
+    "report_ts": np.array([dates[0]], dtype="datetime64[us]"),
+    "f205": [12.0],
+    "f197": [20.0],
+    "f003": [8.0],
+  })
 
   account = PortfolioAccount(1000000.0, dp)
   strat = FundamentalTimingStrategy(
@@ -85,6 +93,8 @@ def test_fundamental_timing_template_synthetic():
     stop_loss_pct=0.08,
     trailing_trigger=0.10,
     max_positions=2,
+    rebalance_mode="interval",
+    rebalance_interval=20,
   )
 
   runner = PortfolioRunner(account)
@@ -94,6 +104,8 @@ def test_fundamental_timing_template_synthetic():
   assert "exit_stop_loss_count" in diag
   assert "exit_trailing_stop_count" in diag
   assert "exit_trend_break_count" in diag
+  assert diag["rebalance_count"] > 0
+  assert diag["rebalance_mode"] == "interval"
 
 
 def test_multifactor_rotation_template_synthetic():
@@ -166,6 +178,14 @@ def test_cta_momentum_template_synthetic():
 
   data = _make_dummy_stock_data(n_bars, p, dates)
   dp = DataProvider(data, objs=["SH600000"])
+  dp.financial_frame = pl.DataFrame({
+    "obj": ["SH600000"],
+    "ts": np.array([dates[0]], dtype="datetime64[us]"),
+    "report_ts": np.array([dates[0]], dtype="datetime64[us]"),
+    "f205": [12.0],
+    "f197": [20.0],
+    "f003": [8.0],
+  })
 
   account = Account(100000.0, dp)
   strat = CtaMomentumStrategy(

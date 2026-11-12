@@ -14,20 +14,26 @@
 
 from __future__ import annotations
 
-import os
+import inspect
+from types import ModuleType
 
-TEMPLATES = {
-  "fundamental_timing": "fundamental_timing.py",
-  "multifactor_rotation": "multifactor_rotation.py",
-  "cta_momentum": "cta_momentum.py",
+from . import cta_momentum, fundamental_timing, multifactor_rotation
+
+TEMPLATES: dict[str, ModuleType] = {
+  "fundamental_timing": fundamental_timing,
+  "multifactor_rotation": multifactor_rotation,
+  "cta_momentum": cta_momentum,
 }
 
 
 def get_template_path(name: str) -> str:
   """获取指定策略模版的绝对文件路径.
 
+  支持通过短名称 (如 'fundamental_timing') 或文件名 (如 'cta_momentum.py') 查找.
+  亦可直接使用模块对象的 `__file__` 属性 (如 `mbt.strategy_templates.fundamental_timing.__file__`).
+
   Args:
-    name: 模版短名称 (如 'fundamental_timing') 或文件名 (如 'cta_momentum.py').
+    name: 模版短名称或文件名.
 
   Returns:
     模版文件的绝对路径.
@@ -40,8 +46,34 @@ def get_template_path(name: str) -> str:
     available = ", ".join(repr(k) for k in TEMPLATES.keys())
     raise KeyError(f"Template '{name}' not found. Available templates: [{available}]")
 
-  filename = TEMPLATES[clean_name]
-  return os.path.join(os.path.dirname(__file__), filename)
+  module = TEMPLATES[clean_name]
+  file_path = getattr(module, "__file__", None)
+  if not file_path:
+    raise FileNotFoundError(f"Template '{name}' has no __file__ attribute")
+  return file_path
+
+
+def get_template_source(name: str) -> str:
+  """获取指定策略模版的源代码内容.
+
+  支持通过短名称 (如 'fundamental_timing') 或文件名 (如 'cta_momentum.py') 获取.
+  亦可直接使用 `inspect.getsource(mbt.strategy_templates.fundamental_timing)`.
+
+  Args:
+    name: 模版短名称或文件名.
+
+  Returns:
+    模版源码字符串.
+
+  Raises:
+    KeyError: 当模版名称不存在时抛出.
+  """
+  clean_name = name.removesuffix(".py")
+  if clean_name not in TEMPLATES:
+    available = ", ".join(repr(k) for k in TEMPLATES.keys())
+    raise KeyError(f"Template '{name}' not found. Available templates: [{available}]")
+
+  return inspect.getsource(TEMPLATES[clean_name])
 
 
 def list_templates() -> list[str]:
@@ -51,6 +83,10 @@ def list_templates() -> list[str]:
 
 __all__ = [
   "TEMPLATES",
+  "cta_momentum",
+  "fundamental_timing",
   "get_template_path",
+  "get_template_source",
   "list_templates",
+  "multifactor_rotation",
 ]

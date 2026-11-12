@@ -40,17 +40,37 @@ def _make_dummy_stock_data(n_bars: int, prices: np.ndarray, dates: np.ndarray) -
 
 
 def test_template_registry():
+  import inspect
+
   templates = strategy_templates.list_templates()
   assert "fundamental_timing" in templates
   assert "multifactor_rotation" in templates
   assert "cta_momentum" in templates
 
+  # 验证子模块可作为一等公民直接访问
+  assert hasattr(strategy_templates, "fundamental_timing")
+  assert hasattr(strategy_templates, "multifactor_rotation")
+  assert hasattr(strategy_templates, "cta_momentum")
+
   for t_name in templates:
+    # 验证 get_template_path 与 module.__file__
     path = strategy_templates.get_template_path(t_name)
+    mod = getattr(strategy_templates, t_name)
     assert os.path.isfile(path)
-    with open(path, "r", encoding="utf-8") as f:
-      content = f.read()
-      assert len(content) > 0
+    assert path == mod.__file__
+
+    # 验证 get_template_source 与 inspect.getsource
+    src_via_func = strategy_templates.get_template_source(t_name)
+    src_via_inspect = inspect.getsource(mod)
+    assert src_via_func == src_via_inspect
+    assert len(src_via_func) > 0
+
+  # 验证异常提示
+  try:
+    strategy_templates.get_template_path("non_existent")
+    assert False, "Should raise KeyError"
+  except KeyError as e:
+    assert "non_existent" in str(e)
 
 
 def test_template_anti_pattern_linting():

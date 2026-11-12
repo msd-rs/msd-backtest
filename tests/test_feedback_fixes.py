@@ -199,3 +199,45 @@ def test_selector_lifecycle_and_context():
   assert out_bt == ["SH600000"]
   assert sel_bt.observed_modes == [True]
   assert sel_bt.observed_dates == ["20240511"]
+
+
+def test_load_financial_sql_date_where_only_year():
+  """Verify load_financial includes ts.month = 12 when only_year=True and does not speculate fetch_n."""
+  recorded_sqls = []
+
+  class FakeClient:
+    def query_concat(self, sql):
+      recorded_sqls.append(sql)
+      return {}
+
+  dp = MsdSelectorDataProvider("http://localhost:50510", date="2024-05-10")
+  dp._client = FakeClient()
+
+  # Test only_year=True
+  dp.load_financial(["SH600000"], fields=["f001"], only_year=True, lastN=3)
+  assert len(recorded_sqls) == 1
+  sql1 = recorded_sqls[0]
+  assert 'ts <= "2024-05-10"' in sql1
+  assert "ts.month = 12" in sql1
+  assert "limit -3" in sql1
+  assert "limit -7" not in sql1
+
+  # Test only_year=False
+  recorded_sqls.clear()
+  dp.load_financial(["SH600000"], fields=["f001"], only_year=False, lastN=5)
+  assert len(recorded_sqls) == 1
+  sql2 = recorded_sqls[0]
+  assert 'ts <= "2024-05-10"' in sql2
+  assert "ts.month = 12" not in sql2
+  assert "limit -5" in sql2
+
+  # Test with date=None
+  recorded_sqls.clear()
+  dp_no_date = MsdSelectorDataProvider("http://localhost:50510", date=None)
+  dp_no_date._client = FakeClient()
+  dp_no_date.load_financial(["SH600000"], fields=["f001"], only_year=True, lastN=2)
+  assert len(recorded_sqls) == 1
+  sql3 = recorded_sqls[0]
+  assert "ts.month = 12" in sql3
+  assert "limit -2" in sql3
+

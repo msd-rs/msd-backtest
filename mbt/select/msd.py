@@ -205,10 +205,13 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     if "ts" not in query_fields:
       query_fields.insert(0, "ts")
 
-    # Fetch extra records to compensate for future reports filtered out by statutory disclosure date
-    fetch_n = max(lastN + 4, lastN * 2)
-    date_where = f'AND ts <= "{self.date}"' if self.date else ""
-    sql = f"SELECT {db_fields(query_fields)} FROM stock_financial where obj in ({objs_where(objs)}) {date_where} limit -{fetch_n}"
+    conds = []
+    if self.date:
+      conds.append(f'ts <= "{self.date}"')
+    if only_year:
+      conds.append("ts.month = 12")
+    date_where = f"AND {' AND '.join(conds)}" if conds else ""
+    sql = f"SELECT {db_fields(query_fields)} FROM stock_financial where obj in ({objs_where(objs)}) {date_where} limit -{lastN}"
     res = self._client.query_concat(sql)
 
     if "stock_financial" not in res:

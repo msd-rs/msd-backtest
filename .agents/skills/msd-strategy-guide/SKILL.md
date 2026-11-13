@@ -21,7 +21,7 @@ Strategy Framework: msd-backtest
 
 # Write Strategy
 
-The `msd-backtest` import name is `mbt`, it's well documented. use `python3 -m pydoc mbt` to read it.
+The `msd-backtest` import name is `mbt`, it's well documented. After python env setup, use `[uv run] python -m pydoc mbt` to read it.
 
 There are 3 kinds of Strategy
 

@@ -3,6 +3,7 @@ name = "msd-backtest"
 version = "0.1.20"
 description = "MSD backtest framework"
 readme = "README.md"
+license = "BSD-2-Clause"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2.4.2"]
 

@@ -1,0 +1,20 @@
+{
+  "targets": [
+    {
+      "name": "feishu-desk",
+      "url": "feishu://${FEISHU_BOT_TOKEN}",
+      "detail": "compact",
+      "on_trade_only": false,
+      "keyword": "mbt",
+      "enabled": true
+    },
+    {
+      "name": "slack-alerts",
+      "url": "slack://${SLACK_TOKEN_A}/${SLACK_TOKEN_B}/${SLACK_TOKEN_C}",
+      "detail": "minimal",
+      "on_trade_only": true,
+      "keyword": "",
+      "enabled": false
+    }
+  ]
+}

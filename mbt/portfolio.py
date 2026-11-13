@@ -88,6 +88,8 @@ class PortfolioAccount:
     self.tolerance = float(tolerance)
     self.deducted = 0.0
     self.records: list[PortfolioRecord] = []
+    self.exec_mode: str = "close"
+    self.pending_signals: list[dict] = []
 
     self.groups = dp.groups
     self.bars = dp.bars
@@ -208,6 +210,93 @@ class PortfolioAccount:
       return []
     u_set = set(universe)
     return [s for s in self.held_objs if s not in u_set]
+
+  def daily_snapshot(self, bar: int | None = None) -> dict:
+    """Extract a structured daily snapshot of NAV, holdings, trades, and pending signals.
+
+    Args:
+      bar: Target bar index (defaults to the last bar `self.bars - 1`).
+
+    Returns:
+      Dictionary containing date, exec_mode, total_assets, cash, market_value,
+      position_ratio, daily_ror, total_ror, holdings, trades, and pending_signals.
+    """
+    exec_mode = getattr(self, "exec_mode", "close")
+    if self.bars <= 0:
+      return {
+        "bar": -1,
+        "date": "",
+        "exec_mode": exec_mode,
+        "total_assets": float(self.initial_cash),
+        "cash": float(self.initial_cash),
+        "market_value": 0.0,
+        "position_ratio": 0.0,
+        "daily_ror": 0.0,
+        "total_ror": 0.0,
+        "holdings": [],
+        "trades": [],
+        "pending_signals": [],
+      }
+
+    idx = self.bars - 1 if bar is None else int(bar)
+    if idx < 0 or idx >= self.bars:
+      raise IndexError(f"bar index {idx} out of range [0, {self.bars - 1}]")
+
+    raw_date = self.dp.dates[idx]
+    if isinstance(raw_date, np.datetime64):
+      date_str = str(np.datetime_as_string(raw_date, unit="D"))
+    else:
+      date_str = str(raw_date)[:10]
+
+    total_assets = float(self.portfolio_assets[idx])
+    cash = float(self.portfolio_cash[idx])
+    market_value = max(0.0, total_assets - cash)
+    position_ratio = (market_value / total_assets) if total_assets > 0 else 0.0
+    prev_assets = float(self.portfolio_assets[idx - 1]) if idx > 0 else float(self.initial_cash)
+    daily_ror = (total_assets / prev_assets - 1.0) if prev_assets > 0 else 0.0
+    total_ror = float(self.portfolio_ror[idx])
+
+    objs = self.dp.objs
+    prices = self.dp.all("price")
+    holdings: list[dict] = []
+    for g in range(self.groups):
+      pos = self.position(g, current_bar=idx)
+      if pos.shares <= 0:
+        continue
+      mark_p = float(prices[g * self.bars + idx])
+      if np.isnan(mark_p) or mark_p <= 0:
+        mark_p = float(pos.raw_cost_price)
+      mv = float(pos.shares) * mark_p
+      holdings.append({
+        "obj": objs[g] if g < len(objs) else str(g),
+        "shares": float(pos.shares),
+        "price": mark_p,
+        "market_value": mv,
+        "weight": (mv / total_assets) if total_assets > 0 else 0.0,
+        "cost_price": float(pos.raw_cost_price),
+        "ror": float(pos.ror),
+        "unrealized_pnl": float(pos.unrealized_pnl),
+        "holding_days": int(pos.holding_days),
+      })
+    holdings.sort(key=lambda h: h["weight"], reverse=True)
+
+    trades = [r.to_dict() for r in self.records if r.bar == idx]
+    pending = list(self.pending_signals) if idx == self.bars - 1 else []
+
+    return {
+      "bar": idx,
+      "date": date_str,
+      "exec_mode": exec_mode,
+      "total_assets": total_assets,
+      "cash": cash,
+      "market_value": market_value,
+      "position_ratio": position_ratio,
+      "daily_ror": daily_ror,
+      "total_ror": total_ror,
+      "holdings": holdings,
+      "trades": trades,
+      "pending_signals": pending,
+    }
 
   def apply_corporate_actions(self, ts: int):
     for g in range(self.groups):
@@ -1070,6 +1159,8 @@ class PortfolioRunner:
     finally:
       self.ctx._in_execute = False
 
+    acc.pending_signals = self._extract_pending_signals(dp, acc, offsets, prices)
+
     # Post-execution phase: finalize hook with full bar range
     with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
       diag = strategy.finalize(self.ctx)
@@ -1077,6 +1168,91 @@ class PortfolioRunner:
         self.diagnostics = diag
         setattr(strategy, "diagnostics", diag)
         setattr(acc, "diagnostics", diag)
+
+  def _extract_pending_signals(
+    self, dp: DataProvider, acc: PortfolioAccount, offsets: np.ndarray, prices: np.ndarray
+  ) -> list[dict]:
+    """Extract unexecuted signals generated on the final bar when exec_mode == 'next_open'."""
+    if self.exec_mode != "next_open" or dp.bars <= 0:
+      return []
+    last_i = dp.bars - 1
+    warmup_b = getattr(dp, "warmup_bars", 0)
+    if last_i < warmup_b:
+      return []
+
+    objs = dp.objs
+    idx_sig = offsets + last_i
+    sell_p = self.ctx.sell_percents[idx_sig]
+    buy_p = self.ctx.buy_percents[idx_sig]
+    tgt_w = self.ctx.target_weights[last_i]
+    total_assets = float(acc.portfolio_assets[last_i])
+
+    pending: list[dict] = []
+    explicit_sell_groups: set[int] = set()
+    for g in range(dp.groups):
+      if not acc.tradable_mask[g]:
+        continue
+      if sell_p[g] > 0 and acc.positions[g].shares > 0:
+        ref_p = float(prices[idx_sig[g]])
+        est_shares = acc.positions[g].shares * float(sell_p[g])
+        if sell_p[g] < 1.0:
+          est_shares = float(int(est_shares) - (int(est_shares) % acc.unit))
+        if est_shares > 0:
+          explicit_sell_groups.add(g)
+          pending.append({
+            "obj": objs[g] if g < len(objs) else str(g),
+            "action": "SELL",
+            "ref_price": ref_p,
+            "est_shares": float(est_shares),
+            "target_weight": None,
+            "sell_percent": float(sell_p[g]),
+          })
+
+    if not np.all(np.isnan(tgt_w)):
+      step_tol = self.ctx.target_tolerances[last_i]
+      tol = float(acc.tolerance) if np.isnan(step_tol) else float(step_tol)
+      for g in range(dp.groups):
+        if not acc.tradable_mask[g] or g in explicit_sell_groups:
+          continue
+        tw = float(tgt_w[g])
+        if np.isnan(tw):
+          continue
+        ref_p = float(prices[idx_sig[g]])
+        pos_shares = float(acc.positions[g].shares)
+        cur_w = (pos_shares * ref_p / total_assets) if (total_assets > 0 and ref_p > 0) else 0.0
+        if abs(tw - cur_w) <= tol and not (tw == 0.0 and pos_shares > 0):
+          continue
+        if tw == 0.0 and pos_shares <= 0:
+          continue
+        action = "BUY" if tw > cur_w else "SELL"
+        est_shares = 0.0
+        if ref_p > 0 and total_assets > 0:
+          delta_val = abs(tw - cur_w) * total_assets
+          raw_sh = int(delta_val / ref_p)
+          est_shares = float(raw_sh - (raw_sh % acc.unit)) if tw > 0 else pos_shares
+        pending.append({
+          "obj": objs[g] if g < len(objs) else str(g),
+          "action": action,
+          "ref_price": ref_p,
+          "est_shares": float(est_shares),
+          "target_weight": tw,
+          "current_weight": float(cur_w),
+        })
+      return pending
+
+    for g in range(dp.groups):
+      if not acc.tradable_mask[g]:
+        continue
+      if buy_p[g] > 0:
+        pending.append({
+          "obj": objs[g] if g < len(objs) else str(g),
+          "action": "BUY",
+          "ref_price": float(prices[idx_sig[g]]),
+          "est_shares": None,
+          "target_weight": None,
+          "buy_percent": float(buy_p[g]),
+        })
+    return pending
 
 
 class SelectorStrategy(PortfolioStrategy):

@@ -21,6 +21,9 @@ cli = [
     "python-dotenv>=1.2.2",
     "tabulate>=0.10.0",
 ]
+notify = [
+    "apprise>=2.2.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

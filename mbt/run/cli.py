@@ -35,6 +35,7 @@ from mbt.run import (
 from mbt.run.msd import load_data
 from mbt.select import MsdSelectorDataProvider
 from mbt.select.cli import load_selector, try_load_selector, parse_args as parse_kv_args
+from mbt.notify import load_notify_config, send_notifications
 import mbt.shared.stocks
 import logging
 from typing import Any, Tuple
@@ -227,6 +228,24 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     default=None,
     help="holdout date or duration (e.g. 2025-07-01, 180d, 1y) to evaluate In-Sample vs Out-of-Sample",
   )
+  parser.add_argument(
+    "--notify",
+    type=str,
+    default=None,
+    help="path to JSON notification config (e.g. etc/notify.json) to push daily portfolio signals",
+  )
+  parser.add_argument(
+    "--notify-on-trade",
+    action="store_true",
+    help="only send webhook notifications when the final bar has executed trades or pending signals",
+  )
+  parser.add_argument(
+    "--notify-detail",
+    type=str,
+    choices=["compact", "minimal"],
+    default=None,
+    help="override notification message detail level ('compact' or 'minimal')",
+  )
   parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
 
@@ -412,6 +431,9 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   req.kv_kwargs = kv_kwargs
   req.strategy_path = args.strategy
   req.benchmark = args.benchmark
+  req.notify = args.notify  # type: ignore[attr-defined]
+  req.notify_on_trade = bool(args.notify_on_trade)  # type: ignore[attr-defined]
+  req.notify_detail = args.notify_detail  # type: ignore[attr-defined]
 
   fee = Fee.load(args.fee, overrides=kv_kwargs)
 
@@ -615,6 +637,8 @@ def main():
   fin_lookback_days = getattr(req, "fin_lookback_days", None)
   holdout = getattr(req, "holdout", None)
   show_summary = getattr(req, "summary", False)
+  notify_path = getattr(req, "notify", None)
+  notify_targets = load_notify_config(notify_path) if notify_path else None
 
   if starts and len(starts) > 1:
     logger.info(f"running multi-start backtest across {len(starts)} starts: {starts}")
@@ -670,6 +694,19 @@ def main():
       print(summary_text, end="")
     else:
       echo_reports(reports)
+
+  if notify_targets is not None:
+    if not isinstance(acc, PortfolioAccount):
+      raise ValueError("--notify is only supported in portfolio mode (-p)")
+    snapshot = acc.daily_snapshot()
+    strat_name = req.strategy.__class__.__name__ if req.strategy is not None else ""
+    send_notifications(
+      snapshot,
+      notify_targets,
+      strategy_name=strat_name,
+      on_trade_only=(True if getattr(req, "notify_on_trade", False) else None),
+      detail_override=getattr(req, "notify_detail", None),
+    )
 
 
 if __name__ == "__main__":

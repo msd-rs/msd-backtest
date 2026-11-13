@@ -17,3 +17,5 @@ dev
 
 .benchmarks
 optimize
+
+notify.json

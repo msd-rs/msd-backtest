@@ -24,6 +24,8 @@ from mbt.select import A_STOCKS_EXCLUDE_ST
 
 logger = logging.getLogger(__name__)
 
+M_AUTHOR = "Gemini 4 Hydrogen"
+
 
 def get_board_sector(obj: str) -> str:
   """根据 A 股代码规则划分板块大类，用于分散度约束。"""

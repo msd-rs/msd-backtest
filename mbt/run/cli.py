@@ -246,6 +246,13 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     default=None,
     help="override notification message detail level ('compact' or 'minimal')",
   )
+  parser.add_argument(
+    "--overview",
+    nargs="?",
+    const="overview.png",
+    default=None,
+    help="generate high-DPI strategy overview PNG chart (default: overview.png)",
+  )
   parser.add_argument("-V", "--verbose", action="store_true", help="verbose output")
   args = parser.parse_args()
 
@@ -434,6 +441,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
   req.notify = args.notify  # type: ignore[attr-defined]
   req.notify_on_trade = bool(args.notify_on_trade)  # type: ignore[attr-defined]
   req.notify_detail = args.notify_detail  # type: ignore[attr-defined]
+  req.overview = args.overview  # type: ignore[attr-defined]
 
   fee = Fee.load(args.fee, overrides=kv_kwargs)
 
@@ -460,7 +468,16 @@ def json_default(self, o):
   return o
 
 
-def build_output(reports: list[Report], output: str):
+def build_output(
+  reports: list[Report],
+  output: str,
+  strategy: Any = None,
+  selector: Any = None,
+  account: Any = None,
+  dp: Any = None,
+  req: Any = None,
+  is_portfolio: bool = False,
+):
   ext = output.split(".")[-1].lower()
   logger.info(f"output kind: {ext}")
   if ext == "csv":
@@ -502,6 +519,18 @@ def build_output(reports: list[Report], output: str):
     md_text = build_markdown_summary(reports)
     with open(output, "w", encoding="utf-8") as f:
       f.write(md_text)
+  elif ext == "png":
+    from mbt.run.overview import render_strategy_overview
+    render_strategy_overview(
+      reports,
+      output,
+      strategy=strategy,
+      selector=selector,
+      account=account,
+      dp=dp,
+      req=req,
+      is_portfolio=is_portfolio,
+    )
   else:
     raise ValueError(f"unsupported output format: {ext}")
   logger.info(f"output saved to: {output}")
@@ -684,16 +713,41 @@ def main():
   )
   logger.info("report built")
 
+  overview_path = getattr(req, "overview", None)
+  is_port = isinstance(acc, PortfolioAccount)
   summary_text = build_markdown_summary(reports, account=acc, holdout=holdout)
   if len(output) > 0:
-    build_output(reports, output)
+    build_output(
+      reports,
+      output,
+      strategy=req.strategy,
+      selector=getattr(req, "selector", None),
+      account=acc,
+      dp=dp,
+      req=req,
+      is_portfolio=is_port,
+    )
     if show_summary:
       print(summary_text, end="")
   else:
     if show_summary:
       print(summary_text, end="")
-    else:
+    elif not overview_path:
       echo_reports(reports)
+
+  if overview_path and overview_path != output:
+    from mbt.run.overview import render_strategy_overview
+    render_strategy_overview(
+      reports,
+      overview_path,
+      strategy=req.strategy,
+      selector=getattr(req, "selector", None),
+      account=acc,
+      dp=dp,
+      req=req,
+      is_portfolio=is_port,
+    )
+    logger.info(f"overview chart saved to: {overview_path}")
 
   if notify_targets is not None:
     if not isinstance(acc, PortfolioAccount):

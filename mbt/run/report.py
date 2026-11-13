@@ -41,6 +41,8 @@ class Report:
   trade_count: int
   rebalance_count: int = 0
   diagnostics: dict | None = None
+  benchmark_ror: np.ndarray | None = None
+  benchmark_obj: str = ""
   
 
   def __init__(self, obj: str, dp: DataProvider , account: Account ):
@@ -122,6 +124,9 @@ class Report:
     r.trades = d.get('trades', [])
     r.attribution = d.get('attribution', [])
     r.diagnostics = d.get('diagnostics', None)
+    b_ror = d.get('benchmark_ror', None)
+    r.benchmark_ror = np.array(b_ror, dtype='float64') if b_ror is not None else None
+    r.benchmark_obj = d.get('benchmark_obj', '')
 
     return r    
     
@@ -133,6 +138,12 @@ class Report:
     if w > 0 and len(bench_bw) > w:
       bench_bw = bench_bw[w:]
     benchmark = uniform_ror(bench_bw)
+    self.benchmark_ror = np.round(
+      pl.Series("", benchmark).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy(),
+      4,
+    )
+    if hasattr(dp, "objs") and len(dp.objs) > 0:
+      self.benchmark_obj = str(dp.objs[0])
 
     # 1. Convert cumulative returns to daily returns
     strategy_ratio = 1.0 + self.ror
@@ -625,6 +636,15 @@ def build_portfolio_report(
     benchmark = uniform_ror(dp.slice("bw_price", 0)[w:])
   else:
     benchmark = np.zeros(eff_bars, dtype=np.float64)
+
+  r.benchmark_ror = np.round(
+    pl.Series("", benchmark).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy(),
+    4,
+  )
+  if bench_idx is not None and hasattr(dp, "objs") and bench_idx < len(dp.objs):
+    r.benchmark_obj = str(dp.objs[bench_idx])
+  elif getattr(account, "benchmark_obj", None):
+    r.benchmark_obj = str(account.benchmark_obj)
 
   strategy_ratio = 1.0 + r.ror
   benchmark_ratio = 1.0 + benchmark

@@ -337,11 +337,11 @@ class FeeItem:
 DEFAULT_FEE_CONFIG: list[dict] = [
   {
     "ts": 4102416000,
-    "commission_buy": 0.0015,
+    "commission_buy": 0.0010,
     "min_commission_buy": 5.0,
     "tax_buy": 0.001,
     "transaction_fee_buy": 0.0001,
-    "commission_sell": 0.0015,
+    "commission_sell": 0.0010,
     "min_commission_sell": 5.0,
     "tax_sell": 0.0,
     "transaction_fee_sell": 0.0,

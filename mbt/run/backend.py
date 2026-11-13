@@ -171,7 +171,9 @@ class RunRequest:
               and issubclass(obj, Strategy)
               and obj not in (Strategy, PortfolioStrategy)
             ):
-              return instantiate_class(obj, args)
+              inst = instantiate_class(obj, args)
+              setattr(inst, "_source_module", module)
+              return inst
 
       content = strategy.read()
       if isinstance(content, bytes):

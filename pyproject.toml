@@ -13,17 +13,16 @@ excel = ["openpyxl>=3.1.5"]
 
 [project.optional-dependencies]
 alpha = ["py-alpha-lib>=0.4"]
-msd = ["pymsd>=0.1", "requests>=2.32", "polars>=1.0.0", "xlsxwriter>=3.2.9"]
+msd = ["pymsd>=0.1", "polars>=1.0.0", "xlsxwriter>=3.2.9"]
 server = ["fastapi[standard]>=0.135.1", "uvicorn>=0.54", "msd-backtest[cli]"]
 cli = [
     "orjson>=3.11.9",
     "msd-backtest[alpha,msd]",
     "python-dotenv>=1.2.2",
     "tabulate>=0.10.0",
+    "matplotlib>=3.11.2",
 ]
-notify = [
-    "apprise>=2.2.0",
-]
+notify = ["apprise>=2.2.0"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

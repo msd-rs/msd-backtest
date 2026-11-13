@@ -10,11 +10,11 @@ def test_fee_default():
   fee = Fee.default()
   assert len(fee.config) >= 1
   item = fee.get(0)
-  assert item.commission_buy == 0.0015
+  assert item.commission_buy == 0.0010
   assert item.min_commission_buy == 5.0
   assert item.tax_buy == 0.001
   assert item.transaction_fee_buy == 0.0001
-  assert item.commission_sell == 0.0015
+  assert item.commission_sell == 0.0010
   assert item.min_commission_sell == 5.0
   assert item.tax_sell == 0.0
   assert item.transaction_fee_sell == 0.0
@@ -23,14 +23,14 @@ def test_fee_default():
 def test_fee_load_empty_or_none():
   fee_none = Fee.load(None)
   fee_empty = Fee.load("")
-  assert fee_none.get(0).commission_buy == 0.0015
-  assert fee_empty.get(0).commission_buy == 0.0015
+  assert fee_none.get(0).commission_buy == 0.0010
+  assert fee_empty.get(0).commission_buy == 0.0010
 
 
 def test_fee_load_non_existent_file():
   # When file does not exist, should gracefully fall back to default fee instead of raising error
   fee = Fee.load("path/that/does/not/exist/fee.json")
-  assert fee.get(0).commission_buy == 0.0015
+  assert fee.get(0).commission_buy == 0.0010
   assert fee.get(0).min_commission_buy == 5.0
 
 
@@ -81,7 +81,7 @@ def test_fee_default_fallback_when_no_files_exist(monkeypatch):
   # Simulate candidate.is_file() returning False for all candidate files
   monkeypatch.setattr(Path, "is_file", lambda self: False)
   fee = Fee.default()
-  assert fee.get(0).commission_buy == 0.0015
+  assert fee.get(0).commission_buy == 0.0010
   assert fee.get(0).min_commission_buy == 5.0
 
 
@@ -116,7 +116,7 @@ class DummyStrategy(mbt.Strategy):
   )
   _, _, _, fee = parse_args()
   assert fee is not None
-  assert fee.get(0).commission_buy == 0.0015
+  assert fee.get(0).commission_buy == 0.0010
   assert fee.get(0).min_commission_buy == 5.0
 
 
@@ -151,7 +151,7 @@ class DummyStrategy(mbt.Strategy):
   _, _, _, fee = parse_args()
   assert fee is not None
   # Gracefully fell back to default fee
-  assert fee.get(0).commission_buy == 0.0015
+  assert fee.get(0).commission_buy == 0.0010
   assert fee.get(0).min_commission_buy == 5.0
 
 

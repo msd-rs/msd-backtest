@@ -36,6 +36,17 @@ So, first, please choose what will be build, then reading the relevant documenta
 - [How to build a portfolio trading strategy](./references/portfolio.md)
 
 
+## Strategy Metadata (`M_AUTHOR`)
+
+When writing a strategy file, define a module-level constant `M_AUTHOR` near the top of the file (right after `logger` / imports) and fill in your own model name, for example:
+
+```python
+M_AUTHOR = "<Your Model Name>"  # e.g. "Gemini 4 Hydrogen", "Claude Sonnet 4"
+```
+
+Backtest overview reports (`mbt.run.overview`) automatically read `M_AUTHOR` to credit the authoring model.
+
+
 ## Combining Selector and Strategy in a Single File
 
 A single `.py` file can define both a `Selector` (subclass of `mbt.Selector`) and a `Strategy` (subclass of `mbt.Strategy` or `mbt.PortfolioStrategy`):

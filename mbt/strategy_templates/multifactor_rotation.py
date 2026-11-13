@@ -37,6 +37,8 @@ import mbt
 
 logger = logging.getLogger(__name__)
 
+M_AUTHOR = ""  # 编写策略时建议定义模块常量 M_AUTHOR，填入当前模型名称
+
 
 def _calc_zscore(vals: np.ndarray) -> np.ndarray:
   """安全计算截面 Z-Score 标准化，防御 NaN 与极端零方差."""

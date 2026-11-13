@@ -42,6 +42,8 @@ import mbt
 
 logger = logging.getLogger(__name__)
 
+M_AUTHOR = ""  # 编写策略时建议定义模块常量 M_AUTHOR，填入当前模型名称
+
 
 class CtaMomentumStrategy(mbt.Strategy):
   """唐奇安通道突破与动态 ATR 追踪止损 CTA 策略."""

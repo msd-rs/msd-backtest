@@ -43,6 +43,8 @@ from mbt.select import Panel
 
 logger = logging.getLogger(__name__)
 
+M_AUTHOR = ""  # 编写策略时建议定义模块常量 M_AUTHOR，填入当前模型名称
+
 
 class FundamentalTimingSelector(mbt.Selector):
   """基本面优质成长与合理估值选股器 (单文件选股端)."""

@@ -76,7 +76,10 @@ def load_stocks_from_db() -> pl.DataFrame:
 
   conn.query_map("select * from stock_infos where obj='stocks'", handler)
   if df is None or len(df) == 0:
-    raise Exception("stocks load failed")
+    raise RuntimeError(
+      f"Failed to load stock universe from MSD ({base_url}): table 'stock_infos' returned no records for obj='stocks'. "
+      "Please verify MSD service status and data initialization via `python -m mbt.doctor`."
+    )
   return normalize_stocks(df)
 
 

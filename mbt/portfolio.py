@@ -184,39 +184,20 @@ class PortfolioAccount:
 
   def has_position(self, obj: str | int) -> bool:
     """Check whether the account currently holds shares in obj or group."""
-    if isinstance(obj, str):
-      g = self._obj_to_group.get(obj)
-      return g is not None and self.positions[g].shares > 0
-    elif isinstance(obj, (int, np.integer)):
-      return 0 <= obj < self.groups and self.positions[obj].shares > 0
-    return False
+    g = self._resolve_group_idx(obj)
+    return self.positions[g].shares > 0
 
   def position(self, obj: str | int, current_bar: int | None = None) -> Position:
     """Get the current Position object for an obj or group index."""
-    if isinstance(obj, str):
-      g = self._obj_to_group.get(obj)
-      if g is not None and 0 <= g < len(self.positions):
-        pos = self.positions[g]
-        pos.holding_days = self.holding_days(g, current_bar=current_bar)
-        if current_bar is not None and 0 <= current_bar < self.bars:
-          j = g * self.bars + current_bar
-          p = self.dp.all("price")[j]
-          if not np.isnan(p) and p > 0:
-            pos.raw_mark_price = float(p)
-        return pos
-      return Position.zero()
-    elif isinstance(obj, (int, np.integer)):
-      if 0 <= obj < len(self.positions):
-        pos = self.positions[obj]
-        pos.holding_days = self.holding_days(obj, current_bar=current_bar)
-        if current_bar is not None and 0 <= current_bar < self.bars:
-          j = int(obj) * self.bars + current_bar
-          p = self.dp.all("price")[j]
-          if not np.isnan(p) and p > 0:
-            pos.raw_mark_price = float(p)
-        return pos
-      return Position.zero()
-    return Position.zero()
+    g = self._resolve_group_idx(obj)
+    pos = self.positions[g]
+    pos.holding_days = self.holding_days(g, current_bar=current_bar)
+    if current_bar is not None and 0 <= current_bar < self.bars:
+      j = g * self.bars + current_bar
+      p = self.dp.all("price")[j]
+      if not np.isnan(p) and p > 0:
+        pos.raw_mark_price = float(p)
+    return pos
 
   def runoff_objs(self, universe: set[str] | list[str] | None = None) -> list[str]:
     """Held stocks that are no longer in the active universe whitelist."""
@@ -258,11 +239,12 @@ class PortfolioAccount:
           right_cost = 0.0
         if actual_r > 0:
           old_cost = pos.cost_basis
+          old_raw_cost = pos.raw_cost_price
           pos.shares += actual_r
           if pos.shares > 0:
             pos.raw_cost_price = (old_cost + right_cost) / pos.shares
-            if pos.raw_cost_price > 0:
-              pos._adj_cost_price = pos.raw_cost_price * (pos._adj_cost_price / pos.raw_cost_price)
+            if old_raw_cost > 0:
+              pos._adj_cost_price = pos._adj_cost_price * (pos.raw_cost_price / old_raw_cost)
 
   def _sell_group(self, g: int, ts: int, shares_to_sell: float, deal_price: float):
     pos = self.positions[g]
@@ -404,18 +386,25 @@ class PortfolioAccount:
   def holding_days(self, obj: str | int, current_bar: int | None = None) -> int:
     """Return number of bars since position was first acquired."""
     g = self._resolve_group_idx(obj)
-    if g is None or self.entry_bars[g] < 0:
+    if self.entry_bars[g] < 0:
       return 0
     cur = self.bars if current_bar is None else current_bar
     return max(0, cur - int(self.entry_bars[g]))
 
-  def _resolve_group_idx(self, obj: str | int) -> int | None:
+  def _resolve_group_idx(self, obj: str | int) -> int:
     if isinstance(obj, str):
-      return self._obj_to_group.get(obj)
+      g = self._obj_to_group.get(obj)
+      if g is not None and 0 <= g < self.groups:
+        return g
+      raise ValueError(
+        f"Symbol '{obj}' is not in the pre-loaded portfolio pool (total {self.groups} objs). "
+        "Ensure all target symbols are included via -s/--objs."
+      )
     elif isinstance(obj, (int, np.integer)):
       if 0 <= obj < self.groups:
         return int(obj)
-    return None
+      raise ValueError(f"Group index {obj} out of range [0, {self.groups})")
+    raise TypeError(f"Expected str or int for obj, got {type(obj).__name__}")
 
   def update_mark_to_market(self, ts: int, mark_prices: np.ndarray):
     for g in range(self.groups):
@@ -635,10 +624,10 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
         )
 
     if len(fin_fields) > 0 and fin_only_year and not self._fin_only_year:
-      logger.warning(
+      raise ValueError(
         "_HistoricalPanelSelectorDataProvider: load_snapshot/load_kline requested fin_only_year=True with fin_fields, "
         "but backtest data was not loaded with fin_only_year=True (contains quarterly as-of joins). "
-        "To align data, set fin_only_year=True on your Strategy or via --fin-only-year."
+        "To align data and prevent silent quarterly/annual mismatch, set fin_only_year=True on your Strategy/Selector or via --fin-only-year."
       )
     n_bars = lastN if isinstance(lastN, int) else int(lastN[0])
     n_bars = min(n_bars, self._panel.bars)
@@ -658,8 +647,12 @@ class _HistoricalPanelSelectorDataProvider(SelectorDataProvider):
       fin_only_year=fin_only_year,
     )
     cols = {col: p.last(col) for col in p.columns}
-    if "raw_close" in cols:
-      cols["close"] = cols["raw_close"]
+    for base_col in ("open", "high", "low", "close"):
+      raw_col = f"raw_{base_col}"
+      if raw_col in cols:
+        cols[base_col] = cols[raw_col]
+    if "report_ts" in cols and "f_ts" not in cols:
+      cols["f_ts"] = cols["report_ts"]
     return p.cross_section(**cols)
 
 
@@ -685,13 +678,14 @@ class PortfolioContext(Context):
     if objs is None:
       self.universe = None
     else:
-      self.universe = set(objs)
       missing = [s for s in objs if s not in self._obj_to_group]
       if missing:
-        logger.warning(
-          f"set_universe: {len(missing)} obj(s) not in pre-loaded pool and will be ignored: "
-          f"{missing[:5]}{'...' if len(missing) > 5 else ''}"
+        raise ValueError(
+          f"set_universe: {len(missing)} obj(s) not in pre-loaded pool: "
+          f"{missing[:5]}{'...' if len(missing) > 5 else ''}. "
+          "Pass the full candidate universe via -s/--objs (e.g. -s A_STOCKS) when starting the backtest."
         )
+      self.universe = set(objs)
 
   @property
   def universe_objs(self) -> list[str]:
@@ -729,10 +723,12 @@ class PortfolioContext(Context):
     selected_list = list(selected)
     missing = [s for s in selected_list if s not in self._obj_to_group]
     if missing:
-      logger.warning(
+      raise ValueError(
         f"run_selector: {len(missing)} selected obj(s) not in pre-loaded pool: "
         f"{missing[:5]}{'...' if len(missing) > 5 else ''}. "
-        "In-backtest dynamic selection operates only on the pre-loaded pool."
+        "In-backtest dynamic selection operates only on the pre-loaded pool. "
+        "Ensure your Selector uses the passed `stocks` argument in step00 during backtest (`if not self.is_backtest and not stocks:`), "
+        "or preload the full candidate pool via -s/--objs."
       )
     return selected_list
 
@@ -835,25 +831,22 @@ class PortfolioContext(Context):
     idx = self._group_offsets + self.dp.i
     if isinstance(flags, str):
       mask = np.zeros(self.dp.groups, dtype=bool)
-      g = self._obj_to_group.get(flags)
-      if g is not None:
-        mask[g] = True
+      g = self.account._resolve_group_idx(flags)
+      mask[g] = True
       return idx, mask
-    if isinstance(flags, (int, np.integer)):
+    if isinstance(flags, (int, np.integer)) and not isinstance(flags, (bool, np.bool_)):
       mask = np.zeros(self.dp.groups, dtype=bool)
-      if 0 <= flags < self.dp.groups:
-        mask[flags] = True
+      g = self.account._resolve_group_idx(int(flags))
+      mask[g] = True
       return idx, mask
     if isinstance(flags, (list, set, tuple)):
       mask = np.zeros(self.dp.groups, dtype=bool)
       for item in flags:
-        if isinstance(item, str):
-          g = self._obj_to_group.get(item)
-          if g is not None:
-            mask[g] = True
-        elif isinstance(item, (int, np.integer)):
-          if 0 <= item < self.dp.groups:
-            mask[item] = True
+        if isinstance(item, (str, int, np.integer)) and not isinstance(item, (bool, np.bool_)):
+          g = self.account._resolve_group_idx(item)
+          mask[g] = True
+        else:
+          raise TypeError(f"Unsupported flag element type: {type(item).__name__}")
       return idx, mask
     arr = np.asarray(flags, dtype=bool)
     if arr.ndim == 1 and len(arr) == self.dp.groups:
@@ -918,8 +911,7 @@ class PortfolioContext(Context):
           if curr_shares <= 0 or total_equity <= 0:
             w[g] = 0.0
           else:
-            dp_g = self.account.positions[g].price
-            curr_val = curr_shares * dp_g
+            curr_val = self.account.positions[g].market_value
             curr_w = curr_val / total_equity
             w[g] = min(w[g], curr_w)
 
@@ -929,7 +921,7 @@ class PortfolioContext(Context):
     """Rebalance portfolio using a mapping of {symbol: weight}.
 
     Symbols not present in target_weights are assigned a target weight of 0.0.
-    Symbols not in the pre-loaded pool are logged as warnings and ignored.
+    Symbols not in the pre-loaded pool raise a ValueError (Fail-Fast).
 
     Args:
       target_weights: dict mapping stock symbol to target weight (e.g. {"SH600000": 0.05}).
@@ -944,9 +936,10 @@ class PortfolioContext(Context):
       else:
         missing.append(sym)
     if missing:
-      logger.warning(
-        f"rebalance_objs: {len(missing)} obj(s) not in pre-loaded pool and ignored: "
-        f"{missing[:5]}{'...' if len(missing) > 5 else ''}"
+      raise ValueError(
+        f"rebalance_objs: {len(missing)} obj(s) not in pre-loaded pool: "
+        f"{missing[:5]}{'...' if len(missing) > 5 else ''}. "
+        "Ensure all target symbols are included in the pre-loaded pool via -s/--objs."
       )
     self.rebalance(weights, tolerance=tolerance)
 
@@ -1130,9 +1123,15 @@ class SelectorStrategy(PortfolioStrategy):
 
     weights = np.zeros(sub_panel.n_objs, dtype=np.float64)
     if len(selected) > 0:
+      missing = [s for s in selected if s not in sub_panel._index]
+      if missing:
+        raise ValueError(
+          f"SelectorStrategy: {len(missing)} selected obj(s) not in pre-loaded pool: "
+          f"{missing[:5]}{'...' if len(missing) > 5 else ''}. "
+          "Ensure Selector only selects from the passed `stocks` pool during backtest."
+        )
       w = 1.0 / len(selected)
       for s in selected:
-        if s in sub_panel._index:
-          weights[sub_panel.pick(s)] = w
+        weights[sub_panel.pick(s)] = w
 
     ctx.rebalance(weights)

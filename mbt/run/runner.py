@@ -125,11 +125,15 @@ class RunnerContext(Context):
       mask = np.zeros(self.dp.groups, dtype=bool)
       if hasattr(self.dp, "objs") and flags in self.dp.objs:
         mask[self.dp.objs.index(flags)] = True
+      else:
+        raise ValueError(f"Symbol '{flags}' is not in context objs")
       return idx, mask
     if isinstance(flags, (int, np.integer)):
       mask = np.zeros(self.dp.groups, dtype=bool)
       if 0 <= flags < self.dp.groups:
         mask[flags] = True
+      else:
+        raise ValueError(f"Group index {flags} out of range [0, {self.dp.groups})")
       return idx, mask
     arr = np.asarray(flags, dtype=bool)
     if arr.ndim == 0:
@@ -167,11 +171,12 @@ class RunnerContext(Context):
     if isinstance(obj, str):
       if obj in self.dp.objs:
         return self.accounts[self.dp.objs.index(obj)]
-      return None
+      raise ValueError(f"Symbol '{obj}' is not in context objs")
     elif isinstance(obj, (int, np.integer)):
       if 0 <= obj < len(self.accounts):
         return self.accounts[int(obj)]
-    return None
+      raise ValueError(f"Group index {obj} out of range [0, {len(self.accounts)})")
+    raise TypeError(f"Expected str, int, or None for obj, got {type(obj).__name__}")
 
   def position(self, obj: str | int | None = None) -> 'Position':
     """Get the current Position object."""
@@ -310,7 +315,7 @@ class Runner:
 
             # Ensure mark-to-market uses closing price when executed at open
             if self.exec_mode == "next_open" and acc.position.shares > 0 and not np.isnan(prices[j]) and prices[j] > 0:
-              acc.position.price = prices[j]
+              acc.position.raw_mark_price = float(prices[j])
               acc.assets[i] = acc.asset
               acc.ror[i] = acc.asset / acc.assets[0] - 1
               acc.ror_hold[i] = (acc.asset - acc.per_assets) / acc.per_assets if acc.per_assets > 0 else 0.0

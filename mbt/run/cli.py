@@ -343,10 +343,10 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
         f"nor Selector ({sel_cls.__name__ if sel_cls else 'None'}) accepts these arguments.{hint}"
       )
   if req.portfolio and len(raw_objs) == 0:
-    stock_count = len(selected_objs) - (1 if args.benchmark in selected_objs else 0)
-    logger.warning(
-      f"组合策略未通过 -s/--objs 指定候选池，已使用策略内置 Selector 在起始日 ({req.start}) 筛选出的 {stock_count} 只股票作为全周期固定基础回测池。"
-      "注意：回测运行中的动态重选 (run_selector) 仅在此基础池内轮动，无法从全市场选入新标的。若需全市场动态选股，请通过 -s/--objs 显式传入大候选池 (例如 A_STOCKS)。"
+    raise ValueError(
+      f"Portfolio strategy '{args.strategy}' requires an explicit candidate stock pool via -s/--objs "
+      "(e.g. -s A_STOCKS or -s A_STOCKS_EXCLUDE_ST). Implicitly falling back to the initial day's "
+      "selected stocks is disabled to prevent silent universe truncation."
     )
   def _normalize_fields(val: Any) -> list[str]:
     if not val:
@@ -537,23 +537,23 @@ def run_single_period(
 
   selected_objs = req.objs
   if getattr(req, "strategy_path", None) and getattr(req, "starts", None):
-    try:
-      selector, init_objs = build_selector(
-        req.raw_objs,
-        selector_kwargs=req.kv_kwargs,
-        strategy_path=req.strategy_path,
+    selector, init_objs = build_selector(
+      req.raw_objs,
+      selector_kwargs=req.kv_kwargs,
+      strategy_path=req.strategy_path,
+    )
+    selector_dp = MsdSelectorDataProvider(msd_host, date=start)
+    cur_objs = list(selector.execute(selector_dp, init_objs))
+    if len(cur_objs) == 0:
+      raise ValueError(
+        f"Selector '{selector.__class__.__name__}' returned 0 stocks for start='{start}'."
       )
-      selector_dp = MsdSelectorDataProvider(msd_host, date=start)
-      cur_objs = list(selector.execute(selector_dp, init_objs))
-      if len(cur_objs) > 0:
-        try:
-          cur_objs.remove(req.benchmark)
-        except ValueError:
-          pass
-        cur_objs.insert(0, req.benchmark)
-        selected_objs = cur_objs
-    except Exception as e:
-      logger.warning(f"Failed to re-execute selector for start={start}: {e}")
+    try:
+      cur_objs.remove(req.benchmark)
+    except ValueError:
+      pass
+    cur_objs.insert(0, req.benchmark)
+    selected_objs = cur_objs
 
   dp, objs = load_data(
     msd_host,

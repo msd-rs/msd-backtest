@@ -94,7 +94,10 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     if len(fin_fields) > 0 and len(loaded) > 0 and bars > 0:
       ts_year_where = "AND ts.month=12" if fin_only_year else ""
       n = max(start[0] // 100 + 4, 4) if fin_only_year else max(start[0] // 50 + 4, 8)
-      fin_sql = f"SELECT {','.join(fin_fields)} FROM stock_financial WHERE obj in ({where_}) {date_where} {ts_year_where} LIMIT -{n};"
+      fin_query_cols = list(fin_fields)
+      if "ts" not in fin_query_cols:
+        fin_query_cols.insert(0, "ts")
+      fin_sql = f"SELECT {','.join(fin_query_cols)} FROM stock_financial WHERE obj in ({where_}) {date_where} {ts_year_where} LIMIT -{n};"
       for col in fin_fields:
         data[col] = np.full(len(loaded) * bars, np.nan, dtype=np.float64)
       data["report_ts"] = np.full(len(loaded) * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
@@ -138,7 +141,8 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
               rep_arr[valid] = obj_rep_ts[safe_idx[valid]]
               data["report_ts"][kline_slice] = rep_arr
       except Exception as e:
-        logger.warning(f"failed to query and align stock_financial in load_kline: {e}")
+        logger.error(f"failed to query and align stock_financial in load_kline: {e}", exc_info=True)
+        raise
 
     # Ensure corporate action columns exist even if no dividend events occurred
     for col in ["dividend", "transfer_shares", "right_shares", "right_price"]:
@@ -150,15 +154,18 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
     with al.Context(groups=len(loaded), flags=al.FLAG_SKIP_NAN):
       # limit_ratio 必须按返回块顺序生成, 且基于未复权除权参考价计算涨跌停, 避免前复权缩放后 round 失真
       limit_ratio = get_limit_ratio(loaded, repeat=bars)
-      prev_raw_close = np.nan_to_num(al.REF(data["close"], 1))
+      prev_raw_close = al.REF(data["close"], 1)
       denom = 1.0 + data["transfer_shares"] + data["right_shares"]
       denom = np.where(denom > 0, denom, 1.0)
       ex_ref_price = (
         prev_raw_close - data["dividend"] + data["right_shares"] * data["right_price"]
       ) / denom
-      data["limited"] = np.where(
-        (data["close"] >= np.round(ex_ref_price * (1 + limit_ratio), 2)), 1, np.where(
-        (data["close"] <= np.round(ex_ref_price * (1 - limit_ratio), 2)), -1, 0))
+      limit_up_price = np.round(ex_ref_price * (1.0 + limit_ratio), 2)
+      limit_down_price = np.round(ex_ref_price * (1.0 - limit_ratio), 2)
+      valid_ref = ~np.isnan(prev_raw_close) & (prev_raw_close > 0)
+      is_limit_up = valid_ref & (data["close"] == data["high"]) & (data["close"] >= limit_up_price)
+      is_limit_down = valid_ref & (data["close"] == data["low"]) & (data["close"] <= limit_down_price)
+      data["limited"] = np.where(is_limit_up, 1, np.where(is_limit_down, -1, 0))
 
       # Preserve unadjusted raw prices before forward adjustment
       data["raw_open"] = data["open"].copy()
@@ -191,7 +198,7 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
 
     return Panel(full_df, loaded, bars)
 
-  def load_financial(self, objs: list[str], fields: list[str], only_year: bool = True, lastN: int = 3) -> pl.DataFrame:
+  def load_financial(self, objs: list[str], fields: list[str], only_year: bool = True, lastN: int = 12) -> pl.DataFrame:
     """Load historical financial records aligned by statutory disclosure deadline.
 
     See SelectorDataProvider.load_financial for schema details.
@@ -206,12 +213,23 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
       query_fields.insert(0, "ts")
 
     conds = []
+    fetch_n = int(lastN)
     if self.date:
       conds.append(f'ts <= "{self.date}"')
+      try:
+        d_str = str(self.date)[:10]
+        dt_part = datetime.fromisoformat(d_str)
+        md = (dt_part.month, dt_part.day)
+        # During statutory disclosure lag windows (Jan 1-Apr 29, Jun 30-Aug 30, Sep 30-Oct 30),
+        # the latest report_ts <= date may not be disclosed yet; fetch extra rows so post-filter retains lastN
+        if (1, 1) <= md < (4, 30) or (6, 30) <= md < (8, 31) or (9, 30) <= md < (10, 31):
+          fetch_n = lastN + (1 if only_year else 2)
+      except Exception:
+        pass
     if only_year:
       conds.append("ts.month = 12")
     date_where = f"AND {' AND '.join(conds)}" if conds else ""
-    sql = f"SELECT {db_fields(query_fields)} FROM stock_financial where obj in ({objs_where(objs)}) {date_where} limit -{lastN}"
+    sql = f"SELECT {db_fields(query_fields)} FROM stock_financial where obj in ({objs_where(objs)}) {date_where} limit -{fetch_n}"
     res = self._client.query_concat(sql)
 
     if "stock_financial" not in res:

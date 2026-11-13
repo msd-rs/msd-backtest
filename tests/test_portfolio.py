@@ -461,8 +461,8 @@ def test_portfolio_context_panel_warning_and_slice(caplog):
   assert any("Calling ctx.panel(allow_future=True) during execute()" in rec.message for rec in caplog.records)
 
 
-def test_historical_panel_selector_fin_only_year_warning(caplog):
-  import logging
+def test_historical_panel_selector_fin_only_year_warning():
+  import pytest
   from mbt.portfolio import _HistoricalPanelSelectorDataProvider
   from mbt.select.panel import Panel
 
@@ -473,18 +473,15 @@ def test_historical_panel_selector_fin_only_year_warning(caplog):
   panel = Panel(df, ["SH600000"], 2)
 
   # When backtest was NOT loaded with fin_only_year (fin_only_year=False),
-  # requesting fin_only_year=True with fin_fields triggers a warning
+  # requesting fin_only_year=True with fin_fields raises a ValueError (Fail-Fast)
   dp_slice = _HistoricalPanelSelectorDataProvider(panel, fin_only_year=False)
-  with caplog.at_level(logging.WARNING):
+  with pytest.raises(ValueError, match="requested fin_only_year=True with fin_fields"):
     dp_slice.load_snapshot(["SH600000"], fin_fields=["f001"], fin_only_year=True)
-  assert any("requested fin_only_year=True with fin_fields" in rec.message for rec in caplog.records)
 
-  # When backtest WAS loaded with fin_only_year=True, no warning
-  caplog.clear()
+  # When backtest WAS loaded with fin_only_year=True, succeeds
   dp_slice_ok = _HistoricalPanelSelectorDataProvider(panel, fin_only_year=True)
-  with caplog.at_level(logging.WARNING):
-    dp_slice_ok.load_snapshot(["SH600000"], fin_fields=["f001"], fin_only_year=True)
-  assert not any("requested fin_only_year=True with fin_fields" in rec.message for rec in caplog.records)
+  snap = dp_slice_ok.load_snapshot(["SH600000"], fin_fields=["f001"], fin_only_year=True)
+  assert len(snap) == 1
 
 
 def test_rebalance_and_buy_universe_whitelist_guard():
@@ -532,8 +529,8 @@ def test_rebalance_and_buy_universe_whitelist_guard():
   assert acc.positions[1].shares > 0.0
 
 
-def test_set_universe_and_run_selector_missing_objs_warning(caplog):
-  import logging
+def test_set_universe_and_run_selector_missing_objs_warning():
+  import pytest
   prices = np.full(8, 10.0)
   dp = DataProvider(
     {
@@ -552,15 +549,13 @@ def test_set_universe_and_run_selector_missing_objs_warning(caplog):
   class MissingObjStrategy(Strategy):
     def execute(self, ctx: PortfolioContext):
       if ctx.bar == 1:
-        # Pass an obj not in preloaded pool
+        # Pass an obj not in preloaded pool -> Fail-Fast ValueError
         ctx.set_universe(["SH600000", "SH999999"])
 
   acc = PortfolioAccount(10000.0, dp)
   runner = PortfolioRunner(acc)
-  with caplog.at_level(logging.WARNING):
+  with pytest.raises(ValueError, match="set_universe: 1 obj\\(s\\) not in pre-loaded pool"):
     runner.run(MissingObjStrategy())
-
-  assert any("set_universe: 1 obj(s) not in pre-loaded pool" in rec.message for rec in caplog.records)
 
 
 

@@ -1,19 +1,18 @@
 import argparse
+import importlib.util
+import inspect
 import logging
+import os
+import sys
+from typing import Any, Tuple
+
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-from typing import Any
-from mbt.select import Selector, StaticSelector, MsdSelectorDataProvider
-from mbt.run.backend import instantiate_class
-import mbt.shared.stocks 
-import logging
-from typing import Tuple
-import argparse
-import os
-import sys
-import importlib.util
 import polars as pl
+from mbt.select import Selector, StaticSelector, MsdSelectorDataProvider
+from mbt.run.backend import instantiate_class, SYSTEM_ARGS
+import mbt.shared.stocks
 
 logging.basicConfig(
   format="%(asctime)s %(name)s %(levelname)s %(message)s", level=logging.INFO
@@ -37,11 +36,11 @@ def expand_objs(objs: list[str]) -> list[str]:
     else:
       match s:
         case "A_STOCKS_EXCLUDE_ST":
-          expanded.update(mbt.select.stocks.A_STOCKS_EXCLUDE_ST)
+          expanded.update(mbt.shared.stocks.A_STOCKS_EXCLUDE_ST)
         case "A_STOCKS":
-          expanded.update(mbt.select.stocks.A_STOCKS)
+          expanded.update(mbt.shared.stocks.A_STOCKS)
         case "FOUNDS":
-          expanded.update(mbt.select.stocks.FOUNDS)
+          expanded.update(mbt.shared.stocks.FOUNDS)
         case _:
           expanded.add(s)
 
@@ -117,10 +116,11 @@ def parse_args(args: list[str]) -> dict[str, Any]:
 
   for arg in args:
     kv = arg.split('=', 1)
-    if len(kv) != 2:
-      logger.warning(f'invalid arg "{arg}"')
-      continue
-    key, value = kv
+    if len(kv) != 2 or not kv[0].strip():
+      raise ValueError(
+        f"Invalid argument format '{arg}' passed to -a/--arg. Expected 'key=value' format."
+      )
+    key, value = kv[0].strip(), kv[1].strip()
     kwargs[key] = try_value(value)
   return kwargs
 
@@ -160,6 +160,25 @@ def main():
     os.environ["MSD_HOST"] = args.msd
   kwargs = parse_args(args.arg)
   selector = load_selector(args.selector, **kwargs)
+  if kwargs:
+    sel_cls = selector.__class__
+    valid_keys = set(SYSTEM_ARGS)
+    if sel_cls.__init__ is not object.__init__:
+      valid_keys.update(
+        p for p in inspect.signature(sel_cls.__init__).parameters if p != "self"
+      )
+    orphan_keys = [k for k in kwargs if k not in valid_keys]
+    if orphan_keys:
+      custom_params = sorted(valid_keys - set(SYSTEM_ARGS))
+      hint = (
+        f" Accepted parameters: {custom_params}."
+        if custom_params
+        else " Selector declares no custom __init__ parameters."
+      )
+      raise ValueError(
+        f"Unrecognized argument(s) passed via -a/--arg: {orphan_keys}. "
+        f"Selector ({sel_cls.__name__}) does not accept these arguments.{hint}"
+      )
   logger.info(f"selector loaded: {selector}")
 
   dp = MsdSelectorDataProvider(args.msd, args.date)

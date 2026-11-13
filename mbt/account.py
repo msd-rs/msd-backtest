@@ -238,14 +238,6 @@ class Position:
       adj_cost_price=adj_cost_price,
       holding_days=self._holding_days,
     )
-    return Position(
-      shares,
-      raw_cost_price,
-      raw_cost_price=raw_cost_price,
-      raw_mark_price=raw_mark_price,
-      dividends=dividends,
-      adj_cost_price=adj_cost_price,
-    )
 
   def __str__(self):
     return f"Position(shares={self.shares}, price={self.price})"
@@ -571,7 +563,7 @@ class Record:
     """position after operation"""
     self.position = position
     """value of position"""
-    self.value = self.position.shares * self.position.price
+    self.value = self.position.market_value
     """total assets"""
     self.assets = self.cash + self.value
     """deducted commission and other fees"""
@@ -713,12 +705,13 @@ class Account:
             right_cost = 0.0
           if actual_right > 0:
             old_cost = self.position.cost_basis
+            old_raw_cost = self.position.raw_cost_price
             self.position.shares += actual_right
             if self.position.shares > 0:
               self.position.raw_cost_price = (old_cost + right_cost) / self.position.shares
-              if self.position.raw_cost_price > 0:
-                self.position._adj_cost_price = self.position.raw_cost_price * (
-                  self.position._adj_cost_price / self.position.raw_cost_price
+              if old_raw_cost > 0:
+                self.position._adj_cost_price = self.position._adj_cost_price * (
+                  self.position.raw_cost_price / old_raw_cost
                 )
 
     op_price = operation.position.price

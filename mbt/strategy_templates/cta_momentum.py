@@ -53,7 +53,6 @@ class CtaMomentumStrategy(mbt.Strategy):
     atr_period: int = 14,
     atr_stop_multiplier: float = 2.0,
     fixed_stop_loss: float = 0.06,
-    **kwargs,
   ):
     super().__init__()
     self.channel_period = max(2, int(channel_period))

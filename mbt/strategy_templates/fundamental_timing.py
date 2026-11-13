@@ -18,14 +18,14 @@
    - `purge_outdated = False`: 自然淘汰 (Runoff 模式)，允许旧持仓继续按均线和止损保护自然跑完离场。
 
 【CLI 运行范例】：
-# 1. 单文件双层初选组合回测 (使用初始选出标的池，期间按季度换血):
-uv run python -m mbt.run.cli mbt/strategy_templates/fundamental_timing.py -b 2023-01-01 -e 2023-12-31 -p -c 1000000 -S
+# 1. 全市场基本面筛选 + 组合趋势择时回测 (传入 A_STOCKS_EXCLUDE_ST 候选池，期间按季度换血):
+uv run python -m mbt.run.cli mbt/strategy_templates/fundamental_timing.py -s A_STOCKS_EXCLUDE_ST -b 2023-01-01 -e 2023-12-31 -p -c 1000000 -S
 
 # 2. 全市场真·动态成分换血 (显式传入全市场 A_STOCKS 作为基础加载池，策略按季度全市场重选换血):
 uv run python -m mbt.run.cli mbt/strategy_templates/fundamental_timing.py -s A_STOCKS -b 2023-01-01 -e 2023-12-31 -p -c 1000000 -a rebalance_mode=quarterly -S
 
 # 3. 使用定时器每 40 个交易日换血一次 (-a rebalance_mode=interval -a rebalance_interval=40):
-uv run python -m mbt.run.cli mbt/strategy_templates/fundamental_timing.py -b 2023-01-01 -e 2023-12-31 -p -c 1000000 -a rebalance_mode=interval -a rebalance_interval=40 -S
+uv run python -m mbt.run.cli mbt/strategy_templates/fundamental_timing.py -s A_STOCKS_EXCLUDE_ST -b 2023-01-01 -e 2023-12-31 -p -c 1000000 -a rebalance_mode=interval -a rebalance_interval=40 -S
 """
 
 from __future__ import annotations
@@ -51,7 +51,6 @@ class FundamentalTimingSelector(mbt.Selector):
     min_roe: float = 8.0,
     min_profit_growth: float = 10.0,
     max_pe: float = 35.0,
-    **kwargs,
   ):
     super().__init__()
     self.min_roe = float(min_roe)
@@ -79,7 +78,7 @@ class FundamentalTimingSelector(mbt.Selector):
       stocks,
       fields=["f205", "f197", "f003"],
       only_year=False,
-      lastN=1,
+      lastN=2,
     )
 
     if isinstance(fin_data, dict):
@@ -166,7 +165,6 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
     rebalance_mode: str = "quarterly",
     rebalance_interval: int = 60,
     purge_outdated: bool = True,
-    **kwargs,
   ):
     super().__init__()
     self.fast_period = int(fast_period)

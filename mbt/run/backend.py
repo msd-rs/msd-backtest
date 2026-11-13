@@ -51,8 +51,16 @@ def parse_kv_args(args: list[str] | dict[str, Any] | None) -> dict[str, Any]:
 
   kwargs: dict[str, Any] = {}
   for item in args:
-    if isinstance(item, str) and "=" in item:
+    if isinstance(item, str):
+      if "=" not in item:
+        raise ValueError(
+          f"Invalid argument format '{item}' passed via -a/--args. Expected 'key=value' format."
+        )
       k, v = item.split("=", 1)
+      if not k.strip():
+        raise ValueError(
+          f"Invalid argument format '{item}' passed via -a/--args. Key cannot be empty."
+        )
       kwargs[k.strip()] = try_val(v.strip())
   return kwargs
 
@@ -139,13 +147,11 @@ class RunRequest:
       # input is file-like object, read it and import it and return Strategy class instance in it
       if hasattr(strategy, "name") and strategy.name.endswith(".py"):
         path = os.path.abspath(strategy.name)
-        try:
+        if os.path.isfile(path):
           with open(path, "r", encoding="utf-8") as f:
             code_text = f.read()
           from .validator import check_strategy_source
-          check_strategy_source(code_text, filename=path)
-        except Exception:
-          pass
+          check_strategy_source(code_text, filename=path, fail_fast=True)
 
         dir_path = os.path.dirname(path)
         if dir_path not in sys.path:
@@ -175,7 +181,7 @@ class RunRequest:
           return RunRequest.load_strategy(f, args=args)
 
       from .validator import check_strategy_source
-      check_strategy_source(strategy, filename="<strategy_source>")
+      check_strategy_source(strategy, filename="<strategy_source>", fail_fast=True)
 
       # input is source code, import it and return Strategy class instance in it
       loc = {}

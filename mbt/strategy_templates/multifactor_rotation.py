@@ -65,7 +65,6 @@ class MultiFactorRotationStrategy(mbt.PortfolioStrategy):
     weight_momentum: float = 0.4,
     weight_value: float = 0.3,
     weight_quality: float = 0.3,
-    **kwargs,
   ):
     super().__init__()
     self.top_k = max(1, int(top_k))

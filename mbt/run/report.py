@@ -195,7 +195,8 @@ class Report:
       calmar = 0.0
 
     # 3. Trade-level metrics
-    action_shares = dp.slice("action_shares", self.obj) if "action_shares" in dp.data else np.zeros_like(self.price)
+    raw_action_shares = dp.slice("action_shares", self.obj) if "action_shares" in dp.data else np.zeros(dp.bars)
+    action_shares = raw_action_shares[w:] if (w > 0 and len(raw_action_shares) > w) else raw_action_shares
 
     # Track shares held at each bar
     shares = np.zeros(len(self.actions))
@@ -221,7 +222,8 @@ class Report:
 
     s = dp.objs.index(self.obj) * dp.bars
     e = s + dp.bars
-    assets = dp.all("assets")[s:e]
+    raw_assets = dp.all("assets")[s:e]
+    assets = raw_assets[w:] if (w > 0 and len(raw_assets) > w) else raw_assets
 
     for s_idx, e_idx in zip(starts, ends):
       base_idx = s_idx - 1 if s_idx > 0 else 0
@@ -443,12 +445,11 @@ def extract_portfolio_trades(
           total_fees = 0.0
 
     if in_pos and curr_shares > 0:
-      pos_price = 0.0
-      if positions and g < len(positions):
-        pos_price = positions[g].price
-      elif recs:
-        pos_price = recs[-1].deal_price
-      mark_val = curr_shares * pos_price
+      if positions and g < len(positions) and positions[g].shares > 0:
+        mark_val = positions[g].market_value + positions[g].dividends
+      else:
+        pos_price = recs[-1].deal_price if recs else 0.0
+        mark_val = curr_shares * pos_price
       profit_amount = total_sell_amount + mark_val - total_buy_amount - total_fees
       cost = total_buy_amount
       profit_rate = (profit_amount / cost) if cost > 0 else 0.0
@@ -1016,20 +1017,26 @@ def compute_holdout_split(report: Report, holdout: str | int) -> dict | None:
         split_idx = int(np.searchsorted(dates, d_target))
       elif len(dates) > 0:
         v0 = float(dates[0])
-        dt = datetime.datetime.fromisoformat(d_target)
-        if v0 > 1e17:
-          target_val = int(dt.timestamp() * 1e9)
-        elif v0 > 1e14:
-          target_val = int(dt.timestamp() * 1e6)
-        elif v0 > 1e11:
-          target_val = int(dt.timestamp() * 1000)
-        elif v0 > 1e8:
-          target_val = int(dt.timestamp())
+        if isinstance(holdout, (int, np.integer)) or (holdout_str.isdigit() and len(holdout_str) < 8):
+          target_val = int(holdout_str)
         else:
-          target_val = int(d_target.replace("-", ""))
+          dt = datetime.datetime.fromisoformat(d_target)
+          if v0 > 1e17:
+            target_val = int(dt.timestamp() * 1e9)
+          elif v0 > 1e14:
+            target_val = int(dt.timestamp() * 1e6)
+          elif v0 > 1e11:
+            target_val = int(dt.timestamp() * 1000)
+          elif v0 > 1e8:
+            target_val = int(dt.timestamp())
+          else:
+            target_val = int(d_target.replace("-", ""))
         split_idx = int(np.searchsorted(dates, target_val))
-    except Exception:
-      split_idx = len(dates) // 2
+    except Exception as e:
+      raise ValueError(
+        f"Invalid --holdout value '{holdout}'. Expected a date string (YYYY-MM-DD), "
+        "bar count (e.g. '60d'), or year duration (e.g. '1y')."
+      ) from e
 
   if split_idx <= 1 or split_idx >= len(dates) - 1:
     return None

@@ -6,7 +6,7 @@ import polars as pl
 import alpha as al
 import pymsd
 from mbt import DataProvider
-from mbt.shared import get_limit_ratio
+from mbt.shared import get_limit_ratio, to_statutory_disclosure_date
 
 logger = logging.getLogger("msd_loader")
 
@@ -74,33 +74,30 @@ def find_date_index(
   return int(np.searchsorted(dates, target_val))
 
 
-def to_statutory_disclosure_date(ts_series: pl.Series) -> pl.Series:
-  """Convert report period dates to A-share statutory disclosure deadlines.
-
-  Statutory Deadlines:
-  - Q1 (month == 3): year-04-30
-  - Semi-annual / Q2 (month == 6): year-08-31
-  - Q3 (month == 9): year-10-31
-  - Annual / Q4 (month == 12): (year+1)-04-30
-  - Non-standard: end of month (28th fallback)
-  """
-  y = ts_series.dt.year()
-  m = ts_series.dt.month()
-  df = pl.DataFrame({"report_ts": ts_series})
-  ann = df.select(
-    pl.when(m == 3).then(
-      pl.date(y, 4, 30)
-    ).when(m == 6).then(
-      pl.date(y, 8, 31)
-    ).when(m == 9).then(
-      pl.date(y, 10, 31)
-    ).when(m == 12).then(
-      pl.date(y + 1, 4, 30)
-    ).otherwise(
-      pl.date(y, m, 28)
-    ).cast(pl.Datetime("us")).alias("ts")
-  )["ts"]
-  return ann
+def _check_dataset_min_ts(client: pymsd.MsdConnection, obj: str, req_start: str | int | None):
+  if not req_start or isinstance(req_start, int):
+    return
+  req_start_str = str(req_start)[:10]
+  try:
+    res = client.query_concat(
+      f'SELECT ts FROM stock_kline_1d WHERE obj="{obj}" LIMIT 1; '
+      f'SELECT ts FROM stock_kline_1d WHERE obj="{obj}" LIMIT -1;'
+    )
+    if "stock_kline_1d" in res:
+      t, _ = res["stock_kline_1d"]
+      d = t.to_dict().get("ts", [])
+      if len(d) > 0:
+        min_ts_str = str(d[0])[:10]
+        max_ts_str = str(d[-1])[:10]
+        if req_start_str < min_ts_str:
+          raise ValueError(
+            f"Requested start '{req_start_str}' is earlier than dataset min_ts '{min_ts_str}' "
+            f"(available range for {obj}: {min_ts_str} to {max_ts_str})."
+          )
+  except ValueError:
+    raise
+  except Exception:
+    pass
 
 
 def load_data(
@@ -237,17 +234,27 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {shares_ts_cond}{shares_limit
       objs[0],
     )
   except Exception as e:
-    logger.warning(f"failed to query_join from msd: {e}")
-    return DataProvider({"ts": np.array([])}, objs=[]), []
+    _check_dataset_min_ts(client, objs[0], target_start)
+    raise RuntimeError(
+      f"Failed to query market data from MSD ({msd_host}) for {len(objs)} obj(s) "
+      f"in range [{target_start}, {end}]: {e}"
+    ) from e
 
   if bars == 0 or table.rows == 0:
-    return DataProvider({"ts": np.array([])}, objs=[]), []
+    _check_dataset_min_ts(client, objs[0], target_start)
+    raise ValueError(
+      f"No market data found in MSD ({msd_host}) for {len(objs)} obj(s) "
+      f"(baseline='{objs[0]}') in range [{target_start}, {end}]."
+    )
 
   data = dict((k, v) for k, v in table.to_list())
   logger.info(f"raw data build from msd, {len(objs)} objs, {bars} bars, {time.time() - t1:.3f}s")
 
   if data is None or "ts" not in data or len(data["ts"]) == 0:
-    return DataProvider({"ts": np.array([])}, objs=[]), []
+    _check_dataset_min_ts(client, objs[0], target_start)
+    raise ValueError(
+      f"Empty 'ts' column returned from MSD ({msd_host}) for range [{target_start}, {end}]."
+    )
 
   # Query and align stock_financial with statutory disclosure date fallback
   financial_frame = None
@@ -330,9 +337,19 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {shares_ts_cond}{shares_limit
     if target_start and not isinstance(target_start, int):
       req_start_str = str(target_start)[:10]
       if req_start_str < start_dt_str:
-        logger.warning(
-          f"请求的回测起始日 ({req_start_str}) 早于数据源最早可用日期 ({start_dt_str})，回测将自动从 {start_dt_str} 开始执行。"
-        )
+        _check_dataset_min_ts(client, objs[0], target_start)
+        try:
+          gap_days = (
+            datetime.date.fromisoformat(start_dt_str)
+            - datetime.date.fromisoformat(req_start_str)
+          ).days
+        except ValueError:
+          gap_days = 0
+        if gap_days > 15:
+          raise ValueError(
+            f"Requested start '{req_start_str}' is earlier than dataset min_ts '{start_dt_str}' "
+            f"(available range: {start_dt_str} to {end_dt_str})."
+          )
 
   data["limit_ratio"] = get_limit_ratio(objs, repeat=dp.bars)
 

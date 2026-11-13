@@ -94,3 +94,85 @@ def test_cli_missing_objs_descriptive_error(monkeypatch):
 
   with pytest.raises(ValueError, match="No target stocks provided"):
     parse_args()
+
+
+def test_portfolio_cli_rejects_implicit_first_day_pool(tmp_path, monkeypatch):
+  """Verify portfolio strategy without -s raises ValueError instead of silently truncating to day-1 pool."""
+  import sys
+  from mbt.run.cli import parse_args
+
+  combo_file = tmp_path / "port_combo.py"
+  combo_file.write_text(
+    """
+import mbt
+
+class MySelector(mbt.Selector):
+  def step00(self, stocks):
+    return ["SH600000", "SZ000001"]
+
+class MyPortStrategy(mbt.PortfolioStrategy):
+  def execute(self, ctx):
+    pass
+""",
+    encoding="utf-8",
+  )
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    ["mbt.run.cli", str(combo_file), "-b", "2024-01-01", "-e", "2024-12-31"],
+  )
+  with pytest.raises(ValueError, match="requires an explicit candidate stock pool via -s/--objs"):
+    parse_args()
+
+
+def test_out_of_pool_and_rights_and_report_fixes():
+  """Verify out-of-pool fail-fast, right_shares adj_cost_price dilution, and split-aware trade attribution."""
+  import numpy as np
+  from mbt import DataProvider, PortfolioAccount, PortfolioContext
+  from mbt.run.backend import RunRequest
+  from mbt.run.report import extract_portfolio_trades
+
+  # 1. Cross-dimensional price anti-pattern fail-fast on load_strategy
+  bad_src = """
+import mbt
+class BadStrat(mbt.Strategy):
+  def execute(self, ctx):
+    pos = ctx.position()
+    ror = (ctx.close[0] - pos.price) / pos.price
+"""
+  with pytest.raises(ValueError, match="Cross-dimensional price arithmetic detected"):
+    RunRequest.load_strategy(bad_src)
+
+  # 2. Rights issue dilution of adj_cost_price and split-aware extract_portfolio_trades
+  dp = DataProvider(
+    {
+      "ts": np.arange(3),
+      "price": np.array([20.0, 10.0, 10.0]),
+      "close": np.array([10.0, 10.0, 10.0]),
+      "dividend": np.array([0.0, 0.0, 1.0]),
+      "transfer_shares": np.array([0.0, 1.0, 0.0]),
+      "right_shares": np.zeros(3),
+      "right_price": np.zeros(3),
+    },
+    objs=["SZ000001"],
+  )
+  acc = PortfolioAccount(100000.0, dp)
+  ctx = PortfolioContext(acc)
+
+  # Out-of-pool rebalance_objs and buy must raise ValueError
+  with pytest.raises(ValueError, match="not in pre-loaded pool"):
+    ctx.rebalance_objs({"SH999999": 0.5})
+  with pytest.raises(ValueError, match="not in the pre-loaded portfolio pool"):
+    ctx.buy("SH999999", percent=0.5)
+
+  # Buy 1000 shares @ 20.0 (cost = 20,000), then 10-for-10 split on bar 1, then 1.0 dividend on bar 2
+  acc._buy_group(0, 0, 20000.0, 20.0)
+  acc.apply_corporate_actions(1)
+  acc.update_mark_to_market(1, np.array([10.0]))
+  acc.apply_corporate_actions(2)
+  acc.update_mark_to_market(2, np.array([10.0]))
+
+  trades = extract_portfolio_trades(account=acc, dp=dp)
+  assert len(trades) == 1
+  # Market value (2000 * 10 = 20000) + dividends (2000 * 1 = 2000) - cost (20000) = +2000 (+10%)
+  assert np.isclose(trades[0]["profit_amount"], 2000.0 - acc.deducted)

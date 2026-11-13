@@ -91,7 +91,7 @@ class SelectorDataProvider:
       price columns are NaN on suspension days -- two different kinds of "empty".
     * `total_shares` / `tradable_shares`: as-of carried backward from
       `stock_shares` (the last known value at or before that bar).
-    * `limited`: 1/-1/0 = limit-up/limit-down/normal, computed on adjusted prices.
+    * `limited`: 1/-1/0 = limit-up/limit-down/normal, computed on unadjusted prices with ex-dividend reference price.
 
     Args:
       objs: the list of objs; the first one is used as the asof baseline

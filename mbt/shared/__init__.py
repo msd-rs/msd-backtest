@@ -8,7 +8,7 @@ if TYPE_CHECKING:
   from .stocks import ALL_STOCKS, A_STOCKS, A_STOCKS_EXCLUDE_ST, FOUNDS
 
 
-__ALL__ = [
+__all__ = [
   'ALL_STOCKS',
   'A_STOCKS',
   'A_STOCKS_EXCLUDE_ST',

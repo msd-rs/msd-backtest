@@ -73,7 +73,7 @@ def check_msd(host: str) -> dict[str, Any]:
       if tbl in res:
         t, _ = res[tbl]
         d = t.to_dict()["ts"]
-        tables_info[tbl+" (sample: SZ00001)"] = {
+        tables_info[tbl + " (sample: SZ000001)"] = {
           "min_ts": str(d[0])[:10],
           "max_ts": str(d[-1])[:10],
         }
@@ -111,7 +111,7 @@ def check_fee() -> dict[str, Any]:
     fee = Fee.load(fee_path)
     return {
       "path": fee_path or "etc/fee.json (default)",
-      "rates": fee.rates if hasattr(fee, "rates") else "loaded",
+      "rates": [vars(item) for item in fee.config] if hasattr(fee, "config") else "loaded",
     }
   except Exception as e:
     return {"error": str(e)}

@@ -4,7 +4,17 @@
 
 from typing import TYPE_CHECKING
 from . import stocks
-from .stocks import KIND_INDEX, KIND_FUND, KIND_STOCK, STATUS_NORMAL, STATUS_ST, STATUS_STAR_ST, get_limit_ratio
+from .stocks import (
+  KIND_INDEX,
+  KIND_FUND,
+  KIND_STOCK,
+  STATUS_NORMAL,
+  STATUS_ST,
+  STATUS_STAR_ST,
+  get_limit_ratio,
+  get_industry_by_stocks,
+  get_stock_by_industries,
+)
 from .financial import to_statutory_disclosure_date
 
 if TYPE_CHECKING:
@@ -23,6 +33,8 @@ __all__ = [
   'STATUS_ST',
   'STATUS_STAR_ST',
   'get_limit_ratio',
+  'get_industry_by_stocks',
+  'get_stock_by_industries',
   'to_statutory_disclosure_date',
 ]
 

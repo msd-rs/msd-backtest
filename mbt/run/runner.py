@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 from typing import Any
 from mbt.account import Operation, ACTION_BUY_PERCENT, ACTION_SELL_PERCENT
 from mbt.strategy import Context

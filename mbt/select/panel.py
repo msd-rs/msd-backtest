@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """Panel: 二维面板视图, 让一维连续缓冲区自带 objs 元数据"""
 
 from __future__ import annotations

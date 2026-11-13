@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 from mbt.strategy import Strategy, PortfolioStrategy
 from typing import Any, IO
 import inspect

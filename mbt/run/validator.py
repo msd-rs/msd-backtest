@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """Strategy validator and AST anti-pattern linting."""
 from __future__ import annotations
 

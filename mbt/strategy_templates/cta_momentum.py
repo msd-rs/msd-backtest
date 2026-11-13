@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """官方标准模版 ③：CTA 纯量价均线/通道跟踪模版 (CTA Price-Volume Momentum & Channel Breakout Template).
 
 【适用场景】：

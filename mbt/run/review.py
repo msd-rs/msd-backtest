@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 from mbt.run.report import Report, build_markdown_summary, compute_stock_attribution
 import orjson
 import sys

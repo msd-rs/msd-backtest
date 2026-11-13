@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """mbt.strategy_templates: 官方标准策略模版库 (Strategy Cookbook & Templates).
 
 本模块提供经过官方严格验证的高性能标准策略模版，涵盖三大典型量化范式：

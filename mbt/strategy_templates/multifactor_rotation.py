@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """官方标准模版 ②：多因子评分全市场定期轮动模版 (Cross-Sectional Multi-Factor Periodic Rotation Template).
 
 【适用场景】：

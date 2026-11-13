@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """官方标准模版 ①：基本面筛选 + 趋势择时模版 (Fundamental Screening + Trend Timing Template).
 
 【适用场景】：

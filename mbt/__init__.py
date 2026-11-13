@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 from .data_provider import DataProvider
 from .strategy import Context, Strategy, PortfolioStrategy
 from .account import Account, Operation, Position, Fee

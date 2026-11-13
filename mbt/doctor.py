@@ -1,3 +1,6 @@
+# Copyright 2026 MSD-RS Project LiJia
+# SPDX-License-Identifier: BSD-2-Clause
+
 """mbt doctor: Environment, database and data coverage diagnostics tool."""
 
 from __future__ import annotations

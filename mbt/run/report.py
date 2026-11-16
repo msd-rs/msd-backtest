@@ -1043,7 +1043,7 @@ def compute_holdout_split(report: Report, holdout: str | int) -> dict | None:
         if isinstance(holdout, (int, np.integer)) or (holdout_str.isdigit() and len(holdout_str) < 8):
           target_val = int(holdout_str)
         else:
-          dt = datetime.datetime.fromisoformat(d_target)
+          dt = datetime.datetime.fromisoformat(d_target).replace(tzinfo=datetime.timezone.utc)
           if v0 > 1e17:
             target_val = int(dt.timestamp() * 1e9)
           elif v0 > 1e14:
@@ -1093,8 +1093,11 @@ def compute_holdout_split(report: Report, holdout: str | int) -> dict | None:
       s = str(val)
       if len(s) == 8 and s.isdigit():
         return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
-      if val > 1e11:
-        return datetime.date.fromtimestamp(val / 1000).isoformat()
+      for threshold, scale in ((1e17, 1e9), (1e14, 1e6), (1e11, 1e3), (1e8, 1.0)):
+        if val > threshold:
+          return datetime.datetime.fromtimestamp(
+            val / scale, tz=datetime.timezone.utc
+          ).strftime("%Y-%m-%d")
     return str(val)[:10]
 
   split_date_str = _fmt_d(dates[split_idx])

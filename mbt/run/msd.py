@@ -63,7 +63,7 @@ def find_date_index(
     return int(np.searchsorted(dates, d))
 
   v0 = float(first)
-  dt = datetime.datetime.fromisoformat(target_str)
+  dt = datetime.datetime.fromisoformat(target_str).replace(tzinfo=datetime.timezone.utc)
   if v0 > 1e17:
     target_val = int(dt.timestamp() * 1e9)
   elif v0 > 1e14:

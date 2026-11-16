@@ -119,3 +119,25 @@ def test_cli_parse_args_begin_options(tmp_path, monkeypatch):
   assert req4.start == "2023-06-01"
   assert req4.starts == ["2023-06-01", "2024-06-01"]
 
+
+def test_compute_holdout_split_utc_timestamps():
+  # 2019-12-28 .. 2020-01-04 as UTC epoch seconds (1577836800 == 2020-01-01)
+  base_s = 1577836800 - 4 * 86400
+  dates_s = np.array([base_s + i * 86400 for i in range(8)], dtype=np.int64)
+  ror = np.linspace(0.0, 0.07, 8)
+  for scale, expected_split in ((1, "2020-01-01"), (1000, "2020-01-01")):
+    r = Report.from_dict(
+      "PORTFOLIO",
+      {
+        "date": dates_s * scale,
+        "ror": ror,
+        "profit": 0.07,
+        "benchmark_profit": 0.02,
+      },
+    )
+    split_res = compute_holdout_split(r, "2020-01-01")
+    assert split_res is not None
+    assert split_res["split_date"] == expected_split
+    assert split_res["is_range"] == "2019-12-28 ~ 2019-12-31"
+    assert split_res["oos_range"] == "2020-01-01 ~ 2020-01-04"
+

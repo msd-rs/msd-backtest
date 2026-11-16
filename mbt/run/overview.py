@@ -843,14 +843,14 @@ def render_strategy_overview(
   plt.setp(ax_dd.get_xticklabels(), visible=False)
 
   def _fmt_xaxis_date(x, _pos=None):
-    dt = mdates.num2date(x)
+    dt = mdates.num2date(x, tz=datetime.timezone.utc)
     if dt.month == 1 and dt.day == 1:
       return f"{dt.year}"
     return f"{dt.month:02d}-{dt.day:02d}"
 
   ax_dd.set_ylabel("回撤", fontsize=9.0, color=PALETTE["text_secondary"])
   ax_pos.set_ylabel("持仓数", fontsize=9.0, color=PALETTE["text_secondary"])
-  ax_pos.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=6))
+  ax_pos.xaxis.set_major_locator(mdates.AutoDateLocator(tz=datetime.timezone.utc, minticks=4, maxticks=6))
   ax_pos.xaxis.set_major_formatter(mticker.FuncFormatter(_fmt_xaxis_date))
 
   fig.text(

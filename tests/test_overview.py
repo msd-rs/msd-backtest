@@ -211,3 +211,38 @@ def test_render_strategy_overview_portfolio_and_multi(tmp_path):
     assert img.format == "PNG"
     assert img.size[1] > img.size[0]
     assert img.size[0] == 1280
+
+
+def test_overview_xaxis_utc_independent_of_rc_timezone(tmp_path, monkeypatch):
+  import matplotlib as mpl
+  import matplotlib.pyplot as plt
+
+  # 180 daily bars across 2019-10-01 .. 2020-03-28 as UTC epoch seconds (1577836800 == 2020-01-01)
+  base_s = 1577836800 - 92 * 86400
+  dates_ts = np.array([base_s + i * 86400 for i in range(180)], dtype=np.int64)
+  r = _make_sample_report(n_bars=180)
+  r.date = dates_ts
+
+  meta = extract_strategy_meta(report=r, strategy=_DemoStrategy())
+  assert meta.date_range == "2019-10-01 ~ 2020-03-28"
+
+  captured_labels: list[list[str]] = []
+  orig_close = plt.close
+
+  def _capture_and_close(fig=None):
+    if fig is not None and len(fig.axes) >= 3:
+      ax_pos = fig.axes[-1]
+      captured_labels.append([lbl.get_text() for lbl in ax_pos.get_xticklabels()])
+    orig_close(fig)
+
+  monkeypatch.setattr(plt, "close", _capture_and_close)
+
+  for tz_name in ("UTC", "America/New_York", "Asia/Shanghai"):
+    with mpl.rc_context({"timezone": tz_name}):
+      out_png = tmp_path / f"tz_{tz_name.replace('/', '_')}.png"
+      render_strategy_overview([r], str(out_png), strategy=_DemoStrategy())
+      assert out_png.exists()
+
+  assert len(captured_labels) == 3
+  assert captured_labels[0] == captured_labels[1] == captured_labels[2]
+  assert "2020" in captured_labels[0]

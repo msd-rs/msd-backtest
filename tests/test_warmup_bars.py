@@ -108,15 +108,17 @@ def test_find_date_index_all_types():
   d_int = np.array([20221230, 20230103, 20230104])
   assert find_date_index(d_int, "2023-01-01") == 1
 
-  # 5. Timestamp seconds
-  ts_target = int(datetime.datetime(2023, 1, 1).timestamp())
-  d_ts_s = np.array([ts_target - 86400, ts_target + 86400])
+  # 5. Timestamp seconds (UTC epoch, matching MSD datetime64[s].astype(int))
+  ts_target = int(np.datetime64("2023-01-01", "s").astype(np.int64))
+  d_ts_s = np.array([ts_target - 86400, ts_target, ts_target + 86400])
   assert find_date_index(d_ts_s, "2023-01-01") == 1
+  assert find_date_index(d_ts_s, "2023-01-02") == 2
 
-  # 6. Timestamp microseconds
-  ts_us = int(datetime.datetime(2023, 1, 1).timestamp() * 1e6)
-  d_ts_us = np.array([ts_us - 86400000000, ts_us + 86400000000])
+  # 6. Timestamp microseconds (UTC epoch, matching MSD datetime64[us].astype(int))
+  ts_us = int(np.datetime64("2023-01-01", "us").astype(np.int64))
+  d_ts_us = np.array([ts_us - 86400_000_000, ts_us, ts_us + 86400_000_000])
   assert find_date_index(d_ts_us, "2023-01-01") == 1
+  assert find_date_index(d_ts_us, "2023-01-02") == 2
 
   # 7. datetime.datetime objects
   d_dt = np.array([

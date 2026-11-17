@@ -1,6 +1,35 @@
-# msd-backtest
+# 简介 
 
-`msd-backtest` 是一个基于 Python 的高性能、向量化量化投研与回测框架。框架专为现代 A 股量化研发打造，深度融合 [MSD (Market Strategy Data)](.agents/skills/msd-strategy-guide/references/msd.md) 数据服务与 [py-alpha-lib](.agents/skills/msd-strategy-guide/references/algo.md) 并行算法库，全面支持**横截面选股（Selector）**、**单标的独立交易策略（Trading Strategy）**以及**多标的多资产组合配置与动态调仓策略（Portfolio Strategy）**。
+`msd-backtest` 是一个基于 Python 的, Agent First 的高性能、向量化量化投研与回测框架。框架深度融合 [MSD (Market Strategy Data)](.agents/skills/msd-strategy-guide/references/msd.md) 数据服务与 [py-alpha-lib](.agents/skills/msd-strategy-guide/references/algo.md) 并行算法库，全面支持**横截面选股（Selector）**、**单标的独立交易策略（Trading Strategy）**以及**多标的多资产组合配置与动态调仓策略（Portfolio Strategy）**。
+
+
+## 实测性能
+
+| 策略 | 起始池大小 | 耗时(秒) | 示例 |
+|-----|---------|-------|----|
+|  1. 近三年盈利持续增长且为正 (使用 f137: 净利润)<br/>2. 大盘股 (市值排名前 20% 的股票)<br/>3. 最近 3 日内跌破 15 日均线 | 5031 | 0.07 | [策略代码](./strategy/growth_large_cap_ma15_selector.py)
+| 1. 基础过滤：剔除 ST 股票、停牌股及无成交股票，要求当日收阳（收盘价 >= 开盘价）。<br/> 2. 月线三连阳：最近 3 个自然月（包含当前月）每个月的月线均为阳线（收盘价 > 开盘价）。<br/> 3. 放量突破：当日收盘价突破过去 N 日（默认 20 日）最高价，且当日成交量达到前 5 日均量的指定倍数（默认 >= 1.5 倍）且大于昨日成交量。| 5031 | 0.04| [策略代码](./strategy/volume_breakout_monthly_yang_selector.py)
+|德瑞曼式「业绩为王 + 低市盈率」选股与半年度调仓策略|5000股票<br/>每半年一次选股调仓<br/>按日回测5年| 5 | [策略代码](./feedback/015/strategy.py) | 
+
+# Vibe Coding 的说明
+
+
+AI Agent 可以通过项目提供的 Skill, 自主完成(已经过大量实测)
+
+- 自主构建数据环境
+- 正确编写策略
+- 根据要求优化策略, 生成优化报告
+
+做到这一点, 只需在你的 Agent 工具(Claude Code, Codex, Antigravity, DeepSeek Hermes, CodeBuddy等)中, 安装 Skill
+
+```
+npx skills add msd-rs/msd-backtest
+```
+
+然后, 告知它你的想要的策略逻辑即可. 如果你的 LLM 支持识图, 你甚至可以将贴给它, *复刻你平常看到的策略时最方便*
+
+
+# Hand Write 的说明
 
 ---
 
@@ -299,18 +328,7 @@ uv run python -m mbt.run.cli strategy/my_strategy.py -s SH600000 -b 2023-01-01 -
 
 ---
 
-## 🧠 AI 辅助策略编写与调优
 
-本项目深度集成量化 AI 研发助手机制。项目中内置了专门的 Agent 技能指南：
-- 核心技能定义：[`msd-strategy-guide`](.agents/skills/msd-strategy-guide/SKILL.md)
-- 详细参考规范：
-  - [选股器构建指引](.agents/skills/msd-strategy-guide/references/selector.md)
-  - [交易策略构建指引](.agents/skills/msd-strategy-guide/references/trading.md)
-  - [组合调仓策略指引](.agents/skills/msd-strategy-guide/references/portfolio.md)
-  - [财务字段与对齐规范](.agents/skills/msd-strategy-guide/references/financial.md)
-  - [策略调优与防过拟合指南](.agents/skills/msd-strategy-guide/references/optimize.md)
-
-AI 助手能够基于自然语言描述，依据上述规范生成经过向量化优化、杜绝未来函数、严格对齐价格语义的高质量策略代码。
 
 ---
 

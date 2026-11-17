@@ -4,7 +4,32 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
+        {
+            "name": "019",
+            "type": "debugpy",
+            "request": "launch",
+            "justMyCode": false,
+            "module": "mbt.run.cli",
+            "args": [
+                "feedback/019/small_cap_rotation.py",
+                "-s",
+                "A_STOCKS_EXCLUDE_ST",
+                "-B",
+                "SH000001",
+                "--warmup-bars",
+                "250",
+                "-b",
+                "2024-06-01",
+                "-e",
+                "2025-12-31",
+                "-o",
+                "feedback/019/small_cap_rotation.png"
+            ],
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+        },
         {
             "name": "run",
             "type": "debugpy",

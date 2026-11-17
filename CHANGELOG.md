@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.22] - 2026-11-17
+
+- Add: strategy now can output as a overview image, eg `-o overview.png`
+- Add: a Tk base strategies manager `mbt.gui`
+- Fix: improve timezone rules
+
 ## [0.1.21] - 2026-11-13
 
 - **holding rate of return & PnL first-class API**: implemented `ctx.holding_ror(obj)` (and `pos.holding_ror`), `ctx.holding_pnl(obj)`, `ctx.cost_price(obj, adjusted=...)`, and `ctx.holding_days(obj)` across `PortfolioAccount`, `PortfolioContext`, `RunnerContext`, and `Position`. The closed-loop calculations accurately account for bonus shares (splits), cash dividends, and position dilution without forcing strategies to handcraft dangerous price arithmetic.

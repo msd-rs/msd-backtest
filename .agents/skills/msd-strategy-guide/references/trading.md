@@ -2,10 +2,14 @@
 
 # Coding Specification
 
-You should create a subclass named `Strategy` of `mbt.Strategy` and implement `prepare` (optional, recommended for static indicators) and `execute`. The skeleton of the code is shown below:
+You should create a subclass named `Strategy` of `mbt.Strategy`.
+
+- **Fast-Path (Recommended when signals do NOT depend on holding/account state)**: Implement `signals(self, ctx)` returning `(buy_signals, sell_signals)` over the full series. `Runner` bypasses the Python bar-by-bar loop and executes directly in the multi-threaded Rust `alpha.sim.Simulator` kernel (recommended for full-market runs such as `5,000 stocks × 2,000 bars`). See [double_avg_fast.py](https://github.com/msd-rs/msd-backtest/strategy/double_avg_fast.py) for a complete example.
+- **Bar-by-Bar Path (When signals depend on position/account state)**: Implement `prepare(self, ctx)` (optional, recommended for static indicators) and `execute(self, ctx)`.
+
+The skeleton of the code is shown below:
 
 ```python
-
 import mbt
 import numpy as np
 import alpha as al
@@ -23,7 +27,7 @@ class Strategy(mbt.Strategy):
 
   def prepare(self, ctx: mbt.Context):
     """
-    prepare static indicators or signals once before the bar-by-bar loop starts.
+    prepare static indicators or signals once before execution starts.
     During prepare(), alpha-lib context is set to the full bar range [0, bars),
     reducing indicator calculation complexity from O(N * T^2) to O(N * T).
     """
@@ -31,12 +35,20 @@ class Strategy(mbt.Strategy):
     # self.ma20 = al.MA(ctx.close, 20)
     pass
 
+  # --- Option A: Fast-Path (when logic does NOT use position / holding_ror / holding_days) ---
+  # def signals(self, ctx: mbt.Context) -> tuple[np.ndarray, np.ndarray]:
+  #   """Return (buy_signals, sell_signals) of length ctx.n_objs * ctx.bars (bool or float64 in [0, 1])."""
+  #   fast_ma = al.MA(ctx.close, 5)
+  #   slow_ma = al.MA(ctx.close, 20)
+  #   return al.CROSS(fast_ma, slow_ma), al.RCROSS(fast_ma, slow_ma)
+
+  # --- Option B: Bar-by-Bar (when logic depends on dynamic position / account state) ---
   def execute(self, ctx: mbt.Context):
     """
     execute the strategy, this method will be called for each bar.
 
     Args:
-      ctx: context of the strategy 
+      ctx: context of the strategy
     """
     # TODO: implement strategy, building buy/sell signals then call ctx.buy/ctx.sell
     pass
@@ -56,7 +68,12 @@ class Strategy(mbt.Strategy):
 
 `mbt` is optimized to run a strategy for multiple stocks's parallel, this will huge improve the backtest performance, it use
 - `alpha-lib` as factor compute library, a parallel factor building algorithms
-- `prepare(self, ctx)` lifecycle hook: called once before the bar-by-bar loop with full-range `alpha-lib` context (`start=0, end=bars`). Always pre-compute static technical indicators (such as `al.MA`) in `prepare()` so they run in `O(N * T)` instead of recomputing them inside `execute()` on every bar (`O(N * T^2)`). Use `execute(self, ctx)` for dynamic signals that depend on account state (such as `ctx.ror_hold`) or to submit precomputed signals.
+- `prepare(self, ctx)` lifecycle hook: called once before execution with full-range `alpha-lib` context (`start=0, end=bars`). Always pre-compute static technical indicators (such as `al.MA`) in `prepare()` so they run in `O(N * T)` instead of recomputing them inside `execute()` on every bar (`O(N * T^2)`).
+- `signals(self, ctx) -> tuple[np.ndarray, np.ndarray] | None` fast-path hook (optional): called once right after `prepare()` under the full-range `alpha-lib` context (`start=0, end=bars`).
+  - **When to use**: Whenever your entry/exit logic depends purely on market/financial features and does **not** query dynamic account or holding state (`ctx.position()`, `ctx.holding_ror()`, `ctx.holding_days()`, `ctx.ror_hold`), and you are running independent per-stock simulation (`Runner`, non-portfolio mode).
+  - **Contract**: Return `(buy_signals, sell_signals)` where each element is a 1D array of length `ctx.n_objs * ctx.bars` (`bool` mask treated as `1.0`, or `float64` fraction in `[0.0, 1.0]`). All operators used to build `buy_signals`/`sell_signals` must be strictly causal (no lookahead).
+  - **Benefit**: When non-`None` is returned, `Runner` skips the Python bar-by-bar `execute()` loop completely and runs the entire backtest in the multi-threaded Rust `alpha.sim.Simulator` kernel while preserving exact corporate-action (`dividend`, `transfer_shares`, `right_shares`, `right_price`), fee, lot-size, slippage, and limit semantics.
+- `execute(self, ctx)` lifecycle hook: use `execute(self, ctx)` when signals depend on dynamic account/position state (such as `ctx.holding_ror`, `ctx.position`, `ctx.holding_days`) or in `PortfolioStrategy` (`-p`) rebalancing mode. Note that `Runner` still accelerates bar-by-bar `execute()` with the Rust `AccountBatch` engine underneath.
 - `finalize(self, ctx)` lifecycle hook: called once after the backtest completes with full-range `alpha-lib` context (`start=0, end=bars`) and fully-settled accounts. Use this to count exit/rebalance reasons, log summary diagnostics, or return a structured dict of custom metrics to appear under `## Strategy Diagnostics` in Markdown summaries and JSON exports.
 - `mbt.Context` hold context of strategy running, including:
   - data (`ctx.data(name)` or `ctx.<name>`)
@@ -65,6 +82,24 @@ class Strategy(mbt.Strategy):
   - 2D `Panel` view (`ctx.panel()`) for multi-period resampling (`panel.resample("1W")`) and 2D array slicing (`panel.compute(...)`, `panel.column(...)`)
 - `fin_fields` parameter: MSD `stock_financial` contains hundreds of financial columns. If your strategy accesses financial data (`ctx.f001`, etc.), always define `fin_fields = ["f001", "f003", ...]` on your Strategy class. If not provided, `load_data` queries all fields `*`, which significantly increases memory usage and loading time.
 - when you to implement the `execute`, use any loop carefully, because it may too slow, vector computing should use preferentially.
+
+## Position-Aware Strategies (Vectorized `execute()`)
+
+When your strategy **must** inspect current holdings or position returns (e.g., take-profit, stop-loss, trailing stop, or grid add-on buying), you cannot use `signals(ctx)`, so you should implement `prepare()` + `execute()`. Follow the pattern in [holding_ror_grid.py](https://github.com/msd-rs/msd-backtest/strategy/holding_ror_grid.py) to keep `5,000 stocks × 2,000 bars` under ~1 second:
+
+1. **Precompute static market conditions in `prepare(ctx)` as 2D `(n_objs, bars)` masks**, and preallocate per-stock state arrays of length `n_objs`:
+   - Use `al.FLAG_STRICTLY_CYCLE` (with `warmup_bars`) so rolling indicators like `MA60` produce `NaN` until a full window is available.
+   - Maintain per-stock thresholds/flags as 1D NumPy arrays (e.g., `self.next_add_ror`, `self.pending_exit`).
+2. **Avoid `for g in range(ctx.n_objs): ctx.position(g)` in `execute(ctx)`**:
+   - Calling scalar `ctx.position(g)` and `ctx.buy(g)` inside a per-stock loop across 5,000 stocks × 2,000 bars causes 10M Python `Position` allocations and FFI calls.
+   - Instead, query the full cross-section in one call with **`ctx.holding_shares()`** and **`ctx.holding_rors()`**, compute boolean masks with NumPy, and submit orders once per bar with `ctx.sell(sell_mask, ...)` and `ctx.buy(buy_mask, ...)`.
+3. **Never compute holding return manually from `ctx.close` vs `pos.price`**:
+   - Always use `ctx.holding_rors()` (or `ctx.holding_ror(obj)`). The engine applies ex-dividend/ex-split adjustments *before* `execute()` runs and accounts for cash dividends and split cost dilution, preventing false `-50%` triggers on 10-for-10 stock splits.
+4. **Respect warmup, `pending_exit`, and lot-size cash sizing**:
+   - Return early `if ctx.is_warmup:` before mutating state arrays.
+   - Track `pending_exit[tp_mask] = True` when submitting a sell and reset it when `shares <= 0.0` so `next_open` mode does not duplicate exits or add-ons before the open fill settles.
+   - Remember A-shares trade in lots of `unit = 100`: ensure `initial_cash * buy_percent >= 100 * price` (CLI `-c` defaults to `10,000,000`), otherwise orders are rejected as `ACTION_BUY_NO_CASH`.
+
 
 # Execution
 
@@ -113,8 +148,17 @@ After writing a strategy, you can run it to verify it works as expected.
   return a 2D `Panel` view (`(n_objs, bars)`) of the strategy data. Useful in `prepare(ctx)` for multi-period resampling (e.g. `ctx.panel().resample("1W")`), `panel.compute(...)`, or 2D views (`panel.column("close")`).
 - `ctx.buy(signals: np.ndarray, percent: float = 1.0)`
   `ctx.sell(signals: np.ndarray, percent: float = 1.0)`
-  buy/sell a position, `signals` is a boolean array of signals, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.
+  buy/sell a position, `signals` is a boolean array (shape `(n_objs,)` or `(n_objs * bars,)`) or stock index/symbol, `True` means buy/sell, `percent` is the percent of cash/position to buy/sell.
   - Calling both `ctx.sell` and `ctx.buy` on the same bar is supported without overwriting: sells are executed first to release cash before buys.
+- `ctx.holding_shares() -> np.ndarray`
+  `ctx.holding_rors() -> np.ndarray`
+  **Vectorized position accessors** (preferred inside `execute()` over per-stock loops): return 1D `float64` arrays of shape `(n_objs,)` containing currently held shares and corporate-action-aware holding rates of return for all stocks at the current bar.
+- `ctx.position(obj: str | int | None = None) -> Position`
+  `ctx.holding_ror(obj: str | int | None = None) -> float`
+  `ctx.holding_pnl(obj: str | int | None = None) -> float`
+  `ctx.cost_price(obj: str | int | None = None, adjusted: bool = False) -> float`
+  `ctx.holding_days(obj: str | int | None = None) -> int`
+  Single-stock position & corporate-action-aware return/cost/holding-duration accessors (for portfolio strategies or targeted per-stock inspection). Always prefer `holding_ror` / `holding_rors` or `cost_price(..., adjusted=True)` over raw arithmetic with `ctx.close`.
 - `ctx.rebalance(weights: np.ndarray, tolerance: float | None = None)`
   rebalance portfolio holdings to target weights (for `mbt.PortfolioStrategy` or `-p` mode). `weights` is a non-negative 1D array of target portfolio weights per stock (either shape `(n_objs,)` or full block length `(n_objs * bars,)`; if the sum exceeds `1.0`, it is normalized automatically). Sells are executed first to release cash before buys.
 - `ctx.rebalance_objs(target_weights: dict[str, float], tolerance: float | None = None)`

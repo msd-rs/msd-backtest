@@ -193,6 +193,14 @@ class Context:
     """Return number of bars since position was first acquired."""
     pass
 
+  def holding_shares(self) -> np.ndarray:
+    """Return 1D float64 array of currently held shares across all objs (shape: `(n_objs,)`)."""
+    pass
+
+  def holding_rors(self) -> np.ndarray:
+    """Return 1D float64 array of corporate-action-aware holding ROR across all objs (shape: `(n_objs,)`)."""
+    pass
+
 
 class Strategy:
   """Base class of a trading strategy.
@@ -242,6 +250,20 @@ class Strategy:
       ctx: context of the strategy
     """
     pass
+
+  def signals(self, ctx: Context) -> tuple[np.ndarray, np.ndarray] | None:
+    """Optional vectorized signal hook for fast-path Rust simulation.
+
+    When overridden to return `(buy, sell)` 1D arrays of length `ctx.n_objs * ctx.bars`
+    (bool mask or float64 fraction in [0, 1]), `Runner` bypasses the bar-by-bar
+    Python `execute()` loop and runs the entire backtest in the multi-threaded Rust
+    `alpha.sim.Simulator` kernel with exact corporate-action, fee, lot-size,
+    slippage, and limit semantics.
+
+    Returns:
+      Tuple `(buy_signals, sell_signals)`, or `None` (default, runs bar-by-bar `execute()`).
+    """
+    return None
 
   def execute(self, ctx: Context):
     """

@@ -94,6 +94,7 @@ class PortfolioAccount:
     self.groups = dp.groups
     self.bars = dp.bars
     self.positions = [Position.zero() for _ in range(self.groups)]
+    self._held_groups: set[int] = set()
     self.entry_bars = np.full(self.groups, -1, dtype=np.int64)
     self._obj_to_group: dict[str, int] = (
       {s: i for i, s in enumerate(dp.objs)} if hasattr(dp, "objs") else {}
@@ -144,6 +145,20 @@ class PortfolioAccount:
       else np.zeros(len(dp.dates), dtype=np.float64)
     )
 
+    self._corp_groups_by_bar: dict[int, list[int]] = {}
+    if (
+      self.groups > 0
+      and self.bars > 0
+      and ("dividend" in dp.data or "transfer_shares" in dp.data or "right_shares" in dp.data)
+    ):
+      has_corp = (
+        (np.nan_to_num(self.dividends, nan=0.0) > 0)
+        | (np.nan_to_num(self.transfer_shares, nan=0.0) > 0)
+        | (np.nan_to_num(self.right_shares, nan=0.0) > 0)
+      ).reshape(self.groups, self.bars)
+      for b in np.flatnonzero(has_corp.any(axis=0)):
+        self._corp_groups_by_bar[int(b)] = np.flatnonzero(has_corp[:, int(b)]).tolist()
+
   @property
   def tradable_start(self) -> int:
     """Index of the first tradable group, maintained for backward compatibility."""
@@ -160,7 +175,7 @@ class PortfolioAccount:
 
   @property
   def market_value(self) -> float:
-    return float(sum(p.value for g, p in enumerate(self.positions) if self.tradable_mask[g]))
+    return float(sum(self.positions[g].value for g in self._held_groups if self.tradable_mask[g]))
 
   @property
   def asset(self) -> float:
@@ -175,11 +190,11 @@ class PortfolioAccount:
   @property
   def held_groups(self) -> list[int]:
     """List of group indices that currently have held shares (> 0)."""
-    return [
+    return sorted(
       g
-      for g in range(self.groups)
+      for g in self._held_groups
       if self.tradable_mask[g] and self.positions[g].shares > 0
-    ]
+    )
 
   @property
   def held_objs(self) -> list[str]:
@@ -299,7 +314,14 @@ class PortfolioAccount:
     }
 
   def apply_corporate_actions(self, ts: int):
-    for g in range(self.groups):
+    if not self._held_groups:
+      return
+    corp_groups = self._corp_groups_by_bar.get(ts)
+    if not corp_groups:
+      return
+    for g in corp_groups:
+      if g not in self._held_groups:
+        continue
       pos = self.positions[g]
       if pos.shares <= 0:
         continue
@@ -353,6 +375,7 @@ class PortfolioAccount:
     self.positions[g] = pos - sell_pos
     if self.positions[g].shares <= 0:
       self.entry_bars[g] = -1
+      self._held_groups.discard(g)
     self.deducted += fee
     j = g * self.bars + ts
     self.actions[j] = ACTION_SELL
@@ -407,6 +430,7 @@ class PortfolioAccount:
 
     self.cash -= buy_pos.value + fee
     self.positions[g] = self.positions[g] + buy_pos
+    self._held_groups.add(g)
     self.deducted += fee
     j = g * self.bars + ts
     self.actions[j] = ACTION_BUY
@@ -499,7 +523,7 @@ class PortfolioAccount:
     raise TypeError(f"Expected str or int for obj, got {type(obj).__name__}")
 
   def update_mark_to_market(self, ts: int, mark_prices: np.ndarray):
-    for g in range(self.groups):
+    for g in self._held_groups:
       p = mark_prices[g]
       if not np.isnan(p) and p > 0:
         self.positions[g].raw_mark_price = float(p)
@@ -507,10 +531,11 @@ class PortfolioAccount:
         self.positions[g].holding_days = max(0, ts - int(self.entry_bars[g]))
       else:
         self.positions[g].holding_days = 0
+    total_asset = self.asset
     self.portfolio_cash[ts] = self.cash
-    self.portfolio_assets[ts] = self.asset
+    self.portfolio_assets[ts] = total_asset
     self.portfolio_ror[ts] = (
-      (self.asset / self.initial_cash - 1.0) if self.initial_cash > 0 else 0.0
+      (total_asset / self.initial_cash - 1.0) if self.initial_cash > 0 else 0.0
     )
 
   def rebalance_step(
@@ -542,7 +567,7 @@ class PortfolioAccount:
       weights = weights / w_sum
 
     # Update current valuation with deal_prices where valid before computing targets
-    for g in range(self.groups):
+    for g in self._held_groups:
       if not self.tradable_mask[g]:
         continue
       dp_g = deal_prices[g]
@@ -554,13 +579,8 @@ class PortfolioAccount:
 
     # Apply tolerance band: keep current position value if deviation is within tolerance
     if tol > 0.0 and total_equity > 0.0:
-      for g in range(self.groups):
-        if not self.tradable_mask[g]:
-          continue
+      for g in np.flatnonzero(self.tradable_mask & (weights > 0.0)):
         tgt_w = weights[g]
-        # Explicit liquidation (target 0) is never suppressed
-        if tgt_w == 0.0:
-          continue
         dp_g = deal_prices[g]
         if np.isnan(dp_g) or dp_g <= 0:
           continue
@@ -569,8 +589,8 @@ class PortfolioAccount:
         if abs(tgt_w - curr_w) <= tol:
           target_values[g] = curr_val
 
-    # Pass 1: Sells first to free up cash
-    for g in range(self.groups):
+    # Pass 1: Sells first to free up cash (only held positions can be sold)
+    for g in sorted(self._held_groups):
       if not self.tradable_mask[g]:
         continue
       lim = limited[g] if limited is not None else 0
@@ -590,11 +610,9 @@ class PortfolioAccount:
         if shares_to_sell > 0:
           self._sell_group(g, ts, float(shares_to_sell), dp_g)
 
-    # Pass 2: Buys using available cash
+    # Pass 2: Buys using available cash (only non-zero target values can exceed curr_val)
     buy_deficits = []
-    for g in range(self.groups):
-      if not self.tradable_mask[g]:
-        continue
+    for g in np.flatnonzero(self.tradable_mask & (target_values > 0.0)):
       if universe is not None and self.dp.objs[g] not in universe:
         continue
       lim = limited[g] if limited is not None else 0
@@ -919,6 +937,18 @@ class PortfolioContext(Context):
     """Return number of bars since position was first acquired."""
     return self.account.holding_days(obj, current_bar=self.dp.i)
 
+  def holding_shares(self) -> np.ndarray:
+    """Return 1D float64 array of currently held shares across all objs."""
+    return np.array([p.shares for p in self.account.positions], dtype=np.float64)
+
+  def holding_rors(self) -> np.ndarray:
+    """Return 1D float64 array of holding ROR across all objs at current bar."""
+    cur_bar = self.dp.i
+    return np.array(
+      [self.account.position(g, current_bar=cur_bar).holding_ror for g in range(self.dp.groups)],
+      dtype=np.float64,
+    )
+
   def _resolve_bar_flags(self, flags) -> tuple[np.ndarray, np.ndarray]:
     idx = self._group_offsets + self.dp.i
     if isinstance(flags, str):
@@ -1091,8 +1121,8 @@ class PortfolioRunner:
         for i in dp:
           bar_ctx.end = i + 1
           bar_ctx.apply()
-          strategy.execute(self.ctx)
           acc.apply_corporate_actions(i)
+          strategy.execute(self.ctx)
 
           sig_i = i - 1 if self.exec_mode == "next_open" else i
           idx_now = offsets + i
@@ -1111,18 +1141,17 @@ class PortfolioRunner:
           buy_p = self.ctx.buy_percents[idx_sig]
 
           has_explicit_sells = False
-          for g in range(dp.groups):
-            if not acc.tradable_mask[g]:
+          sell_candidates = np.flatnonzero(acc.tradable_mask & (sell_p > 0.0))
+          for g in sell_candidates:
+            g_int = int(g)
+            if lim_now is not None and lim_now[g_int] == -1:
               continue
-            if sell_p[g] > 0:
-              if lim_now is not None and lim_now[g] == -1:
-                continue
-              shares_to_sell = acc.positions[g].shares * sell_p[g]
-              if sell_p[g] < 1.0:
-                shares_to_sell = float(int(shares_to_sell) - (int(shares_to_sell) % acc.unit))
-              if shares_to_sell > 0:
-                acc._sell_group(g, i, shares_to_sell, deal_p[g])
-                has_explicit_sells = True
+            shares_to_sell = acc.positions[g_int].shares * sell_p[g_int]
+            if sell_p[g_int] < 1.0:
+              shares_to_sell = float(int(shares_to_sell) - (int(shares_to_sell) % acc.unit))
+            if shares_to_sell > 0:
+              acc._sell_group(g_int, i, shares_to_sell, deal_p[g_int])
+              has_explicit_sells = True
 
           # 2. Check if explicit target_weights were provided at sig_i
           tgt_w = self.ctx.target_weights[sig_i]
@@ -1133,9 +1162,8 @@ class PortfolioRunner:
             # If explicit sells occurred on group g, reduce/zero target weight accordingly
             if has_explicit_sells:
               tgt_w = tgt_w.copy()
-              for g in range(dp.groups):
-                if sell_p[g] > 0:
-                  tgt_w[g] = max(0.0, tgt_w[g] * (1.0 - sell_p[g]))
+              for g in sell_candidates:
+                tgt_w[g] = max(0.0, tgt_w[g] * (1.0 - sell_p[g]))
 
             acc.rebalance_step(
               i, tgt_w, deal_p, mark_p, lim_now, tolerance=tol_val, universe=self.ctx.universe
@@ -1143,17 +1171,17 @@ class PortfolioRunner:
             continue
 
           # 3. Otherwise process buy signals sharing available cash across active signals
-          buy_groups = [
-            g
-            for g in range(dp.groups)
-            if acc.tradable_mask[g] and buy_p[g] > 0 and (lim_now is None or lim_now[g] != 1)
-          ]
+          buy_mask = acc.tradable_mask & (buy_p > 0.0)
+          if lim_now is not None:
+            buy_mask = buy_mask & (lim_now != 1)
+          buy_groups = np.flatnonzero(buy_mask)
           if len(buy_groups) > 0 and acc.cash > 0:
-            total_req = sum(buy_p[g] for g in buy_groups)
+            total_req = float(np.sum(buy_p[buy_groups]))
             alloc_cash = acc.cash * min(1.0, total_req)
             for g in buy_groups:
-              budget = alloc_cash * (buy_p[g] / total_req)
-              acc._buy_group(g, i, budget, deal_p[g])
+              g_int = int(g)
+              budget = alloc_cash * (buy_p[g_int] / total_req)
+              acc._buy_group(g_int, i, budget, deal_p[g_int])
 
           acc.update_mark_to_market(i, mark_p)
     finally:

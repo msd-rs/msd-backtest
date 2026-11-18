@@ -9,6 +9,55 @@ import polars as pl
 import numpy as np
 
 
+def _ffill_nan_zero_1d(arr: np.ndarray) -> np.ndarray:
+  """Forward-fill NaNs and replace leading NaNs with 0.0 without Polars overhead."""
+  if arr.size == 0 or not np.isnan(arr).any():
+    return arr
+  mask = np.isnan(arr)
+  idx = np.where(~mask, np.arange(arr.size), 0)
+  np.maximum.accumulate(idx, out=idx)
+  out = arr[idx].copy()
+  out[np.isnan(out)] = 0.0
+  return out
+
+
+def _ffill_nan_zero_2d(arr: np.ndarray) -> np.ndarray:
+  """Row-wise forward-fill NaNs and replace leading NaNs with 0.0 on 2D (G, T) arrays."""
+  if arr.size == 0 or not np.isnan(arr).any():
+    return arr
+  mask = np.isnan(arr)
+  g_n, t_n = arr.shape
+  idx = np.where(~mask, np.broadcast_to(np.arange(t_n), (g_n, t_n)), 0)
+  np.maximum.accumulate(idx, axis=1, out=idx)
+  rows = np.arange(g_n)[:, None]
+  out = arr[rows, idx].copy()
+  out[np.isnan(out)] = 0.0
+  return out
+
+
+def _calc_shares_1d(actions: np.ndarray, action_shares: np.ndarray) -> np.ndarray:
+  """Compute per-bar held shares from actions and action_shares using vectorized cumsum."""
+  if actions.size == 0:
+    return np.zeros(0, dtype=np.float64)
+  delta = np.where(actions == 1, action_shares, np.where(actions == 2, -action_shares, 0.0))
+  shares = np.cumsum(delta)
+  if shares.min() >= 0.0:
+    return shares
+  # Clamp sequentially only if cumulative delta ever goes negative
+  shares = np.zeros(len(actions), dtype=np.float64)
+  curr = 0.0
+  for t in range(len(actions)):
+    act = actions[t]
+    if act == 1:
+      curr += action_shares[t]
+    elif act == 2:
+      curr -= action_shares[t]
+    if curr < 0.0:
+      curr = 0.0
+    shares[t] = curr
+  return shares
+
+
 @dataclasses.dataclass
 class Report:
   obj: str
@@ -49,7 +98,10 @@ class Report:
     if len(obj) == 0:
       return
     self.obj = obj
-    s, e = dp.obj_indices(obj)
+    obj_idx = dp.objs.index(obj)
+    s = obj_idx * dp.bars
+    e = s + dp.bars
+    self._obj_idx = obj_idx
     w = max(0, int(getattr(dp, "warmup_bars", 0)))
 
     if w > 0 and (e - s) > w:
@@ -76,9 +128,9 @@ class Report:
       self.bw_price = np.round(dp.slice("bw_price", s), 3) if "bw_price" in dp.data else self.price
 
     # Clean NaNs by forward filling and filling leading NaNs with 0
-    self.ror = pl.Series("", self.ror).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy()
-    self.ror_hold = pl.Series("", self.ror_hold).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy()
-    self.ror_original = pl.Series("", self.ror_original).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+    self.ror = _ffill_nan_zero_1d(self.ror)
+    self.ror_hold = _ffill_nan_zero_1d(self.ror_hold)
+    self.ror_original = _ffill_nan_zero_1d(self.ror_original)
 
     self.calculate_metrics(dp, account)
     
@@ -138,10 +190,7 @@ class Report:
     if w > 0 and len(bench_bw) > w:
       bench_bw = bench_bw[w:]
     benchmark = uniform_ror(bench_bw)
-    self.benchmark_ror = np.round(
-      pl.Series("", benchmark).fill_nan(None).fill_null(strategy="forward").fill_null(0.0).to_numpy(),
-      4,
-    )
+    self.benchmark_ror = np.round(_ffill_nan_zero_1d(benchmark), 4)
     if hasattr(dp, "objs") and len(dp.objs) > 0:
       self.benchmark_obj = str(dp.objs[0])
 
@@ -209,20 +258,15 @@ class Report:
       calmar = 0.0
 
     # 3. Trade-level metrics
-    raw_action_shares = dp.slice("action_shares", self.obj) if "action_shares" in dp.data else np.zeros(dp.bars)
+    obj_idx = getattr(self, "_obj_idx", None)
+    if obj_idx is None:
+      obj_idx = dp.objs.index(self.obj)
+    s = obj_idx * dp.bars
+    e = s + dp.bars
+    raw_action_shares = dp.slice("action_shares", s) if "action_shares" in dp.data else np.zeros(dp.bars)
     action_shares = raw_action_shares[w:] if (w > 0 and len(raw_action_shares) > w) else raw_action_shares
 
-    # Track shares held at each bar
-    shares = np.zeros(len(self.actions))
-    curr_shares = 0.0
-    for t in range(len(self.actions)):
-      act = self.actions[t]
-      sh = action_shares[t]
-      if act == 1:    # ACTION_BUY
-        curr_shares += sh
-      elif act == 2:  # ACTION_SELL
-        curr_shares -= sh
-      shares[t] = max(curr_shares, 0.0)
+    shares = _calc_shares_1d(self.actions, action_shares)
 
     # Identify holding periods where shares > 0
     holding = shares > 0
@@ -234,8 +278,6 @@ class Report:
     trade_profits = []
     trade_returns = []
 
-    s = dp.objs.index(self.obj) * dp.bars
-    e = s + dp.bars
     raw_assets = dp.all("assets")[s:e]
     assets = raw_assets[w:] if (w > 0 and len(raw_assets) > w) else raw_assets
 
@@ -357,15 +399,249 @@ def uniform_ror(a: np.ndarray) -> np.ndarray:
   return ((a - base) / base)
 
 
+def _clean_round4_list(arr: np.ndarray) -> list[float]:
+  return np.where(np.isnan(arr), 0.0, np.round(arr, 4)).tolist()
+
+
 def build_report(
   dp: DataProvider,
   accounts: list[Account],
   diagnostics: dict | None = None,
 ) -> list[Report]:
-  reports = [Report(obj, dp, accounts[i]) for i, obj in enumerate(dp.objs)]
-  if diagnostics is not None:
-    for rep in reports:
-      rep.diagnostics = diagnostics
+  objs = getattr(dp, "objs", [])
+  g_count = len(objs)
+  bars = dp.bars
+  if g_count == 0 or bars == 0:
+    reports = [Report(obj, dp, accounts[i]) for i, obj in enumerate(objs)]
+    if diagnostics is not None:
+      for rep in reports:
+        rep.diagnostics = diagnostics
+    return reports
+
+  w = max(0, int(getattr(dp, "warmup_bars", 0)))
+  slice_start = w if (w > 0 and bars > w) else 0
+  eff_bars = bars - slice_start
+
+  dates_2d = dp.dates.reshape(g_count, bars)[:, slice_start:]
+  prices_2d = dp.all("price").reshape(g_count, bars)[:, slice_start:]
+  actions_2d = dp.all("actions").reshape(g_count, bars)[:, slice_start:]
+  action_shares_2d = (
+    dp.all("action_shares").reshape(g_count, bars)[:, slice_start:]
+    if "action_shares" in dp.data
+    else np.zeros((g_count, eff_bars), dtype=np.float64)
+  )
+  assets_2d = dp.all("assets").reshape(g_count, bars)[:, slice_start:]
+  fw_2d = (
+    np.round(dp.all("fw_price").reshape(g_count, bars)[:, slice_start:], 3)
+    if "fw_price" in dp.data
+    else prices_2d
+  )
+  bw_raw_2d = (
+    dp.all("bw_price").reshape(g_count, bars)[:, slice_start:]
+    if "bw_price" in dp.data
+    else None
+  )
+  bw_2d = np.round(bw_raw_2d, 3) if bw_raw_2d is not None else prices_2d
+
+  init_cashes = np.array([float(acc.initial_cash) for acc in accounts], dtype=np.float64)
+  deducteds = np.array([float(acc.deducted) for acc in accounts], dtype=np.float64)
+
+  if slice_start > 0:
+    base_a = np.where((eff_bars > 0) & (assets_2d[:, 0] > 0), assets_2d[:, 0], init_cashes)
+    ror_2d = _ffill_nan_zero_2d(np.round((assets_2d / base_a[:, None]) - 1.0, 4))
+    ror_hold_2d = ror_2d
+  else:
+    ror_2d = _ffill_nan_zero_2d(np.round(dp.all("ror").reshape(g_count, bars), 4))
+    ror_hold_2d = _ffill_nan_zero_2d(np.round(dp.all("ror_hold").reshape(g_count, bars), 4))
+
+  if bw_raw_2d is not None:
+    b0 = bw_raw_2d[:, 0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+      raw_orig = np.where(
+        b0[:, None] == 0.0,
+        bw_raw_2d,
+        (bw_raw_2d - b0[:, None]) / b0[:, None],
+      )
+    ror_original_2d = _ffill_nan_zero_2d(np.round(raw_orig, 4))
+  else:
+    ror_original_2d = np.zeros((g_count, eff_bars), dtype=np.float64)
+
+  # Compute benchmark metrics once across all objects
+  bench_bw = dp.slice("bw_price", 0)[slice_start:] if "bw_price" in dp.data else prices_2d[0]
+  benchmark = uniform_ror(bench_bw) if len(bench_bw) > 0 else np.zeros(0, dtype=np.float64)
+  benchmark_ror = np.round(_ffill_nan_zero_1d(benchmark), 4)
+  benchmark_profit = (
+    0.0
+    if (len(benchmark) == 0 or np.isnan(benchmark[-1]))
+    else float(np.round(benchmark[-1], 4))
+  )
+  benchmark_obj = str(objs[0])
+
+  if eff_bars >= 3:
+    with np.errstate(divide="ignore", invalid="ignore"):
+      strategy_ratio = 1.0 + ror_2d
+      strategy_daily = np.diff(strategy_ratio, axis=1) / strategy_ratio[:, :-1]
+      benchmark_ratio = 1.0 + benchmark
+      benchmark_daily = np.diff(benchmark_ratio) / benchmark_ratio[:-1]
+
+      mean_strat = np.mean(strategy_daily, axis=1)
+      std_strat = np.std(strategy_daily, axis=1, ddof=1)
+      sharpe_arr = np.where(std_strat != 0.0, mean_strat / std_strat * np.sqrt(252.0), 0.0)
+
+      mean_bench = float(np.mean(benchmark_daily))
+      var_bench = float(np.var(benchmark_daily, ddof=1))
+      n_d = strategy_daily.shape[1]
+      cov_sb = (
+        np.sum((strategy_daily - mean_strat[:, None]) * (benchmark_daily[None, :] - mean_bench), axis=1)
+        / (n_d - 1)
+      )
+      beta_arr = cov_sb / var_bench if var_bench != 0.0 else np.zeros(g_count, dtype=np.float64)
+      alpha_arr = (mean_strat - beta_arr * mean_bench) * 252.0
+
+      active_daily = strategy_daily - benchmark_daily[None, :]
+      mean_active = np.mean(active_daily, axis=1)
+      std_active = np.std(active_daily, axis=1, ddof=1)
+      ir_arr = np.where(std_active != 0.0, mean_active / std_active * np.sqrt(252.0), 0.0)
+
+      downside_daily = np.minimum(strategy_daily, 0.0)
+      std_downside = np.std(downside_daily, axis=1, ddof=1)
+      sortino_arr = np.where(std_downside != 0.0, mean_strat / std_downside * np.sqrt(252.0), 0.0)
+      treynor_arr = np.where(beta_arr != 0.0, mean_strat * 252.0 / beta_arr, 0.0)
+  else:
+    mean_strat = np.zeros(g_count, dtype=np.float64)
+    sharpe_arr = np.zeros(g_count, dtype=np.float64)
+    beta_arr = np.zeros(g_count, dtype=np.float64)
+    alpha_arr = np.zeros(g_count, dtype=np.float64)
+    ir_arr = np.zeros(g_count, dtype=np.float64)
+    sortino_arr = np.zeros(g_count, dtype=np.float64)
+    treynor_arr = np.zeros(g_count, dtype=np.float64)
+
+  if eff_bars > 0:
+    equity = 1.0 + ror_2d
+    peaks = np.maximum.accumulate(equity, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+      mdd_arr = np.min((equity - peaks) / peaks, axis=1)
+  else:
+    mdd_arr = np.zeros(g_count, dtype=np.float64)
+
+  if eff_bars >= 3:
+    with np.errstate(divide="ignore", invalid="ignore"):
+      calmar_arr = np.where(mdd_arr != 0.0, mean_strat * 252.0 / np.abs(mdd_arr), 0.0)
+  else:
+    calmar_arr = np.zeros(g_count, dtype=np.float64)
+
+  # Vectorized shares calculation across all groups
+  delta_2d = np.where(actions_2d == 1, action_shares_2d, np.where(actions_2d == 2, -action_shares_2d, 0.0))
+  shares_2d = np.cumsum(delta_2d, axis=1)
+  neg_rows = np.flatnonzero(shares_2d.min(axis=1) < 0.0) if eff_bars > 0 else np.empty(0, dtype=np.int64)
+  for g in neg_rows:
+    shares_2d[g] = _calc_shares_1d(actions_2d[g], action_shares_2d[g])
+
+  holding_2d = shares_2d > 0
+  win_rate_arr = np.zeros(g_count, dtype=np.float64)
+  avg_win_arr = np.zeros(g_count, dtype=np.float64)
+  avg_loss_arr = np.zeros(g_count, dtype=np.float64)
+  pf_arr = np.zeros(g_count, dtype=np.float64)
+  trade_counts = [0] * g_count
+
+  if eff_bars > 0:
+    has_trades = holding_2d.any(axis=1)
+    for g in np.flatnonzero(has_trades):
+      h = holding_2d[g]
+      padded = np.concatenate(([False], h, [False]))
+      diff = np.diff(padded.astype(np.int8))
+      starts = np.flatnonzero(diff == 1)
+      ends = np.flatnonzero(diff == -1) - 1
+      row_assets = assets_2d[g]
+      n_tr = len(starts)
+      trade_counts[g] = n_tr
+      if n_tr == 0:
+        continue
+      base_idx = np.maximum(starts - 1, 0)
+      final_idx = np.minimum(ends + 1, eff_bars - 1)
+      base_a = row_assets[base_idx]
+      profits = row_assets[final_idx] - base_a
+      rets = np.where(base_a != 0.0, profits / base_a, 0.0)
+      win_mask = profits > 0
+      loss_mask = profits < 0
+      win_rate_arr[g] = float(np.sum(win_mask)) / n_tr
+      win_ret_mask = rets > 0
+      loss_ret_mask = rets < 0
+      avg_win_arr[g] = float(np.mean(rets[win_ret_mask])) if np.any(win_ret_mask) else 0.0
+      avg_loss_arr[g] = float(np.mean(rets[loss_ret_mask])) if np.any(loss_ret_mask) else 0.0
+      sum_loss = float(np.abs(np.sum(profits[loss_mask])))
+      pf_arr[g] = float(np.sum(profits[win_mask])) / sum_loss if sum_loss != 0.0 else 0.0
+
+  alpha_list = _clean_round4_list(alpha_arr)
+  beta_list = _clean_round4_list(beta_arr)
+  sharpe_list = _clean_round4_list(sharpe_arr)
+  ir_list = _clean_round4_list(ir_arr)
+  sortino_list = _clean_round4_list(sortino_arr)
+  treynor_list = _clean_round4_list(treynor_arr)
+  mdd_list = _clean_round4_list(mdd_arr)
+  calmar_list = _clean_round4_list(calmar_arr)
+  wr_list = _clean_round4_list(win_rate_arr)
+  aw_list = _clean_round4_list(avg_win_arr)
+  al_list = _clean_round4_list(avg_loss_arr)
+  pf_list = _clean_round4_list(pf_arr)
+  with np.errstate(divide="ignore", invalid="ignore"):
+    fee_rate_list = _clean_round4_list(np.where(init_cashes > 0.0, deducteds / init_cashes, 0.0))
+  profit_list = (ror_2d[:, -1].tolist() if eff_bars > 0 else [0.0] * g_count)
+  profit_orig_list = (ror_original_2d[:, -1].tolist() if eff_bars > 0 else [0.0] * g_count)
+
+  reports: list[Report] = []
+  for i, obj in enumerate(objs):
+    r = Report.__new__(Report)
+    r.obj = obj
+    r.date = dates_2d[i]
+    r.ror = ror_2d[i]
+    r.ror_hold = ror_hold_2d[i].copy() if slice_start > 0 else ror_hold_2d[i]
+    r.ror_original = ror_original_2d[i]
+    r.actions = actions_2d[i]
+    r.price = prices_2d[i]
+    r.close = r.price
+    r.fw_price = fw_2d[i]
+    r.bw_price = bw_2d[i]
+
+    r.alpha = alpha_list[i]
+    r.beta = beta_list[i]
+    r.sharpe = sharpe_list[i]
+    r.information_ratio = ir_list[i]
+    r.ir = ir_list[i]
+    r.sortino = sortino_list[i]
+    r.treynor = treynor_list[i]
+    r.max_drawdown = mdd_list[i]
+    r.calmar = calmar_list[i]
+
+    wr = wr_list[i]
+    aw = aw_list[i]
+    al_v = al_list[i]
+    pf = pf_list[i]
+    r.win_rate = wr
+    r.avg_win = aw
+    r.avg_loss = al_v
+    r.profit_factor = pf
+    r.daily_win_rate = wr
+    r.daily_avg_win = aw
+    r.daily_avg_loss = al_v
+    r.daily_profit_factor = pf
+    r.trade_win_rate = wr
+    r.trade_avg_win = aw
+    r.trade_avg_loss = al_v
+    r.trade_profit_factor = pf
+
+    r.profit = float(profit_list[i])
+    r.profit_original = float(profit_orig_list[i])
+    r.benchmark_profit = benchmark_profit
+    r.fee_rate = fee_rate_list[i]
+    tc = trade_counts[i]
+    r.trade_count = tc
+    r.rebalance_count = tc
+    r.diagnostics = diagnostics
+    r.benchmark_ror = benchmark_ror
+    r.benchmark_obj = benchmark_obj
+    reports.append(r)
+
   return reports
 
 
@@ -842,6 +1118,28 @@ def build_markdown_summary(
     f"- **Positive Profit**: {pos_profit} ({pos_profit / total * 100:.2f}%) | **Beat Buy&Hold{pool_note}**: {beat_hold} ({beat_hold / total * 100:.2f}%)",
     f"- **Benchmark Return**: {bench_ret:.4f} ({bench_ret * 100:.2f}%) | **Beat Benchmark**: {beat_bench} ({beat_bench / total * 100:.2f}%)",
   ]
+
+  if not is_portfolio:
+    no_cash_signals = sum(
+      int(np.count_nonzero(r.actions == 5))
+      for r in reports
+      if getattr(r, "actions", None) is not None and len(r.actions) > 0
+    )
+    buy_fills = sum(
+      int(np.count_nonzero(r.actions == 1))
+      for r in reports
+      if getattr(r, "actions", None) is not None and len(r.actions) > 0
+    )
+    if no_cash_signals > 0 and (buy_fills == 0 or no_cash_signals > buy_fills):
+      init_c = float(getattr(account, "initial_cash", 0.0)) if account is not None else 0.0
+      unit_sz = int(getattr(account, "unit", 100)) if account is not None else 100
+      cash_hint = f" (initial_cash={init_c:,.0f}, unit={unit_sz})" if init_c > 0 else f" (unit={unit_sz})"
+      lines.extend([
+        "",
+        "> [!WARNING]",
+        f"> **{no_cash_signals:,} buy signals rejected (`BUY_NO_CASH`)** vs {buy_fills:,} filled buys{cash_hint}. "
+        "Order budget may be smaller than 1 lot (`unit * price`); increase `-c/--cash` or `buy_percent`.",
+      ])
 
   if total == 1:
     r = reports[0]

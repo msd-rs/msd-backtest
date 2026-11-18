@@ -177,7 +177,7 @@ def parse_args() -> Tuple[RunRequest, str, str, Fee]:
     "--cash",
     type=float,
     default=None,
-    help="initial cash (default: 10000 for single-stock mode, 1000000 for portfolio mode)",
+    help="initial cash (default: 10000000)",
   )
   parser.add_argument(
     "-S",
@@ -481,14 +481,37 @@ def build_output(
   ext = output.split(".")[-1].lower()
   logger.info(f"output kind: {ext}")
   if ext == "csv":
-    for report in reports:
-      df = pl.DataFrame(report.detailed(with_obj=True))
-      float_cols = [col for col, dtype in zip(df.columns, df.dtypes) if dtype in (pl.Float32, pl.Float64)]
-      df = df.with_columns([
-        pl.col(col).map_elements(float_format, return_dtype=pl.String)
-        for col in float_cols
-      ])
-      df.write_csv(output)
+    if not reports:
+      df = pl.DataFrame(
+        schema={
+          "obj": pl.Utf8,
+          "date": pl.Int64,
+          "ror": pl.Float64,
+          "ror_hold": pl.Float64,
+          "ror_original": pl.Float64,
+          "actions": pl.Int32,
+        }
+      )
+    elif len(reports) == 1:
+      r = reports[0]
+      df = pl.DataFrame({
+        "obj": np.repeat(r.obj, len(r.date)),
+        "date": r.date,
+        "ror": np.round(r.ror, 6),
+        "ror_hold": np.round(r.ror_hold, 6),
+        "ror_original": np.round(r.ror_original, 6),
+        "actions": r.actions,
+      })
+    else:
+      df = pl.DataFrame({
+        "obj": np.repeat([r.obj for r in reports], [len(r.date) for r in reports]),
+        "date": np.concatenate([r.date for r in reports]),
+        "ror": np.round(np.concatenate([r.ror for r in reports]), 6),
+        "ror_hold": np.round(np.concatenate([r.ror_hold for r in reports]), 6),
+        "ror_original": np.round(np.concatenate([r.ror_original for r in reports]), 6),
+        "actions": np.concatenate([r.actions for r in reports]),
+      })
+    df.write_csv(output)
   elif ext == "xlsx":
     import xlsxwriter
     wb = xlsxwriter.Workbook(output, options={
@@ -629,7 +652,7 @@ def run_single_period(
 
   bench_obj = getattr(req, "benchmark", None)
   if use_portfolio:
-    init_cash = custom_cash if custom_cash is not None else 1000000.0
+    init_cash = custom_cash if custom_cash is not None else 10000000.0
     p_account = PortfolioAccount(init_cash, dp, fee=fee, benchmark=bench_obj)
     logger.info(f"portfolio account created, initial_cash={init_cash}")
     p_runner = PortfolioRunner(p_account, exec_mode=exec_mode)
@@ -640,9 +663,9 @@ def run_single_period(
     reports = build_portfolio_report(dp, p_account, diagnostics=diag)
     return reports, dp, p_account
   else:
-    init_cash = custom_cash if custom_cash is not None else 10000.0
+    init_cash = custom_cash if custom_cash is not None else 10000000.0
     account = Account(init_cash, dp, fee=fee)
-    logger.info("account created")
+    logger.info(f"account created, initial_cash={init_cash}")
     runner = Runner(account, exec_mode=exec_mode)
     logger.info(f"runner created, exec_mode={exec_mode}")
     runner.run(req.strategy)

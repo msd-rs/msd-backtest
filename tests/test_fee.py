@@ -12,11 +12,11 @@ def test_fee_default():
   item = fee.get(0)
   assert item.commission_buy == 0.0010
   assert item.min_commission_buy == 5.0
-  assert item.tax_buy == 0.001
+  assert item.tax_buy == 0.000
   assert item.transaction_fee_buy == 0.0001
   assert item.commission_sell == 0.0010
   assert item.min_commission_sell == 5.0
-  assert item.tax_sell == 0.0
+  assert item.tax_sell == 0.0005
   assert item.transaction_fee_sell == 0.0
 
 

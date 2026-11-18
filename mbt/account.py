@@ -641,10 +641,10 @@ class Account:
     self.action_shares = dp.all("action_shares", create_if_not_exist=np.float64)[s:e]
 
     """corporate actions"""
-    self.dividends = dp.all("dividend")[s:e]
-    self.transfer_shares = dp.all("transfer_shares")[s:e]
-    self.right_shares = dp.all("right_shares")[s:e]
-    self.right_prices = dp.all("right_price")[s:e]
+    self.dividends = dp.all("dividend")[s:e] if "dividend" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+    self.transfer_shares = dp.all("transfer_shares")[s:e] if "transfer_shares" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+    self.right_shares = dp.all("right_shares")[s:e] if "right_shares" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+    self.right_prices = dp.all("right_price")[s:e] if "right_price" in dp.data else np.zeros(dp.bars, dtype=np.float64)
 
     self.assets.fill(initial_cash)
     self.ror.fill(0.0)

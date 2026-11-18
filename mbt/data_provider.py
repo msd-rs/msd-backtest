@@ -8,6 +8,58 @@ from numpy.typing import DTypeLike
 MAX_N = 1_000_000_000
 
 
+_UNMATERIALIZED = object()
+
+
+class _LazySlicedDict(dict):
+  """Dict view that slices (groups, bars) arrays lazily on first field access."""
+
+  def __init__(
+    self,
+    src: dict[str, np.ndarray],
+    groups: int,
+    bars: int,
+    start_bar: int,
+    skip_keys: set[str],
+  ):
+    keys = [k for k in src if k not in skip_keys]
+    super().__init__({k: _UNMATERIALIZED for k in keys})
+    self._src = src
+    self._groups = groups
+    self._bars = bars
+    self._start_bar = start_bar
+
+  def _materialize(self, key):
+    val = dict.__getitem__(self, key)
+    if val is _UNMATERIALIZED:
+      raw = self._src[key]
+      if len(raw) == self._groups * self._bars:
+        val = np.ascontiguousarray(
+          raw.reshape(self._groups, self._bars)[:, self._start_bar :]
+        ).reshape(-1)
+      else:
+        val = raw
+      dict.__setitem__(self, key, val)
+    return val
+
+  def __getitem__(self, key):
+    return self._materialize(key)
+
+  def get(self, key, default=None):
+    if key not in self:
+      return default
+    return self._materialize(key)
+
+  def items(self):
+    return [(k, self._materialize(k)) for k in self.keys()]
+
+  def values(self):
+    return [self._materialize(k) for k in self.keys()]
+
+  def copy(self):
+    return {k: self._materialize(k) for k in self.keys()}
+
+
 class NextHook(Protocol):
   def __call__(self, i: int, groups: int, bars: int):
     """
@@ -146,3 +198,29 @@ class DataProvider:
       k: v for k, v in self.data.items() if len(v) == self.groups * self.bars
     }
     return Panel(cols, list(self.objs), self.bars)
+
+  def slice_time_window(self, start_bar: int, warmup_bars: int = 0) -> "DataProvider":
+    """Return a new DataProvider sliced from `start_bar` to the end without re-querying MSD."""
+    if start_bar < 0 or start_bar >= self.bars:
+      raise ValueError(f"start_bar {start_bar} out of range [0, {self.bars})")
+
+    transient = {"assets", "ror", "ror_hold", "actions", "action_shares"}
+    g = self.groups
+    b = self.bars
+    if start_bar == 0:
+      new_data = {k: v for k, v in self.data.items() if k not in transient}
+    else:
+      new_data = _LazySlicedDict(self.data, g, b, start_bar, transient)
+
+    dp_sub = DataProvider(
+      new_data,
+      objs=list(self.objs),
+      ts_name=self.ts_name,
+      next_hook=self.next_hook,
+    )
+    dp_sub.warmup_bars = max(0, int(warmup_bars))
+    if hasattr(self, "fin_only_year"):
+      dp_sub.fin_only_year = self.fin_only_year
+    if hasattr(self, "financial_frame"):
+      dp_sub.financial_frame = self.financial_frame
+    return dp_sub

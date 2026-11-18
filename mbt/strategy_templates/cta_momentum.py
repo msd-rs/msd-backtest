@@ -75,7 +75,10 @@ class CtaMomentumStrategy(mbt.Strategy):
     self.exit_signals: np.ndarray | None = None
 
     # 运行期状态跟踪
+    self.offsets: np.ndarray | None = None
     self.highest_price: np.ndarray | None = None
+    self.pending_exit: np.ndarray | None = None
+    self.pending_buy: np.ndarray | None = None
     self.exit_stats = {
       "fixed_stop": 0,
       "atr_trailing": 0,
@@ -109,64 +112,86 @@ class CtaMomentumStrategy(mbt.Strategy):
 
       # 4. 突破信号：今日收盘价突破前一日的通道上轨，且站在大势生命线上方
       prev_channel_high = al.REF(self.channel_high, 1)
-      self.buy_signals = (close > prev_channel_high) & (close > self.ma_trend)
+      self.buy_signals = np.asarray((close > prev_channel_high) & (close > self.ma_trend), dtype=bool)
 
       # 5. 通道跌破信号：今日收盘价跌破前一日的通道下轨
       prev_channel_low = al.REF(self.channel_low, 1)
-      self.exit_signals = close < prev_channel_low
+      self.exit_signals = np.asarray(close < prev_channel_low, dtype=bool)
 
-    # 预分配持仓最高价跟踪器
+    # 预分配截面索引偏移与运行期状态数组
+    self.offsets = np.arange(n_objs, dtype=np.int64) * bars
     self.highest_price = np.zeros(n_objs, dtype=np.float64)
+    self.pending_exit = np.zeros(n_objs, dtype=bool)
+    self.pending_buy = np.zeros(n_objs, dtype=bool)
+    self.exit_stats = {
+      "fixed_stop": 0,
+      "atr_trailing": 0,
+      "channel_exit": 0,
+    }
 
   def execute(self, ctx: mbt.Context):
-    """逐日驱动执行：极速 O(1) 读取信号并执行多层级动态出场与进场."""
-    n_objs = ctx.n_objs
-    current_bar = ctx.bar
+    """逐日驱动执行：截面向量化读取持仓状态，执行多层级动态出场与进场."""
+    if ctx.is_warmup:
+      return
 
-    for i in range(n_objs):
-      pos = ctx.position(i)
-      has_pos = pos.shares > 0
+    assert self.offsets is not None
+    assert self.highest_price is not None
+    assert self.pending_exit is not None
+    assert self.pending_buy is not None
+    assert self.atr is not None
+    assert self.buy_signals is not None
+    assert self.exit_signals is not None
 
-      flat_idx = i * ctx.bars + current_bar
-      cur_high = ctx.high[flat_idx]
-      cur_close = ctx.close[flat_idx]
-      cur_atr = self.atr[flat_idx]
+    # 批量获取全截面持仓股数与除权闭环收益率，避免逐股循环调用 ctx.position(i)
+    shares = ctx.holding_shares()
+    rors = np.nan_to_num(ctx.holding_rors(), nan=0.0)
+    held = shares > 0.0
+    flat = ~held
 
-      if has_pos:
-        # 跟踪持仓期间的最高前复权价格（用于动态 ATR 追踪止损）
-        self.highest_price[i] = max(self.highest_price[i], cur_high)
+    self.pending_exit &= held
+    self.highest_price[flat] = 0.0
+    pending_buy_prev = self.pending_buy.copy()
+    self.pending_buy[:] = False
 
-        # 规则 1：最大硬止损保护 (通过官方 holding_ror 严防送转股基准错配)
-        ror = ctx.holding_ror(i)
-        if ror <= -self.fixed_stop_loss:
-          ctx.sell(i, percent=1.0)
-          self.exit_stats["fixed_stop"] += 1
-          self.highest_price[i] = 0.0
-          continue
+    idx = self.offsets + ctx.bar
+    cur_high = ctx.high[idx]
+    cur_close = ctx.close[idx]
+    cur_atr = self.atr[idx]
 
-        # 规则 2：动态 ATR 波动率追踪止损 (从持仓最高价回撤 N 倍 ATR)
-        trailing_stop_line = self.highest_price[i] - self.atr_stop_multiplier * cur_atr
-        if cur_close < trailing_stop_line:
-          ctx.sell(i, percent=1.0)
-          self.exit_stats["atr_trailing"] += 1
-          self.highest_price[i] = 0.0
-          continue
+    if np.any(held):
+      # 跟踪持仓期间的最高前复权价格（用于动态 ATR 追踪止损）
+      self.highest_price[held] = np.maximum(self.highest_price[held], cur_high[held])
 
-        # 规则 3：通道下轨破位平仓
-        if bool(self.exit_signals[flat_idx]):
-          ctx.sell(i, percent=1.0)
-          self.exit_stats["channel_exit"] += 1
-          self.highest_price[i] = 0.0
-          continue
+    manageable = held & ~self.pending_exit
+    if np.any(manageable):
+      # 规则 1：最大硬止损保护 (基于 holding_rors 严防送转股基准错配)
+      fixed_stop = manageable & (rors <= -self.fixed_stop_loss)
+      # 规则 2：动态 ATR 波动率追踪止损 (从持仓最高价回撤 N 倍 ATR)
+      trailing_stop_line = self.highest_price - self.atr_stop_multiplier * cur_atr
+      atr_trailing = (
+        manageable
+        & ~fixed_stop
+        & np.isfinite(trailing_stop_line)
+        & (cur_close < trailing_stop_line)
+      )
+      # 规则 3：通道下轨破位平仓
+      channel_exit = manageable & ~fixed_stop & ~atr_trailing & self.exit_signals[idx]
+      sell_mask = fixed_stop | atr_trailing | channel_exit
 
-      else:
-        # 未持仓状态：重置最高价
-        self.highest_price[i] = 0.0
+      if np.any(sell_mask):
+        ctx.sell(sell_mask, percent=1.0)
+        self.pending_exit[sell_mask] = True
+        self.highest_price[sell_mask] = 0.0
+        self.exit_stats["fixed_stop"] += int(np.count_nonzero(fixed_stop))
+        self.exit_stats["atr_trailing"] += int(np.count_nonzero(atr_trailing))
+        self.exit_stats["channel_exit"] += int(np.count_nonzero(channel_exit))
 
-        # 规则 4：通道突破进场
-        if bool(self.buy_signals[flat_idx]):
-          ctx.buy(i, percent=1.0)
-          self.highest_price[i] = cur_high
+    # 规则 4：通道突破进场
+    buy_mask = flat & ~pending_buy_prev & self.buy_signals[idx]
+    if np.any(buy_mask):
+      ctx.buy(buy_mask, percent=1.0)
+      self.pending_buy[buy_mask] = True
+      self.highest_price[buy_mask] = cur_high[buy_mask]
 
   def finalize(self, ctx: mbt.Context) -> dict:
     """输出 CTA 出场统计与通道参数配置诊断."""

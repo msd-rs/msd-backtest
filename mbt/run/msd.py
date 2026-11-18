@@ -280,36 +280,55 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {shares_ts_cond}{shares_limit
             ff_dict[col] = d_fin[col]
           financial_frame = pl.DataFrame(ff_dict)
 
-          # Initialize metric columns in data
+          # Initialize metric columns in data as 2D views for fast interval assignment
+          n_objs_len = len(objs)
+          data_2d: dict[str, np.ndarray] = {}
           for col in fin_metric_cols:
-            data[col] = np.full(len(objs) * bars, np.nan, dtype=np.float64)
-          data["report_ts"] = np.full(len(objs) * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+            arr = np.full(n_objs_len * bars, np.nan, dtype=np.float64)
+            data[col] = arr
+            data_2d[col] = arr.reshape(n_objs_len, bars)
+          rep_all = np.full(n_objs_len * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+          data["report_ts"] = rep_all
+          rep_2d = rep_all.reshape(n_objs_len, bars)
 
-          # Align per object using statutory disclosure date
-          range_map = {r[0]: (r[1], r[2]) for r in ranges}
-          for g, obj in enumerate(objs):
-            kline_slice = slice(g * bars, (g + 1) * bars)
-            if obj not in range_map:
-              continue
-            st, end_idx = range_map[obj]
-            if st >= end_idx:
-              continue
-            obj_ann_ts = ann_ts_raw[st:end_idx]
-            if len(obj_ann_ts) == 0:
-              continue
-            obj_rep_ts = rep_ts_raw[st:end_idx]
-            kline_ts = data["ts"][kline_slice]
+          # Align per object using statutory disclosure date in a single vectorized searchsorted
+          kline_i64 = np.asarray(data["ts"][:bars], dtype="datetime64[us]").astype(np.int64)
+          ann_i64 = np.asarray(ann_ts_raw, dtype="datetime64[us]").astype(np.int64)
+          start_bars_all = np.searchsorted(kline_i64, ann_i64, side="left")
+          obj_to_g = {obj: g for g, obj in enumerate(objs)}
+          col_arrays = {col: np.asarray(d_fin[col]) for col in fin_metric_cols}
 
-            idx = np.searchsorted(obj_ann_ts, kline_ts, side="right") - 1
-            valid = idx >= 0
-            safe_idx = np.maximum(idx, 0)
+          for obj_sym, st, end_idx in ranges:
+            g = obj_to_g.get(obj_sym)
+            if g is None or st >= end_idx:
+              continue
+            b_arr = start_bars_all[st:end_idx]
+            if len(b_arr) > 1 and bool(np.any(b_arr[:-1] > b_arr[1:])):
+              order = np.argsort(ann_i64[st:end_idx], kind="mergesort")
+              b_arr = b_arr[order]
+              rep_slice = rep_ts_raw[st:end_idx][order]
+              col_slices = {col: col_arrays[col][st:end_idx][order] for col in fin_metric_cols}
+              off_base = 0
+            else:
+              rep_slice = rep_ts_raw
+              col_slices = col_arrays
+              off_base = st
 
-            for col in fin_metric_cols:
-              val = d_fin[col][st:end_idx]
-              if len(val) == 0:
+            m_rep = len(b_arr)
+            b_list = b_arr.tolist()
+            for k in range(m_rep):
+              s_bar = b_list[k]
+              if s_bar >= bars:
+                break
+              e_bar = b_list[k + 1] if (k + 1 < m_rep) else bars
+              if e_bar > bars:
+                e_bar = bars
+              if e_bar <= s_bar:
                 continue
-              data[col][kline_slice] = np.where(valid, val[safe_idx], np.nan)
-            data["report_ts"][kline_slice] = np.where(valid, obj_rep_ts[safe_idx], np.datetime64("NaT", "us"))
+              idx_k = off_base + k
+              rep_2d[g, s_bar:e_bar] = rep_slice[idx_k]
+              for col in fin_metric_cols:
+                data_2d[col][g, s_bar:e_bar] = col_slices[col][idx_k]
     except Exception as e:
       logger.error(f"failed to load stock_financial from msd: {e}", exc_info=True)
       raise

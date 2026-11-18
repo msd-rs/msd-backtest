@@ -544,33 +544,42 @@ def build_report(
   pf_arr = np.zeros(g_count, dtype=np.float64)
   trade_counts = [0] * g_count
 
-  if eff_bars > 0:
-    has_trades = holding_2d.any(axis=1)
-    for g in np.flatnonzero(has_trades):
-      h = holding_2d[g]
-      padded = np.concatenate(([False], h, [False]))
-      diff = np.diff(padded.astype(np.int8))
-      starts = np.flatnonzero(diff == 1)
-      ends = np.flatnonzero(diff == -1) - 1
-      row_assets = assets_2d[g]
-      n_tr = len(starts)
-      trade_counts[g] = n_tr
-      if n_tr == 0:
-        continue
-      base_idx = np.maximum(starts - 1, 0)
-      final_idx = np.minimum(ends + 1, eff_bars - 1)
-      base_a = row_assets[base_idx]
-      profits = row_assets[final_idx] - base_a
-      rets = np.where(base_a != 0.0, profits / base_a, 0.0)
-      win_mask = profits > 0
-      loss_mask = profits < 0
-      win_rate_arr[g] = float(np.sum(win_mask)) / n_tr
-      win_ret_mask = rets > 0
-      loss_ret_mask = rets < 0
-      avg_win_arr[g] = float(np.mean(rets[win_ret_mask])) if np.any(win_ret_mask) else 0.0
-      avg_loss_arr[g] = float(np.mean(rets[loss_ret_mask])) if np.any(loss_ret_mask) else 0.0
-      sum_loss = float(np.abs(np.sum(profits[loss_mask])))
-      pf_arr[g] = float(np.sum(profits[win_mask])) / sum_loss if sum_loss != 0.0 else 0.0
+  if eff_bars > 0 and holding_2d.any():
+    padded_2d = np.zeros((g_count, eff_bars + 2), dtype=np.int8)
+    padded_2d[:, 1:-1] = holding_2d
+    diff_2d = np.diff(padded_2d, axis=1)
+    s_rows, s_cols = np.where(diff_2d == 1)
+    _, e_cols = np.where(diff_2d == -1)
+    e_cols = e_cols - 1
+
+    if s_rows.size > 0:
+      base_cols = np.maximum(s_cols - 1, 0)
+      final_cols = np.minimum(e_cols + 1, eff_bars - 1)
+      base_a = assets_2d[s_rows, base_cols]
+      profits = assets_2d[s_rows, final_cols] - base_a
+      with np.errstate(divide="ignore", invalid="ignore"):
+        rets = np.where(base_a != 0.0, profits / base_a, 0.0)
+
+      tc_arr = np.bincount(s_rows, minlength=g_count)
+      trade_counts = tc_arr.tolist()
+      win_pos = profits > 0
+      loss_pos = profits < 0
+      win_ret = rets > 0
+      loss_ret = rets < 0
+
+      win_cnt = np.bincount(s_rows, weights=win_pos.astype(np.float64), minlength=g_count)
+      win_ret_cnt = np.bincount(s_rows, weights=win_ret.astype(np.float64), minlength=g_count)
+      loss_ret_cnt = np.bincount(s_rows, weights=loss_ret.astype(np.float64), minlength=g_count)
+      win_ret_sum = np.bincount(s_rows, weights=np.where(win_ret, rets, 0.0), minlength=g_count)
+      loss_ret_sum = np.bincount(s_rows, weights=np.where(loss_ret, rets, 0.0), minlength=g_count)
+      win_prof_sum = np.bincount(s_rows, weights=np.where(win_pos, profits, 0.0), minlength=g_count)
+      loss_prof_sum = np.bincount(s_rows, weights=np.where(loss_pos, -profits, 0.0), minlength=g_count)
+
+      with np.errstate(divide="ignore", invalid="ignore"):
+        win_rate_arr = np.where(tc_arr > 0, win_cnt / tc_arr, 0.0)
+        avg_win_arr = np.where(win_ret_cnt > 0, win_ret_sum / win_ret_cnt, 0.0)
+        avg_loss_arr = np.where(loss_ret_cnt > 0, loss_ret_sum / loss_ret_cnt, 0.0)
+        pf_arr = np.where(loss_prof_sum != 0.0, win_prof_sum / loss_prof_sum, 0.0)
 
   alpha_list = _clean_round4_list(alpha_arr)
   beta_list = _clean_round4_list(beta_arr)
@@ -849,20 +858,18 @@ def build_portfolio_report(
       bench_idx = 0
 
   if len(tradable_indices) > 0 and "bw_price" in dp.data and bars > w:
-    nav_series = []
-    for g in tradable_indices:
-      p = dp.slice("bw_price", g * bars)[w:]
-      valid_mask = ~np.isnan(p) & (p > 0)
-      if np.any(valid_mask):
-        first_idx = np.where(valid_mask)[0][0]
-        # Only include stocks already tradable near start to avoid survivor/IPO extreme skew
-        if first_idx <= max(5, int(0.1 * len(p))):
-          base_p = p[first_idx]
-          ratio = np.where(valid_mask, p / base_p, np.nan)
-          ratio = pl.Series(ratio).fill_null(strategy="forward").fill_null(1.0).to_numpy()
-          nav_series.append(ratio)
-    if len(nav_series) > 0:
-      portfolio_nav = np.nanmean(np.array(nav_series), axis=0)
+    bw_mat = dp.data["bw_price"].reshape(dp.groups, bars)[tradable_indices, w:]
+    valid_mask = (~np.isnan(bw_mat)) & (bw_mat > 0)
+    has_any = valid_mask.any(axis=1)
+    first_idx = np.argmax(valid_mask, axis=1)
+    # Only include stocks already tradable near start to avoid survivor/IPO extreme skew
+    keep = has_any & (first_idx <= max(5, int(0.1 * eff_bars)))
+    if np.any(keep):
+      kept_p = bw_mat[keep]
+      kept_v = valid_mask[keep]
+      base_p = kept_p[np.arange(kept_p.shape[0]), first_idx[keep]][:, None]
+      ratio = np.where(kept_v, kept_p / base_p, np.nan)
+      portfolio_nav = np.nanmean(ratio, axis=0)
       r.ror_original = np.round(portfolio_nav - 1.0, 4)
     else:
       r.ror_original = np.zeros(eff_bars, dtype=np.float64)

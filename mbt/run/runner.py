@@ -12,6 +12,7 @@ from mbt.account import (
   ACTION_SELL_NO_HOLD,
   ACTION_SELL_PERCENT,
   Account,
+  Fee,
   Operation,
   Position,
   Record,
@@ -45,9 +46,24 @@ class RunnerContext(Context):
   and refer data by `ctx.data_name`
   """
 
-  def __init__(self, account: Account):
-    self.accounts = [account.clone(g) for g in range(account.dp.groups)]
-    self.dp = account.dp
+  def __init__(self, account: Account | None, *, dp: Any = None):
+    if account is not None:
+      dp = account.dp
+      dates_i64 = dp.dates.astype("datetime64[s]").astype(np.int64) if len(dp.dates) > 0 else np.array([], dtype=np.int64)
+      dp.all("assets", create_if_not_exist=np.float64).fill(account.initial_cash)
+      dp.all("ror", create_if_not_exist=np.float64).fill(0.0)
+      dp.all("ror_hold", create_if_not_exist=np.float64).fill(0.0)
+      dp.all("actions", create_if_not_exist=np.int32).fill(ACTION_KEEP)
+      dp.all("action_shares", create_if_not_exist=np.float64).fill(0.0)
+      self.accounts = [
+        account.clone(g, _dates_i64=dates_i64, _skip_fill=True)
+        for g in range(dp.groups)
+      ]
+    else:
+      if dp is None:
+        raise ValueError("RunnerContext requires either account or dp")
+      self.accounts = []
+    self.dp = dp
     self._in_execute = False
     self._full_panel = None
     self._obj_to_group: dict[str, int] = (
@@ -191,42 +207,59 @@ class RunnerContext(Context):
       self.actions[active] = ACTION_SELL_PERCENT
       self.action_percents[active] = percent
 
-  def _get_account(self, obj: str | int | None = None) -> Account | None:
-    if not self.accounts:
+  def _resolve_group_idx(self, obj: str | int | None = None) -> int | None:
+    if self.dp.groups <= 0:
       return None
     if obj is None:
-      return self.accounts[0]
+      return 0
     if isinstance(obj, str):
       g = self._obj_to_group.get(obj)
       if g is not None:
-        return self.accounts[g]
+        return g
       raise ValueError(f"Symbol '{obj}' is not in context objs")
-    elif isinstance(obj, (int, np.integer)):
-      if 0 <= obj < len(self.accounts):
-        return self.accounts[int(obj)]
-      raise ValueError(f"Group index {obj} out of range [0, {len(self.accounts)})")
+    if isinstance(obj, (int, np.integer)):
+      if 0 <= obj < self.dp.groups:
+        return int(obj)
+      raise ValueError(f"Group index {obj} out of range [0, {self.dp.groups})")
     raise TypeError(f"Expected str, int, or None for obj, got {type(obj).__name__}")
+
+  def _get_account(self, obj: str | int | None = None) -> Account | None:
+    if not self.accounts:
+      return None
+    g = self._resolve_group_idx(obj)
+    return self.accounts[g] if g is not None else None
 
   def position(self, obj: str | int | None = None) -> 'Position':
     """Get the current Position object."""
-    acc = self._get_account(obj)
-    if acc is not None:
-      g = acc.group
-      if self._batch is not None:
-        cash, shares, raw_cost, raw_mark, adj_cost, dividends, h_bars = self._batch.state_of(g)
+    g = self._resolve_group_idx(obj)
+    if g is None:
+      return Position.zero()
+    if self._batch is not None:
+      cash, shares, raw_cost, raw_mark, adj_cost, dividends, h_bars = self._batch.state_of(g)
+      if self.accounts:
+        acc = self.accounts[g]
         acc.cash = cash
         acc._holding_bars = h_bars
-        acc.position = Position(
-          shares,
-          raw_cost,
-          raw_cost_price=raw_cost,
-          raw_mark_price=raw_mark,
-          dividends=dividends,
-          adj_cost_price=adj_cost,
-          holding_days=h_bars,
-        )
-      else:
-        acc.position.holding_days = acc.holding_days
+      pos = Position(
+        shares,
+        raw_cost,
+        raw_cost_price=raw_cost,
+        raw_mark_price=raw_mark,
+        dividends=dividends,
+        adj_cost_price=adj_cost,
+        holding_days=h_bars,
+      )
+      i = self.dp.i
+      if hasattr(self.dp, "data") and "price" in self.dp.data:
+        p = self.dp.all("price")[g * self.dp.bars + i]
+        if not np.isnan(p) and p > 0:
+          pos.raw_mark_price = float(p)
+      if self.accounts:
+        self.accounts[g].position = pos
+      return pos
+    acc = self._get_account(g)
+    if acc is not None:
+      acc.position.holding_days = acc.holding_days
       i = self.dp.i
       if hasattr(self.dp, "data") and "price" in self.dp.data:
         p = self.dp.all("price")[g * self.dp.bars + i]
@@ -238,14 +271,14 @@ class RunnerContext(Context):
   def holding_ror(self, obj: str | int | None = None) -> float:
     """Return holding rate of return as a decimal (e.g. -0.05 for -5%)."""
     if self._batch is not None:
-      acc = self._get_account(obj)
-      if acc is None:
+      g = self._resolve_group_idx(obj)
+      if g is None:
         return 0.0
       cur_bar = self.dp.i
       if self._batch_rors_bar != cur_bar:
         self._batch_rors = self._batch.holding_rors(cur_bar)
         self._batch_rors_bar = cur_bar
-      return float(self._batch_rors[acc.group])  # type: ignore[index]
+      return float(self._batch_rors[g])  # type: ignore[index]
     return self.position(obj).holding_ror
 
   def holding_pnl(self, obj: str | int | None = None) -> float:
@@ -266,14 +299,14 @@ class RunnerContext(Context):
   def holding_days(self, obj: str | int | None = None) -> int:
     """Return number of bars current position has been held."""
     if self._batch is not None:
-      acc = self._get_account(obj)
-      if acc is None:
+      g = self._resolve_group_idx(obj)
+      if g is None:
         return 0
       cur_bar = self.dp.i
       if self._batch_holding_bars_bar != cur_bar:
         self._batch_holding_bars = self._batch.holding_bars()
         self._batch_holding_bars_bar = cur_bar
-      return int(self._batch_holding_bars[acc.group])  # type: ignore[index]
+      return int(self._batch_holding_bars[g])  # type: ignore[index]
     acc = self._get_account(obj)
     return acc.holding_days if acc is not None else 0
 
@@ -332,8 +365,33 @@ class Runner:
     deducted_arr = snapshot["deducted"].tolist()
     holding_bars_arr = snapshot["holding_bars"].tolist()
 
+    n_acc = len(accounts)
+    if trades and len(trades.get("bar", ())) > 0:
+      t_groups = np.asarray(trades["group"], dtype=np.int64)
+      if t_groups.size <= 1 or bool(np.all(t_groups[:-1] <= t_groups[1:])):
+        sorted_groups = t_groups
+        sorted_trades = trades
+      else:
+        order = np.argsort(t_groups, kind="mergesort")
+        sorted_groups = t_groups[order]
+        sorted_trades = {k: np.asarray(v)[order] for k, v in trades.items()}
+      counts = np.bincount(sorted_groups, minlength=n_acc)
+      ends = np.cumsum(counts)
+      starts = ends - counts
+      starts_l = starts.tolist()
+      ends_l = ends.tolist()
+    else:
+      sorted_trades = None
+      starts_l = [0] * n_acc
+      ends_l = [0] * n_acc
+
     for g, acc in enumerate(accounts):
-      acc.records.clear()
+      acc._records = None if (sorted_trades is not None and ends_l[g] > starts_l[g]) else []
+      acc._raw_trades = (
+        (sorted_trades, starts_l[g], ends_l[g])
+        if (sorted_trades is not None and ends_l[g] > starts_l[g])
+        else None
+      )
       acc.cash = cash_arr[g]
       acc.deducted = deducted_arr[g]
       acc.per_assets = per_assets_arr[g]
@@ -347,36 +405,6 @@ class Runner:
         adj_cost_price=adj_cost_arr[g],
         holding_days=holding_bars_arr[g],
       )
-
-    if trades and len(trades.get("bar", ())) > 0:
-      t_groups = trades["group"].tolist()
-      t_bars = trades["bar"].tolist()
-      t_actions = trades["action"].tolist()
-      t_shares = trades["shares"].tolist()
-      t_prices = trades["deal_price"].tolist()
-      t_fees = trades["fee"].tolist()
-      t_cash = trades["cash_after"].tolist()
-      t_pos_sh = trades["pos_shares"].tolist()
-      t_cost = trades["raw_cost_price"].tolist()
-
-      for k in range(len(t_bars)):
-        g = t_groups[k]
-        acc = accounts[g]
-        act = t_actions[k]
-        sh = t_shares[k]
-        dp_val = t_prices[k]
-        if act == ACTION_BUY:
-          op = Operation.buy(Position(sh, dp_val))
-        elif act == ACTION_SELL:
-          op = Operation.sell(Position(sh, dp_val))
-        elif act == ACTION_BUY_NO_CASH:
-          op = Operation.buy_no_cash(Position(0.0, 0.0))
-        elif act == ACTION_SELL_NO_HOLD:
-          op = Operation.sell_no_hold(Position(0.0, 0.0))
-        else:
-          op = Operation(act, Position(sh, dp_val))
-        pos_snap = Position(t_pos_sh[k], t_cost[k])
-        acc.records.append(Record(t_bars[k], op, t_cash[k], 0.0, pos_snap, t_fees[k]))
 
   def run(self, strategy: Strategy):
     dp = self.ctx.dp
@@ -487,3 +515,182 @@ class Runner:
       if diag is not None:
         self.diagnostics = diag
         setattr(strategy, "diagnostics", diag)
+
+  @classmethod
+  def run_sweep(
+    cls,
+    dp: Any,
+    strategy_cls: Any,
+    param_grid: list[dict[str, Any]],
+    *,
+    initial_cash: float = 10_000_000.0,
+    fee: Fee | None = None,
+    unit: int = 100,
+    slippage: float = 0.0,
+    exec_mode: str | None = None,
+    check_limit: bool = True,
+    exclude_benchmark: bool = True,
+  ) -> list[dict[str, Any]]:
+    """Run a batch parameter sweep reusing a single MarketData and output buffer set.
+
+    Args:
+      dp: Preloaded DataProvider across all target objs and bars.
+      strategy_cls: Strategy class (or factory callable) accepting `**params`.
+      param_grid: List of keyword-argument dicts defining parameter combinations.
+      initial_cash: Starting cash per obj.
+      fee: Fee model (defaults to Fee.default() / zero Fee).
+      unit: Trading lot size.
+      slippage: Execution slippage fraction.
+      exec_mode: Execution mode ('close' or 'next_open'); defaults to strategy_cls.exec_mode.
+      check_limit: Whether to enforce daily limit-up/limit-down restrictions.
+      exclude_benchmark: If True and groups > 1, excludes group 0 from summary metrics.
+
+    Returns:
+      List of result dicts containing params, mean/median profit, positive_ratio,
+      mean_sharpe, mean_max_drawdown, total_trades, and optional diagnostics.
+    """
+    if dp.groups == 0 or dp.bars == 0 or not param_grid:
+      return []
+
+    eff_mode = exec_mode or getattr(strategy_cls, "exec_mode", "close")
+    if eff_mode not in ("close", "next_open"):
+      raise ValueError(f"unsupported exec_mode: {eff_mode}, expected 'close' or 'next_open'")
+
+    fee_obj = fee if fee is not None else Fee()
+    warmup_b = int(getattr(dp, "warmup_bars", 0))
+    market = MarketData.from_dict(
+      dp.data,
+      groups=dp.groups,
+      exec_mode=eff_mode,
+      check_limit=check_limit,
+    )
+    cfg = SimConfig(
+      initial_cash=float(initial_cash),
+      unit=int(unit),
+      slippage=float(slippage),
+      exec_mode=eff_mode,
+      warmup_bars=warmup_b,
+      start_bar=1,
+      check_limit=check_limit,
+      fees=fee_obj.config,
+    )
+    sim = Simulator(market, cfg)
+
+    total = dp.groups * dp.bars
+    out_assets = np.empty(total, dtype=np.float64)
+    out_ror = np.empty(total, dtype=np.float64)
+    out_ror_hold = np.empty(total, dtype=np.float64)
+    out_actions = np.empty(total, dtype=np.int32)
+    out_action_shares = np.empty(total, dtype=np.float64)
+
+    ctx = RunnerContext(None, dp=dp)
+    g_start = 1 if (exclude_benchmark and dp.groups > 1) else 0
+    slice_start = warmup_b if (warmup_b > 0 and dp.bars > warmup_b) else 0
+    eff_bars = dp.bars - slice_start
+
+    results: list[dict[str, Any]] = []
+    for params in param_grid:
+      strat = strategy_cls(**params)
+      dp.reset()
+      out_assets.fill(cfg.initial_cash)
+      out_ror.fill(0.0)
+      out_ror_hold.fill(0.0)
+      out_actions.fill(ACTION_KEEP)
+      out_action_shares.fill(0.0)
+      ctx.actions.fill(0)
+      ctx.action_percents.fill(0.0)
+      ctx.buy_percents.fill(0.0)
+      ctx.sell_percents.fill(0.0)
+
+      with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
+        strat.prepare(ctx)
+        sigs = strat.signals(ctx)
+      dp.reset()
+
+      if sigs is not None:
+        buy_sig, sell_sig = sigs
+        res = sim.run_into(
+          buy_sig,
+          sell_sig,
+          out_assets=out_assets,
+          out_ror=out_ror,
+          out_ror_hold=out_ror_hold,
+          out_actions=out_actions,
+          out_action_shares=out_action_shares,
+        )
+        trades_dict = res.trades
+      else:
+        batch = AccountBatch(market, cfg)
+        ctx._batch = batch
+        bar_ctx = al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=1)
+        ctx._in_execute = True
+        try:
+          with bar_ctx:
+            for i in dp:
+              bar_ctx.end = i + 1
+              bar_ctx.apply()
+              batch.apply_corporate_actions_bar(i)
+              strat.execute(ctx)
+              batch.step_bar(
+                i,
+                ctx.buy_percents,
+                ctx.sell_percents,
+                out_assets=out_assets,
+                out_ror=out_ror,
+                out_ror_hold=out_ror_hold,
+                out_actions=out_actions,
+                out_action_shares=out_action_shares,
+              )
+        finally:
+          ctx._in_execute = False
+          ctx._batch = None
+          ctx._batch_rors_bar = -1
+          ctx._batch_rors = None
+          ctx._batch_shares_bar = -1
+          ctx._batch_shares = None
+          ctx._batch_holding_bars_bar = -1
+          ctx._batch_holding_bars = None
+        trades_dict = batch.trades()
+
+      with al.Context(groups=dp.groups, flags=al.FLAG_SKIP_NAN, start=0, end=dp.bars):
+        diag = strat.finalize(ctx)
+
+      assets_2d = out_assets.reshape(dp.groups, dp.bars)[g_start:, slice_start:]
+      if eff_bars > 0:
+        if slice_start > 0:
+          base_a = np.where(assets_2d[:, 0] > 0.0, assets_2d[:, 0], cfg.initial_cash)
+          ror_2d = (assets_2d / base_a[:, None]) - 1.0
+        else:
+          ror_2d = out_ror.reshape(dp.groups, dp.bars)[g_start:, :]
+        profits = ror_2d[:, -1]
+        equity = 1.0 + ror_2d
+        peaks = np.maximum.accumulate(equity, axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+          mdd = np.min((equity - peaks) / peaks, axis=1)
+          if eff_bars >= 3:
+            daily = np.diff(equity, axis=1) / equity[:, :-1]
+            std = np.std(daily, axis=1, ddof=1)
+            sharpe = np.where(std != 0.0, np.mean(daily, axis=1) / std * np.sqrt(252.0), 0.0)
+          else:
+            sharpe = np.zeros(len(profits), dtype=np.float64)
+        mean_profit = float(np.nanmean(profits))
+        median_profit = float(np.nanmedian(profits))
+        positive_ratio = float(np.mean(profits > 0.0))
+        mean_sharpe = float(np.nanmean(sharpe))
+        mean_mdd = float(np.nanmean(mdd))
+      else:
+        mean_profit = median_profit = positive_ratio = mean_sharpe = mean_mdd = 0.0
+
+      n_trades = int(len(trades_dict.get("bar", ()))) if trades_dict else 0
+      results.append({
+        "params": dict(params),
+        "mean_profit": mean_profit,
+        "median_profit": median_profit,
+        "positive_ratio": positive_ratio,
+        "mean_sharpe": mean_sharpe,
+        "mean_max_drawdown": mean_mdd,
+        "total_trades": n_trades,
+        "diagnostics": diag,
+      })
+
+    return results

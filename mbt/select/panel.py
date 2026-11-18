@@ -290,53 +290,70 @@ class Panel:
     n_sym = self.n_objs
 
     # 重采样面板的时间轴取每个周期的最后一个交易日
-    timeline_arr = np.array([self.timeline()[e - 1] for e in ends])
+    tl = self.timeline()
+    timeline_arr = tl[ends - 1]
     new_cols: dict[str, pl.Series] = {
       "ts": pl.Series("ts", np.tile(timeline_arr, n_sym))
     }
 
     sum_cols = {"volume", "amount", "dividend", "transfer_shares", "right_shares"}
+    bars_len = len(truncated)
+    pos_2d = np.broadcast_to(np.arange(bars_len, dtype=np.int32), (n_sym, bars_len))
+    rows_idx = np.arange(n_sym)[:, None]
 
     for name in self.columns:
       if name == "ts":
         continue
-      col_series = self.frame.get_column(name)
-      dtype = col_series.dtype
-
+      dtype = self.frame.get_column(name).dtype
       arr_2d = self.column(name)
-      res_2d = np.empty((n_sym, m_bars), dtype=arr_2d.dtype)
       is_float = np.issubdtype(arr_2d.dtype, np.floating)
+      is_dt = np.issubdtype(arr_2d.dtype, np.datetime64)
 
-      for k, (s, e) in enumerate(zip(starts, ends)):
-        sub = arr_2d[:, s:e]
-        valid = ~np.isnan(sub) if is_float else np.ones(sub.shape, dtype=bool)
-        has_valid = valid.any(axis=1)
+      if is_float:
+        valid = ~np.isnan(arr_2d)
+        fill_val = arr_2d.dtype.type(np.nan)
+      elif is_dt:
+        valid = ~np.isnat(arr_2d)
+        unit, _ = np.datetime_data(arr_2d.dtype)
+        fill_val = np.datetime64("NaT", unit) if unit else np.array("NaT", dtype=arr_2d.dtype)[()]
+      else:
+        valid = None
+        fill_val = arr_2d.dtype.type(0)
 
-        if name in ("open", "raw_open"):
-          idx = np.where(has_valid, valid.argmax(axis=1), 0)
-          res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
-        elif name in ("close", "raw_close", "price"):
-          idx = (e - s) - 1 - np.where(has_valid, valid[:, ::-1].argmax(axis=1), 0)
-          res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
-        elif name in ("high", "raw_high"):
-          if is_float:
-            res_2d[:, k] = np.where(has_valid, np.nanmax(np.where(valid, sub, -np.inf), axis=1), np.nan)
-          else:
-            res_2d[:, k] = np.max(sub, axis=1)
-        elif name in ("low", "raw_low"):
-          if is_float:
-            res_2d[:, k] = np.where(has_valid, np.nanmin(np.where(valid, sub, np.inf), axis=1), np.nan)
-          else:
-            res_2d[:, k] = np.min(sub, axis=1)
-        elif name in sum_cols:
-          if is_float:
-            res_2d[:, k] = np.where(has_valid, np.nansum(sub, axis=1), 0.0)
-          else:
-            res_2d[:, k] = np.sum(sub, axis=1)
+      if name in ("open", "raw_open"):
+        if valid is None:
+          res_2d = arr_2d[:, starts]
         else:
-          # 其他列(如股本、财务状态等)默认继承该周期最后一个有效值
-          idx = (e - s) - 1 - np.where(has_valid, valid[:, ::-1].argmax(axis=1), 0)
-          res_2d[:, k] = np.where(has_valid, sub[np.arange(n_sym), idx], np.nan if is_float else 0)
+          first_idx = np.minimum.reduceat(np.where(valid, pos_2d, bars_len), starts, axis=1)
+          has_valid = first_idx < bars_len
+          safe_idx = np.minimum(first_idx, bars_len - 1)
+          res_2d = np.where(has_valid, arr_2d[rows_idx, safe_idx], fill_val)
+      elif name in ("high", "raw_high"):
+        if is_float:
+          clean = np.where(valid, arr_2d, -np.inf)
+          res_2d = np.maximum.reduceat(clean, starts, axis=1)
+          res_2d = np.where(np.isneginf(res_2d), np.nan, res_2d)
+        else:
+          res_2d = np.maximum.reduceat(arr_2d, starts, axis=1)
+      elif name in ("low", "raw_low"):
+        if is_float:
+          clean = np.where(valid, arr_2d, np.inf)
+          res_2d = np.minimum.reduceat(clean, starts, axis=1)
+          res_2d = np.where(np.isposinf(res_2d), np.nan, res_2d)
+        else:
+          res_2d = np.minimum.reduceat(arr_2d, starts, axis=1)
+      elif name in sum_cols:
+        clean = np.where(valid, arr_2d, 0.0) if is_float else arr_2d
+        res_2d = np.add.reduceat(clean, starts, axis=1)
+      else:
+        # close/raw_close/price 及股本/财报等状态列：取周期内最后一个有效值
+        if valid is None:
+          res_2d = arr_2d[:, ends - 1]
+        else:
+          last_idx = np.maximum.reduceat(np.where(valid, pos_2d, -1), starts, axis=1)
+          has_valid = last_idx >= 0
+          safe_idx = np.maximum(last_idx, 0)
+          res_2d = np.where(has_valid, arr_2d[rows_idx, safe_idx], fill_val)
 
       new_cols[name] = pl.Series(name, res_2d.ravel(), dtype=dtype)
 

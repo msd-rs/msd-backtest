@@ -32,7 +32,7 @@ from mbt.run import (
   build_multi_start_summary,
   RunRequest,
 )
-from mbt.run.msd import load_data
+from mbt.run.msd import load_data, find_date_index
 from mbt.select import MsdSelectorDataProvider
 from mbt.select.cli import load_selector, try_load_selector, parse_args as parse_kv_args
 from mbt.notify import load_notify_config, send_notifications
@@ -564,6 +564,71 @@ def echo_reports(reports: list[Report]):
   print(orjson.dumps(metrics_list, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY).decode())
 
 
+def _resolve_fin_config(req: RunRequest, fin_lookback_days: int | None) -> tuple[list[str] | None, bool, int | None]:
+  strat_fin = getattr(req, "fin_fields", None) or getattr(req.strategy, "fin_fields", None)
+  sel_fin = getattr(getattr(req, "selector", None), "fin_fields", None)
+  merged_fin: list[str] = []
+  for src in [strat_fin, sel_fin]:
+    if src:
+      fields = [f.strip() for f in src.split(",")] if isinstance(src, str) else list(src)
+      for f in fields:
+        if f not in merged_fin:
+          merged_fin.append(f)
+  fin_fields = merged_fin if merged_fin else None
+  fin_only_year = bool(
+    getattr(req, "fin_only_year", False)
+    or getattr(req.strategy, "fin_only_year", False)
+    or getattr(getattr(req, "selector", None), "fin_only_year", False)
+  )
+  if fin_lookback_days is None:
+    fin_lookback_days = getattr(req, "fin_lookback_days", None) or getattr(
+      req.strategy, "fin_lookback_days", None
+    )
+  return fin_fields, fin_only_year, fin_lookback_days
+
+
+def _execute_on_dp(
+  req: RunRequest,
+  dp: DataProvider,
+  fee: Fee,
+  exec_mode: str,
+  strategy: Any = None,
+) -> tuple[list[Report], DataProvider, Any]:
+  strat = strategy if strategy is not None else req.strategy
+  use_portfolio = getattr(req, "portfolio", False) or getattr(strat, "portfolio", False)
+  custom_cash = getattr(req, "cash", None)
+  bench_obj = getattr(req, "benchmark", None)
+
+  if use_portfolio:
+    init_cash = custom_cash if custom_cash is not None else 10000000.0
+    p_account = PortfolioAccount(init_cash, dp, fee=fee, benchmark=bench_obj)
+    logger.info(f"portfolio account created, initial_cash={init_cash}")
+    p_runner = PortfolioRunner(p_account, exec_mode=exec_mode)
+    logger.info(f"portfolio runner created, exec_mode={exec_mode}")
+    p_runner.run(strat)
+    logger.info("portfolio strategy finished")
+    diag = getattr(p_runner, "diagnostics", None) or getattr(strat, "diagnostics", None)
+    reports = build_portfolio_report(dp, p_account, diagnostics=diag)
+    return reports, dp, p_account
+
+  init_cash = custom_cash if custom_cash is not None else 10000000.0
+  account = Account(init_cash, dp, fee=fee)
+  logger.info(f"account created, initial_cash={init_cash}")
+  runner = Runner(account, exec_mode=exec_mode)
+  logger.info(f"runner created, exec_mode={exec_mode}")
+  runner.run(strat)
+  logger.info("strategy finished")
+  diag = getattr(runner, "diagnostics", None) or getattr(strat, "diagnostics", None)
+  all_reports = build_report(dp, runner.ctx.accounts, diagnostics=diag)
+  if bench_obj:
+    reports = [r for r in all_reports if r.obj != bench_obj]
+    if not reports:
+      reports = all_reports
+  else:
+    reports = all_reports[1:] if len(all_reports) > 1 else all_reports
+  return reports, dp, account
+
+
 def run_single_period(
   req: RunRequest,
   msd_host: str,
@@ -589,28 +654,7 @@ def run_single_period(
   Returns:
     tuple of (reports, data_provider, account).
   """
-  strat_fin = getattr(req, "fin_fields", None) or getattr(
-    req.strategy, "fin_fields", None
-  )
-  sel_fin = getattr(getattr(req, "selector", None), "fin_fields", None)
-  merged_fin: list[str] = []
-  for src in [strat_fin, sel_fin]:
-    if src:
-      fields = [f.strip() for f in src.split(",")] if isinstance(src, str) else list(src)
-      for f in fields:
-        if f not in merged_fin:
-          merged_fin.append(f)
-  fin_fields = merged_fin if merged_fin else None
-
-  fin_only_year = bool(
-    getattr(req, "fin_only_year", False)
-    or getattr(req.strategy, "fin_only_year", False)
-    or getattr(getattr(req, "selector", None), "fin_only_year", False)
-  )
-  if fin_lookback_days is None:
-    fin_lookback_days = getattr(req, "fin_lookback_days", None) or getattr(
-      req.strategy, "fin_lookback_days", None
-    )
+  fin_fields, fin_only_year, fin_lookback_days = _resolve_fin_config(req, fin_lookback_days)
 
   selected_objs = req.objs
   if getattr(req, "strategy_path", None) and getattr(req, "starts", None):
@@ -645,40 +689,7 @@ def run_single_period(
   logger.info(
     f"data loaded, objs: {len(objs)}, bars per obj: {dp.bars}, total_bars: {dp.groups * dp.bars}"
   )
-  use_portfolio = getattr(req, "portfolio", False) or getattr(
-    req.strategy, "portfolio", False
-  )
-  custom_cash = getattr(req, "cash", None)
-
-  bench_obj = getattr(req, "benchmark", None)
-  if use_portfolio:
-    init_cash = custom_cash if custom_cash is not None else 10000000.0
-    p_account = PortfolioAccount(init_cash, dp, fee=fee, benchmark=bench_obj)
-    logger.info(f"portfolio account created, initial_cash={init_cash}")
-    p_runner = PortfolioRunner(p_account, exec_mode=exec_mode)
-    logger.info(f"portfolio runner created, exec_mode={exec_mode}")
-    p_runner.run(req.strategy)
-    logger.info("portfolio strategy finished")
-    diag = getattr(p_runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
-    reports = build_portfolio_report(dp, p_account, diagnostics=diag)
-    return reports, dp, p_account
-  else:
-    init_cash = custom_cash if custom_cash is not None else 10000000.0
-    account = Account(init_cash, dp, fee=fee)
-    logger.info(f"account created, initial_cash={init_cash}")
-    runner = Runner(account, exec_mode=exec_mode)
-    logger.info(f"runner created, exec_mode={exec_mode}")
-    runner.run(req.strategy)
-    logger.info("strategy finished")
-    diag = getattr(runner, "diagnostics", None) or getattr(req.strategy, "diagnostics", None)
-    all_reports = build_report(dp, runner.ctx.accounts, diagnostics=diag)
-    if bench_obj:
-      reports = [r for r in all_reports if r.obj != bench_obj]
-      if not reports:
-        reports = all_reports
-    else:
-      reports = all_reports[1:] if len(all_reports) > 1 else all_reports
-    return reports, dp, account
+  return _execute_on_dp(req, dp, fee, exec_mode)
 
 
 def main():
@@ -695,25 +706,70 @@ def main():
   if starts and len(starts) > 1:
     logger.info(f"running multi-start backtest across {len(starts)} starts: {starts}")
     multi_runs = []
-    for st in starts:
-      logger.info(f"evaluating start: {st}")
-      reports, dp, acc = run_single_period(
-        req,
+    can_reuse = (
+      isinstance(getattr(req, "selector", None), StaticSelector)
+      and all(not str(s).lstrip("-").isdigit() for s in starts)
+    )
+    if can_reuse:
+      fin_fields, fin_only_year, fin_lookback = _resolve_fin_config(req, fin_lookback_days)
+      earliest_start = min(str(s)[:10] for s in starts)
+      master_dp, objs = load_data(
         msd_host,
-        fee,
-        st,
+        req.objs,
+        earliest_start,
         req.end,
+        fin_fields=fin_fields,
+        fin_only_year=fin_only_year,
         warmup_bars=warmup_bars,
-        exec_mode=exec_mode,
-        fin_lookback_days=fin_lookback_days,
+        fin_lookback_days=fin_lookback,
       )
-      if reports:
-        multi_runs.append({
-          "start": st,
-          "end": req.end,
-          "report": reports[0],
-          "objs": req.objs,
-        })
+      logger.info(
+        f"data loaded once for multi-start reuse, objs: {len(objs)}, bars per obj: {master_dp.bars}, total_bars: {master_dp.groups * master_dp.bars}"
+      )
+      first_dates = master_dp.dates[:master_dp.bars]
+      strat_path = getattr(req, "strategy_path", None)
+      for st in starts:
+        logger.info(f"evaluating start: {st}")
+        target_idx = find_date_index(first_dates, st)
+        slice_start = max(0, target_idx - warmup_bars)
+        eff_warmup = max(0, target_idx - slice_start)
+        if slice_start >= master_dp.bars:
+          raise ValueError(
+            f"Requested start '{st}' is after available dataset end '{str(first_dates[-1])[:10]}'."
+          )
+        dp_sub = master_dp.slice_time_window(slice_start, warmup_bars=eff_warmup)
+        if strat_path and strat_path.endswith(".py"):
+          strat_inst = RunRequest.load_strategy(strat_path, args=req.kv_kwargs)
+        else:
+          strat_inst = req.strategy
+        reports, _, _ = _execute_on_dp(req, dp_sub, fee, exec_mode, strategy=strat_inst)
+        if reports:
+          multi_runs.append({
+            "start": st,
+            "end": req.end,
+            "report": reports[0],
+            "objs": req.objs,
+          })
+    else:
+      for st in starts:
+        logger.info(f"evaluating start: {st}")
+        reports, dp, acc = run_single_period(
+          req,
+          msd_host,
+          fee,
+          st,
+          req.end,
+          warmup_bars=warmup_bars,
+          exec_mode=exec_mode,
+          fin_lookback_days=fin_lookback_days,
+        )
+        if reports:
+          multi_runs.append({
+            "start": st,
+            "end": req.end,
+            "report": reports[0],
+            "objs": req.objs,
+          })
 
     summary_md = build_multi_start_summary(multi_runs)
     if len(output) > 0:

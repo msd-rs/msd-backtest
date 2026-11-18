@@ -588,6 +588,8 @@ class Account:
     fee: Fee | None = None,
     unit: int = 100,
     slippage: float = 0.0,
+    _dates_i64: np.ndarray | None = None,
+    _skip_fill: bool = False,
   ):
     """
     Args:
@@ -617,8 +619,9 @@ class Account:
     self.per_assets = 0.0
     """deducted commission and other fees"""
     self.deducted = 0.0
-    """records of the account"""
-    self.records = []
+    """records of the account (materialized lazily when backed by Rust trades)"""
+    self._records: list[Record] | None = []
+    self._raw_trades: tuple[dict[str, np.ndarray], int, int] | None = None
     """fee calculator"""
     self.fee = fee if fee is not None else Fee()
     """slippage of the buy and sell operations"""
@@ -629,7 +632,10 @@ class Account:
     s = self.group * dp.bars
     e = s + dp.bars
     """dates of current group"""
-    self.dates = dp.dates[s:e].astype('datetime64[s]').astype(int)
+    if _dates_i64 is not None:
+      self.dates = _dates_i64[s:e]
+    else:
+      self.dates = dp.dates[s:e].astype('datetime64[s]').astype(int)
     """history of assets for current group"""
     self.assets = dp.all("assets", create_if_not_exist=np.float64)[s:e]
     """history of rate of return for current group"""
@@ -641,17 +647,75 @@ class Account:
     self.action_shares = dp.all("action_shares", create_if_not_exist=np.float64)[s:e]
 
     """corporate actions"""
-    self.dividends = dp.all("dividend")[s:e] if "dividend" in dp.data else np.zeros(dp.bars, dtype=np.float64)
-    self.transfer_shares = dp.all("transfer_shares")[s:e] if "transfer_shares" in dp.data else np.zeros(dp.bars, dtype=np.float64)
-    self.right_shares = dp.all("right_shares")[s:e] if "right_shares" in dp.data else np.zeros(dp.bars, dtype=np.float64)
-    self.right_prices = dp.all("right_price")[s:e] if "right_price" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+    if _skip_fill:
+      self.dividends = None  # type: ignore[assignment]
+      self.transfer_shares = None  # type: ignore[assignment]
+      self.right_shares = None  # type: ignore[assignment]
+      self.right_prices = None  # type: ignore[assignment]
+    else:
+      self.dividends = dp.all("dividend")[s:e] if "dividend" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+      self.transfer_shares = dp.all("transfer_shares")[s:e] if "transfer_shares" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+      self.right_shares = dp.all("right_shares")[s:e] if "right_shares" in dp.data else np.zeros(dp.bars, dtype=np.float64)
+      self.right_prices = dp.all("right_price")[s:e] if "right_price" in dp.data else np.zeros(dp.bars, dtype=np.float64)
 
-    self.assets.fill(initial_cash)
-    self.ror.fill(0.0)
-    self.actions.fill(ACTION_KEEP)
-    self.action_shares.fill(0.0)
+      self.assets.fill(initial_cash)
+      self.ror.fill(0.0)
+      self.actions.fill(ACTION_KEEP)
+      self.action_shares.fill(0.0)
 
-  def clone(self, group: int = 0) -> "Account":
+  @property
+  def records(self) -> list[Record]:
+    if self._records is None:
+      self._records = self._materialize_records()
+    return self._records
+
+  @records.setter
+  def records(self, val: list[Record]):
+    self._records = val
+    self._raw_trades = None
+
+  def _materialize_records(self) -> list[Record]:
+    raw_info = self._raw_trades
+    if raw_info is None:
+      return []
+    trades, start, end = raw_info
+    if end <= start:
+      return []
+    t_bars = trades["bar"][start:end].tolist()
+    t_actions = trades["action"][start:end].tolist()
+    t_shares = trades["shares"][start:end].tolist()
+    t_prices = trades["deal_price"][start:end].tolist()
+    t_fees = trades["fee"][start:end].tolist()
+    t_cash = trades["cash_after"][start:end].tolist()
+    t_pos_sh = trades["pos_shares"][start:end].tolist()
+    t_cost = trades["raw_cost_price"][start:end].tolist()
+
+    recs: list[Record] = []
+    for k in range(len(t_bars)):
+      act = t_actions[k]
+      sh = t_shares[k]
+      dp_val = t_prices[k]
+      if act == ACTION_BUY:
+        op = Operation.buy(Position(sh, dp_val))
+      elif act == ACTION_SELL:
+        op = Operation.sell(Position(sh, dp_val))
+      elif act == ACTION_BUY_NO_CASH:
+        op = Operation.buy_no_cash(Position(0.0, 0.0))
+      elif act == ACTION_SELL_NO_HOLD:
+        op = Operation.sell_no_hold(Position(0.0, 0.0))
+      else:
+        op = Operation(act, Position(sh, dp_val))
+      pos_snap = Position(t_pos_sh[k], t_cost[k])
+      recs.append(Record(t_bars[k], op, t_cash[k], 0.0, pos_snap, t_fees[k]))
+    return recs
+
+  def clone(
+    self,
+    group: int = 0,
+    *,
+    _dates_i64: np.ndarray | None = None,
+    _skip_fill: bool = False,
+  ) -> "Account":
     return Account(
       self.cash,
       self.dp,
@@ -659,6 +723,8 @@ class Account:
       fee=self.fee,
       unit=self.unit,
       slippage=self.slippage,
+      _dates_i64=_dates_i64,
+      _skip_fill=_skip_fill,
     )
 
   @property

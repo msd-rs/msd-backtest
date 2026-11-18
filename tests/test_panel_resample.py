@@ -112,3 +112,35 @@ def test_panel_resample_monthly_and_weekly():
   with pytest.raises(ValueError):
     panel.resample("invalid_freq_xyz")
 
+
+def test_panel_resample_with_datetime_report_ts():
+  """Verify resample handles datetime64 columns (like report_ts from fin_fields) with NaT safely."""
+  objs = ["SH600000", "SZ000001"]
+  dates = np.array(
+    ["2026-09-29", "2026-09-30", "2026-10-08", "2026-10-09"],
+    dtype="datetime64[us]",
+  )
+  rep_ts_0 = np.array(["2026-06-30", "2026-06-30", "2026-06-30", "2026-09-30"], dtype="datetime64[us]")
+  rep_ts_1 = np.array(["NaT", "NaT", "2026-06-30", "NaT"], dtype="datetime64[us]")
+  panel = Panel(
+    {
+      "ts": np.tile(dates, 2),
+      "open": np.array([10.0, 10.2, 10.5, 10.8, np.nan, np.nan, 20.0, 20.5]),
+      "high": np.array([10.5, 10.6, 11.0, 11.2, np.nan, np.nan, 21.0, 21.2]),
+      "low": np.array([9.8, 10.0, 10.2, 10.5, np.nan, np.nan, 19.8, 20.1]),
+      "close": np.array([10.2, 10.4, 10.8, 11.0, np.nan, np.nan, 20.5, 20.8]),
+      "volume": np.array([100.0, 150.0, 200.0, 250.0, 0.0, 0.0, 300.0, 400.0]),
+      "report_ts": np.concatenate([rep_ts_0, rep_ts_1]),
+    },
+    objs,
+    4,
+  )
+  m_panel = panel.resample("1M")
+  assert m_panel.bars == 2
+  rep_out = m_panel.column("report_ts")
+  assert rep_out[0, 0] == np.datetime64("2026-06-30", "us")
+  assert rep_out[0, 1] == np.datetime64("2026-09-30", "us")
+  assert np.isnat(rep_out[1, 0])
+  assert rep_out[1, 1] == np.datetime64("2026-06-30", "us")
+  assert np.isnan(m_panel.column("close")[1, 0])
+

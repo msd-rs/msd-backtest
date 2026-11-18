@@ -203,6 +203,9 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
     self.death_cross: np.ndarray | None = None
 
     # 运行期状态跟踪
+    self.offsets: np.ndarray | None = None
+    self.obj_to_idx: dict[str, int] = {}
+    self.universe_mask: np.ndarray | None = None
     self.peak_rors: np.ndarray | None = None
     self.last_rebalance_quarter: int | None = None
     self.rebalance_count: int = 0
@@ -225,16 +228,32 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
       self.ma_slow = al.MA(close, self.slow_period)
       self.ma_trend = al.MA(close, self.trend_period)
 
-      self.gold_cross = al.CROSS(self.ma_fast, self.ma_slow)
-      self.death_cross = al.RCROSS(self.ma_fast, self.ma_slow)
+      self.gold_cross = np.asarray(al.CROSS(self.ma_fast, self.ma_slow), dtype=bool)
+      self.death_cross = np.asarray(al.RCROSS(self.ma_fast, self.ma_slow), dtype=bool)
 
-    # 预分配各标的的最高收益率记录（用于移动止盈）
+    # 预分配截面偏移、白名单掩码与各标的最高收益率记录（用于移动止盈）
+    self.offsets = np.arange(n_objs, dtype=np.int64) * bars
+    self.obj_to_idx = {sym: i for i, sym in enumerate(ctx.objs())}
+    self.universe_mask = np.ones(n_objs, dtype=bool)
     self.peak_rors = np.full(n_objs, -np.inf, dtype=np.float64)
     self.last_rebalance_quarter = None
     self.rebalance_count = 0
+    self.exit_stats = {
+      "stop_loss": 0,
+      "trailing_stop": 0,
+      "trend_break": 0,
+      "universe_purge": 0,
+    }
 
   def execute(self, ctx: mbt.Context):
-    """逐日驱动执行：检查换血调度、管理白名单、基于真实收益率出场与右侧顺势进场."""
+    """逐日驱动执行：检查换血调度、管理白名单、截面向量化出场与右侧顺势进场."""
+    assert self.offsets is not None
+    assert self.universe_mask is not None
+    assert self.peak_rors is not None
+    assert self.ma_trend is not None
+    assert self.gold_cross is not None
+    assert self.death_cross is not None
+
     n_objs = ctx.n_objs
     current_bar = ctx.bar
     current_date_str = ctx.date
@@ -264,78 +283,88 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
       # 1. 在当前无未来函数的历史切片上重新执行 Selector 选股
       picked = ctx.run_selector(self.selector, lastN=100)
 
-      # 2. 将选出的最新优质标的设置为当前组合买入白名单
+      # 2. 将选出的最新优质标的设置为当前组合买入白名单，并同步更新向量化掩码
       ctx.set_universe(picked)
+      u_mask = np.zeros(n_objs, dtype=bool)
+      for sym in picked:
+        g = self.obj_to_idx.get(sym)
+        if g is not None:
+          u_mask[g] = True
+      self.universe_mask = u_mask
       self.rebalance_count += 1
       logger.info(
         f"[{current_date_str}] 触发成分股换血: 候选池 {n_objs} 只中选出优质标的 {len(picked)} 只更新为 Universe 白名单"
       )
 
-      # 3. 淘汰标的处置：若开启 purge_outdated，持仓中不在新白名单内的标的立即平仓腾挪资金
-      if self.purge_outdated and ctx.universe is not None:
-        for i in range(n_objs):
-          sym = ctx.objs()[i]
-          if ctx.position(i).shares > 0 and sym not in ctx.universe:
-            ctx.sell(i, percent=1.0)
-            self.exit_stats["universe_purge"] += 1
-            self.peak_rors[i] = -np.inf
-
     # =========================================================================
-    # 标的交易与风控流
+    # 标的交易与风控流（截面向量化读取持仓与掩码提交）
     # =========================================================================
-    # 统计当前实际持仓数量
-    holding_count = sum(1 for i in range(n_objs) if ctx.position(i).shares > 0)
+    shares = ctx.holding_shares()
+    rors = np.nan_to_num(ctx.holding_rors(), nan=0.0)
+    held = shares > 0.0
+    self.peak_rors[~held] = -np.inf
 
-    for i in range(n_objs):
-      sym = ctx.objs()[i]
-      pos = ctx.position(i)
+    # 3. 淘汰标的处置：若开启 purge_outdated，持仓中不在新白名单内的标的立即平仓腾挪资金
+    purge_mask = np.zeros(n_objs, dtype=bool)
+    if need_rebalance and self.purge_outdated and ctx.universe is not None:
+      purge_mask = held & ~self.universe_mask
+      n_purge = int(np.count_nonzero(purge_mask))
+      if n_purge > 0:
+        ctx.sell(purge_mask, percent=1.0)
+        self.exit_stats["universe_purge"] += n_purge
+        self.peak_rors[purge_mask] = -np.inf
 
-      flat_idx = i * ctx.bars + current_bar
-      close_price = ctx.close[flat_idx]
-      trend_price = self.ma_trend[flat_idx]
-      is_gold = bool(self.gold_cross[flat_idx])
-      is_death = bool(self.death_cross[flat_idx])
+    idx = self.offsets + current_bar
+    close_prices = ctx.close[idx]
+    trend_prices = self.ma_trend[idx]
+    is_gold = self.gold_cross[idx]
+    is_death = self.death_cross[idx]
 
-      if pos.is_holding:
-        # 【核心规范】：使用 pos.ror (或 ctx.holding_ror(i)) 获取企业行动除权闭环后的真实收益率
-        ror = pos.ror
-        self.peak_rors[i] = max(self.peak_rors[i], ror)
+    manageable = held & ~purge_mask
+    exit_mask = np.zeros(n_objs, dtype=bool)
+    if np.any(manageable):
+      # 【核心规范】：使用 holding_rors() 获取企业行动除权闭环后的真实收益率
+      self.peak_rors[manageable] = np.maximum(self.peak_rors[manageable], rors[manageable])
 
-        # 规则 A：硬止损保护
-        if ror <= -self.stop_loss_pct:
-          ctx.sell(i, percent=1.0)
-          self.exit_stats["stop_loss"] += 1
-          self.peak_rors[i] = -np.inf
-          holding_count -= 1
-          continue
+      # 规则 A：硬止损保护
+      stop_mask = manageable & (rors <= -self.stop_loss_pct)
 
-        # 规则 B：移动止盈锁定胜果 (盈利达到门槛后，从高点回撤触发)
-        if self.peak_rors[i] >= self.trailing_trigger and (self.peak_rors[i] - ror) >= self.trailing_stop_pct:
-          ctx.sell(i, percent=1.0)
-          self.exit_stats["trailing_stop"] += 1
-          self.peak_rors[i] = -np.inf
-          holding_count -= 1
-          continue
+      # 规则 B：移动止盈锁定胜果 (盈利达到门槛后，从高点回撤触发)
+      trail_mask = (
+        manageable
+        & ~stop_mask
+        & (self.peak_rors >= self.trailing_trigger)
+        & ((self.peak_rors - rors) >= self.trailing_stop_pct)
+      )
 
-        # 规则 C：趋势走弱或均线死叉防守离场
-        if is_death or (close_price < trend_price):
-          ctx.sell(i, percent=1.0)
-          self.exit_stats["trend_break"] += 1
-          self.peak_rors[i] = -np.inf
-          holding_count -= 1
-          continue
+      # 规则 C：趋势走弱或均线死叉防守离场
+      trend_mask = (
+        manageable
+        & ~stop_mask
+        & ~trail_mask
+        & (is_death | (close_prices < trend_prices))
+      )
 
-      else:
-        # 重置未持仓标的的浮盈记录
-        self.peak_rors[i] = -np.inf
+      exit_mask = stop_mask | trail_mask | trend_mask
+      if np.any(exit_mask):
+        ctx.sell(exit_mask, percent=1.0)
+        self.peak_rors[exit_mask] = -np.inf
+        self.exit_stats["stop_loss"] += int(np.count_nonzero(stop_mask))
+        self.exit_stats["trailing_stop"] += int(np.count_nonzero(trail_mask))
+        self.exit_stats["trend_break"] += int(np.count_nonzero(trend_mask))
 
-        # 规则 D：右侧顺势买入
-        # 注意：白名单保护已在底层生效，此处也可显式验证标的是否在 universe 中
-        in_universe = ctx.universe is None or sym in ctx.universe
-        if in_universe and holding_count < self.max_positions:
-          if is_gold and (close_price > trend_price):
-            ctx.buy(i, percent=target_pos_weight)
-            holding_count += 1
+    # 规则 D：右侧顺势买入（白名单保护 + 剩余槽位截断）
+    holding_count = int(np.count_nonzero(held & ~purge_mask & ~exit_mask))
+    avail_slots = self.max_positions - holding_count
+    if avail_slots > 0:
+      u_allow = self.universe_mask if ctx.universe is not None else True
+      entry_candidates = np.flatnonzero(
+        (~held) & u_allow & is_gold & (close_prices > trend_prices)
+      )
+      if entry_candidates.size > 0:
+        buy_mask = np.zeros(n_objs, dtype=bool)
+        buy_mask[entry_candidates[:avail_slots]] = True
+        ctx.buy(buy_mask, percent=target_pos_weight)
 
   def finalize(self, ctx: mbt.Context) -> dict:
     """输出语义诊断统计信息，沉淀于回测报告中."""

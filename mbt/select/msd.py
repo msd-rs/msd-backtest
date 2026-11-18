@@ -101,9 +101,15 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
       if "ts" not in fin_query_cols:
         fin_query_cols.insert(0, "ts")
       fin_sql = f"SELECT {','.join(fin_query_cols)} FROM stock_financial WHERE obj in ({where_}) {date_where} {ts_year_where} LIMIT -{n};"
+      n_loaded = len(loaded)
+      data_2d: dict[str, np.ndarray] = {}
       for col in fin_fields:
-        data[col] = np.full(len(loaded) * bars, np.nan, dtype=np.float64)
-      data["report_ts"] = np.full(len(loaded) * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+        arr = np.full(n_loaded * bars, np.nan, dtype=np.float64)
+        data[col] = arr
+        data_2d[col] = arr.reshape(n_loaded, bars)
+      rep_all = np.full(n_loaded * bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
+      data["report_ts"] = rep_all
+      rep_2d = rep_all.reshape(n_loaded, bars)
 
       try:
         res = self._client.query_concat(fin_sql)
@@ -113,36 +119,44 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
           if len(d_fin.get("ts", [])) > 0:
             rep_ts_raw = d_fin["ts"]
             ann_ts_raw = to_statutory_disclosure_date(pl.Series("report_ts", rep_ts_raw)).to_numpy()
-            range_map = {r[0]: (r[1], r[2]) for r in ranges}
-            for g, obj in enumerate(loaded):
-              if obj not in range_map:
-                continue
-              st, end_idx = range_map[obj]
-              if st >= end_idx:
-                continue
-              obj_ann_ts = ann_ts_raw[st:end_idx]
-              if len(obj_ann_ts) == 0:
-                continue
-              obj_rep_ts = rep_ts_raw[st:end_idx]
-              kline_slice = slice(g * bars, (g + 1) * bars)
-              kline_ts = data["ts"][kline_slice]
+            kline_i64 = np.asarray(data["ts"][:bars], dtype="datetime64[us]").astype(np.int64)
+            ann_i64 = np.asarray(ann_ts_raw, dtype="datetime64[us]").astype(np.int64)
+            start_bars_all = np.searchsorted(kline_i64, ann_i64, side="left")
+            obj_to_g = {obj: g for g, obj in enumerate(loaded)}
+            avail_cols = [col for col in fin_fields if col in d_fin]
+            col_arrays = {col: np.asarray(d_fin[col]) for col in avail_cols}
 
-              idx = np.searchsorted(obj_ann_ts, kline_ts, side="right") - 1
-              valid = idx >= 0
-              safe_idx = np.maximum(idx, 0)
+            for obj_sym, st, end_idx in ranges:
+              g = obj_to_g.get(obj_sym)
+              if g is None or st >= end_idx:
+                continue
+              b_arr = start_bars_all[st:end_idx]
+              if len(b_arr) > 1 and bool(np.any(b_arr[:-1] > b_arr[1:])):
+                order = np.argsort(ann_i64[st:end_idx], kind="mergesort")
+                b_arr = b_arr[order]
+                rep_slice = rep_ts_raw[st:end_idx][order]
+                col_slices = {col: col_arrays[col][st:end_idx][order] for col in avail_cols}
+                off_base = 0
+              else:
+                rep_slice = rep_ts_raw
+                col_slices = col_arrays
+                off_base = st
 
-              for col in fin_fields:
-                if col in d_fin:
-                  val = d_fin[col][st:end_idx]
-                  if len(val) == 0:
-                    continue
-                  col_arr = np.full(bars, np.nan, dtype=np.float64)
-                  col_arr[valid] = val[safe_idx[valid]]
-                  data[col][kline_slice] = col_arr
-
-              rep_arr = np.full(bars, np.datetime64("NaT", "us"), dtype="datetime64[us]")
-              rep_arr[valid] = obj_rep_ts[safe_idx[valid]]
-              data["report_ts"][kline_slice] = rep_arr
+              m_rep = len(b_arr)
+              b_list = b_arr.tolist()
+              for k in range(m_rep):
+                s_bar = b_list[k]
+                if s_bar >= bars:
+                  break
+                e_bar = b_list[k + 1] if (k + 1 < m_rep) else bars
+                if e_bar > bars:
+                  e_bar = bars
+                if e_bar <= s_bar:
+                  continue
+                idx_k = off_base + k
+                rep_2d[g, s_bar:e_bar] = rep_slice[idx_k]
+                for col in avail_cols:
+                  data_2d[col][g, s_bar:e_bar] = col_slices[col][idx_k]
       except Exception as e:
         logger.error(f"failed to query and align stock_financial in load_kline: {e}", exc_info=True)
         raise

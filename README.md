@@ -103,13 +103,15 @@ npx skills add msd-rs/msd-backtest
 推荐使用现代 Python 包管理器 `uv`（要求 Python 3.12+）：
 
 ```bash
-# 克隆仓库
+# use uv
 uv add "msd-backtest[cli]"
+# or use pip
+pip install "msd-backtest[cli]"
 ```
 
 ### 2. 环境配置
 
-在项目根目录下创建或编辑 `.env` 文件，配置 MSD 数据库地址与费率规则：
+在项目根目录下创建或编辑 `.env` 文件，配置 MSD 数据库地址：
 
 ```env
 # MSD 服务端地址（必须）
@@ -118,8 +120,8 @@ MSD_HOST=http://localhost:50510
 # 基准指数代码（可选，默认为上证指数 SH000001）
 MSD_BT_BENCHMARK=SH000001
 
-# 手续费配置文件（可选，未指定时默认使用 etc/fee.json 标准印花税与佣金）
-# MSD_BT_FEE=etc/fee.json
+# 手续费配置文件（可选，未指定时默认使用如 etc/fee.json 标准印花税与佣金）
+MSD_BT_FEE=etc/fee.json
 ```
 
 ---

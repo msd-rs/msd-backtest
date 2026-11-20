@@ -21,6 +21,8 @@ from .portfolio import (
   SelectorStrategy,
 )
 from . import strategy_templates
+from . import factor
+from .factor import Factor, ExpressionFactor
 
 
 __all__ = [
@@ -32,6 +34,8 @@ __all__ = [
   "Account",
   "Context",
   "DataProvider",
+  "ExpressionFactor",
+  "Factor",
   "Fee",
   "MsdSelectorDataProvider",
   "Operation",
@@ -47,5 +51,6 @@ __all__ = [
   "SelectorStrategy",
   "StaticSelector",
   "Strategy",
+  "factor",
   "strategy_templates",
 ]

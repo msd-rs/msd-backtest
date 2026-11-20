@@ -23,14 +23,16 @@ Strategy Framework: msd-backtest
 
 The `msd-backtest` import name is `mbt`, it's well documented. After python env setup, use `[uv run] python -m pydoc mbt` to read it.
 
-There are 3 kinds of Strategy
+There are 4 kinds of Strategy / Research artifacts
 
+- Factor: Used to research, validate, and compare cross-sectional alpha factors (IC/RankIC, quantile returns, turnover, neutrality, causality checks) via Python `Factor` classes or `alpha.lang` expressions before deploying into a portfolio strategy.
 - Selector: Used to build cross-sectional stock selection
 - Trading: Use to build time series trading signals strategy, each stock has it's fund account, such strategies are often used to evaluate performance on a per-stock basis.
 - Portfolio: Use to build  time series trading signals strategy, but share a portfolio account, such strategies are usually paired with a stock-selection strategy for portfolio rebalancing, and then the overall performance is evaluated.
 
 So, first, please choose what will be build, then reading the relevant documentation to proceed with the build.
 
+- [How to build and evaluate a factor](./references/factor.md)
 - [How to build a selector](./references/selector.md)
 - [How to build a trading strategy](./references/trading.md)
 - [How to build a portfolio trading strategy](./references/portfolio.md)

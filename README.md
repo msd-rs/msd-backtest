@@ -1,6 +1,6 @@
 # 简介 
 
-`msd-backtest` 是一个基于 Python 的, Agent First 的高性能、向量化量化投研与回测框架。框架深度融合 [MSD (Market Strategy Data)](.agents/skills/msd-strategy-guide/references/msd.md) 数据服务与 [py-alpha-lib](.agents/skills/msd-strategy-guide/references/algo.md) 并行算法库，全面支持**横截面选股（Selector）**、**单标的独立交易策略（Trading Strategy）**以及**多标的多资产组合配置与动态调仓策略（Portfolio Strategy）**。
+`msd-backtest` 是一个基于 Python 的, Agent First 的高性能、向量化量化投研与回测框架。框架深度融合 [MSD (Market Strategy Data)](.agents/skills/msd-strategy-guide/references/msd.md) 数据服务与 [py-alpha-lib](.agents/skills/msd-strategy-guide/references/algo.md) 并行算法库，全面支持**因子研究与评估（Factor）**、**横截面选股（Selector）**、**单标的独立交易策略（Trading Strategy）**以及**多标的多资产组合配置与动态调仓策略（Portfolio Strategy）**。
 
 
 ## 实测性能
@@ -51,6 +51,10 @@ npx skills add msd-rs/msd-backtest
   # 查看选股器与数据提供者（包含矩阵布局契约与字段语义）
   uv run python -m pydoc mbt.select.SelectorDataProvider
   uv run python -m pydoc mbt.select.Panel
+
+  # 查看因子评估子系统与表达式算子契约
+  uv run python -m pydoc mbt.factor
+  uv run python -m mbt.factor --list-ops
   ```
 - **启动本地 Web 文档服务器：**
   ```bash
@@ -64,7 +68,8 @@ npx skills add msd-rs/msd-backtest
 
 ## 🌟 核心特性
 
-- **三位一体的策略架构**：
+- **四位一体的量化投研架构**：
+  - **因子评估（`mbt.factor` / `mbt.Factor` / `mbt.ExpressionFactor`）**：支持 Python 向量化因子类与 `alpha.lang` 公式表达式（WorldQuant BRAIN 规范 + WQ101/GTJA191 方言兼容），内置动态因果性探针（防未来函数）、MAD/行业市值中性化、IC/RankIC（Newey-West t 检验）、Tranche 分层净值、样本外验证与中文高 DPI 全景报告图。
   - **选股策略（`mbt.Selector`）**：多阶段漏斗式选股（`stepXX`），基于 `Panel` 二维矩阵与 Polars 进行高效率横截面因子筛选，无缝对齐财务指标与快照数据。
   - **交易策略（`mbt.Strategy`）**：单标的独立账户机制，用于细粒度验证个股时间序列上的择时信号与买卖点逻辑。
   - **组合策略（`mbt.PortfolioStrategy`）**：多标的共享单一现金池（`PortfolioAccount`），内置权重调仓（`ctx.rebalance`）、两阶段撮合（先卖后买）、交易限额、停牌与涨跌停约束。
@@ -330,6 +335,25 @@ uv run python -m mbt.run.cli strategy/my_strategy.py -s SH600000 -b 2023-01-01 -
 
 
 
+### 运行因子评估 (`mbt.factor` / `mbt.factor.cli`)
+
+```bash
+# 1. 查看规范表达式算子、WQ101/GTJA191 方言别名与数据字段
+uv run python -m mbt.factor --list-ops
+
+# 2. 评估 Python 因子文件（支持多因子族、行业市值中性化、样本外 Holdout 与中文全景图）
+uv run python -m mbt.factor strategy/demo_factor.py \
+  -s A_STOCKS_EXCLUDE_ST -b 2022-01-01 -e 2025-12-31 \
+  --winsorize mad --neutralize industry,mktcap --holdout 2025-01-01 \
+  -S --overview factor_overview.png -o factor_report.json
+
+# 3. 直接评估内联因子表达式（支持重复传入 -E 自动输出排行榜与相关性矩阵）
+uv run python -m mbt.factor \
+  -E 'bp=f003 / raw_close' \
+  -E 'wq7=((adv20 < volume) ? ((-1 * ts_rank(abs(delta(close, 7)), 60)) * sign(delta(close, 7))) : -1)' \
+  -s A_STOCKS_EXCLUDE_ST -b 2023-01-01 -e 2025-12-31 -S
+```
+
 ---
 
 ## 📂 项目结构
@@ -341,6 +365,16 @@ uv run python -m mbt.run.cli strategy/my_strategy.py -s SH600000 -b 2023-01-01 -
 │   ├── portfolio.py         # 共享资金组合账户、调仓撮合与多资产上下文
 │   ├── strategy.py          # 策略基类（Strategy, PortfolioStrategy）与 Context
 │   ├── data_provider.py     # 数据源抽象接口
+│   ├── factor/              # 因子评估子系统
+│   │   ├── factor.py        # Factor 基类、AST 检查与动态因果性探针
+│   │   ├── expr.py          # alpha.lang 表达式编译、ExpressionFactor 与 PanelExecContext
+│   │   ├── returns.py       # 前瞻总收益与停牌/涨跌停可交易性掩码
+│   │   ├── preprocess.py    # 截面去极值、标准化与行业/市值中性化
+│   │   ├── metrics.py       # IC/RankIC、Tranche 分层收益、换手衰减、Holdout 与相关性矩阵
+│   │   ├── evaluator.py     # 因子评估编排引擎（evaluate_panel / evaluate_factor）
+│   │   ├── report.py        # Markdown / JSON / CSV / XLSX 报告导出
+│   │   ├── overview.py      # 中文高 DPI 因子评估全景图渲染器
+│   │   └── cli.py           # 因子评估命令行工具
 │   ├── select/              # 选股器模块
 │   │   ├── selector.py      # Selector 基类与静态选股器
 │   │   ├── panel.py         # 2D Panel 矩阵视图与向量化算子计算

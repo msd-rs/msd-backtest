@@ -147,6 +147,7 @@ _BLOCK_TREE_CACHE: dict[str, list[str]] | None = None
 _BLOCK_CATEGORIES_INDEX: dict[str, set[str]] | None = None
 _BLOCK_TO_STOCKS_CACHE: dict[str, list[str]] = {}
 _STOCK_TO_BLOCKS_CACHE: dict[str, list[str]] = {}
+_CATEGORY_STOCK_MAP_CACHE: dict[str, dict[str, str]] = {}
 
 
 def _load_block_tree(refresh: bool = False) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
@@ -358,6 +359,61 @@ def get_stock_by_industries(
     per_block_stocks.append(_BLOCK_TO_STOCKS_CACHE[ind])
 
   return _intersect_lists(per_block_stocks)
+
+
+def get_stock_industry_map(
+  objs: Sequence[str] | None = None,
+  *,
+  category: str = "申万行业",
+  refresh: bool = False,
+) -> dict[str, str]:
+  """Batch-resolve stock -> industry/block mapping for a given block category.
+
+  Unlike ``get_industry_by_stocks`` (which issues one MSD query per stock), this
+  function queries the constituent list of each block under ``category`` (e.g.
+  ~31 queries for Shenwan L1 industries instead of ~5,000 per-stock queries) and
+  caches the inverted map in memory.
+
+  Args:
+    objs: Optional sequence of stock codes to filter the returned mapping. When
+      ``None``, returns the complete mapping for every stock in ``category``.
+    category: Top-level block category in ``__block_tree__`` (default ``"申万行业"``).
+    refresh: If ``True``, bypass caches and re-query MSD.
+
+  Returns:
+    Dictionary mapping stock code to its block name within ``category``. Stocks
+    absent from the category are omitted from the returned dictionary.
+
+  Raises:
+    ValueError: If ``category`` is empty or not found in ``__block_tree__``.
+    RuntimeError: If MSD block tree cannot be loaded.
+  """
+  if not isinstance(category, str) or not category.strip():
+    raise ValueError("category must be a non-empty string")
+  cat = category.strip()
+
+  if refresh or cat not in _CATEGORY_STOCK_MAP_CACHE:
+    tree, _ = _load_block_tree(refresh=refresh)
+    if cat not in tree:
+      raise ValueError(
+        f"Unknown block category {cat!r}. Available categories: {list(tree.keys())}"
+      )
+    full_map: dict[str, str] = {}
+    for block_name in tree[cat]:
+      if refresh or block_name not in _BLOCK_TO_STOCKS_CACHE:
+        members = _query_stock_block(block_name)
+        if members is None:
+          continue
+        _BLOCK_TO_STOCKS_CACHE[block_name] = members
+      for sym in _BLOCK_TO_STOCKS_CACHE[block_name]:
+        if sym not in full_map:
+          full_map[sym] = block_name
+    _CATEGORY_STOCK_MAP_CACHE[cat] = full_map
+
+  cached = _CATEGORY_STOCK_MAP_CACHE[cat]
+  if objs is None:
+    return dict(cached)
+  return {sym: cached[sym] for sym in objs if sym in cached}
 
 
 _LAZY_VARS = ("ALL_STOCKS", "A_STOCKS", "A_STOCKS_EXCLUDE_ST", "FOUNDS")

@@ -91,6 +91,14 @@
     - `panel.py`：2D 矩阵视图 `Panel` 与向量化算子计算
     - `msd.py`：选股端 MSD 行情与快照接入
     - `cli.py`：选股命令行工具 (`uv run python -m mbt.select.cli`)
+  - `factor/`：因子评估子系统（Agent-First 单因子/多因子检验与表达式引擎）
+    - `factor.py`：因子基类 `Factor`、动态加载、AST 反模式检查与动态因果性探针
+    - `expr.py`：基于 `alpha.lang` 的 `ExpressionFactor`、`PanelExecContext`（WorldQuant BRAIN 规范 + WQ101/GTJA191 方言兼容）与依赖自动推断
+    - `returns.py`：前瞻总收益与 A 股可交易性掩码（停牌/涨停/次新过滤，`next_open`/`open_close`/`close`）
+    - `preprocess.py`：截面去极值（MAD/Sigma/分位）、标准化与 FWL 行业/市值中性化
+    - `metrics.py` & `evaluator.py`：IC/RankIC（含 Newey-West t 值）、Tranche 分层收益、单调性、换手半衰期、分年度/Holdout/分行业与相关性矩阵
+    - `report.py` & `overview.py`：Markdown/JSON/CSV/XLSX 报告导出与中文高 DPI 因子全景图
+    - `cli.py`：因子评估命令行工具 (`uv run python -m mbt.factor` / `mbt.factor.cli`)
   - `run/`：回测与交易执行子系统
     - `runner.py`：单标的回测推进核心
     - `cli.py`：回测命令行工具 (`uv run python -m mbt.run.cli`)
@@ -138,12 +146,25 @@ uv run python -m mbt.run.cli mbt/strategy_templates/cta_momentum.py -s SH600000 
 uv run python -m mbt.select.cli strategy/my_selector.py -d 2024-05-10 -f
 ```
 
-### 3. API 与 Pydoc 查阅
+### 3. 运行因子评估 (`mbt.factor` / `mbt.factor.cli`)
+```bash
+# 查看规范表达式算子、WQ101/GTJA191 方言别名与可用字段
+uv run python -m mbt.factor --list-ops
+
+# 运行 Python Factor 类（支持多因子族、去极值、行业市值中性化、Holdout 与中文全景图）
+uv run python -m mbt.factor strategy/demo_factor.py -s A_STOCKS_EXCLUDE_ST -b 2022-01-01 -e 2025-12-31 --winsorize mad --neutralize industry,mktcap --holdout 2025-01-01 -S --overview factor_overview.png
+
+# 直接评估内联因子表达式 (-E 可重复传入多个表达式横向对比，自动推断 fin_fields 与 warmup_bars)
+uv run python -m mbt.factor -E 'bp=f003 / raw_close' -E 'wq7=((adv20 < volume) ? ((-1 * ts_rank(abs(delta(close, 7)), 60)) * sign(delta(close, 7))) : -1)' -s A_STOCKS_EXCLUDE_ST -b 2023-01-01 -e 2025-12-31 -S
+```
+
+### 4. API 与 Pydoc 查阅
 ```bash
 # 查看模块或类的详细机读契约
 uv run python -m pydoc mbt
 uv run python -m pydoc mbt.Context
 uv run python -m pydoc mbt.select.Panel
+uv run python -m pydoc mbt.factor
 
 # 启动本地可视化文档服务
 uv run python -m pydoc -p 8080

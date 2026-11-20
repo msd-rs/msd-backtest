@@ -14,6 +14,7 @@ from .stocks import (
   get_limit_ratio,
   get_industry_by_stocks,
   get_stock_by_industries,
+  get_stock_industry_map,
 )
 from .financial import to_statutory_disclosure_date
 
@@ -35,6 +36,7 @@ __all__ = [
   'get_limit_ratio',
   'get_industry_by_stocks',
   'get_stock_by_industries',
+  'get_stock_industry_map',
   'to_statutory_disclosure_date',
 ]
 

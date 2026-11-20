@@ -28,10 +28,14 @@ npx skills add msd-rs/msd-backtest
 
 然后, 告知它你的想要的策略逻辑即可. 如果你的 LLM 支持识图, 你甚至可以将贴给它, *复刻你平常看到的策略时最方便*
 
+---
+
+> **以下内容仅供人类参考阅读, AI Agent 可以通过上述的 Skill 完成所有工作. 包括数据环境搭建和策略编写**
+
+---
 
 # Hand Write 的说明
 
----
 
 ## 📖 极佳的代码自解释性与 Pydoc 支持
 
@@ -100,14 +104,7 @@ npx skills add msd-rs/msd-backtest
 
 ```bash
 # 克隆仓库
-git clone https://github.com/msd-rs/msd-backtest.git
-cd msd-backtest
-
-# 安装核心及 CLI 依赖
-uv sync --with cli
-
-# 若需启动远程回测服务器（可选）
-uv sync --with server
+uv add "msd-backtest[cli]"
 ```
 
 ### 2. 环境配置

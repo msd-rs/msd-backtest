@@ -71,6 +71,7 @@
   - 运行命令：`uv run <command>`
   - 启动 Python：使用 `uv run python` 或 `uv python`，不要直接使用裸 `python`。
 - **语言规范**：Python 3.12+，代码缩进采用 **2 个空格**。
+- **语法查错**：使用 `pyrefly check` 来做 Lint 检查, 确保无 WARN 和 ERROR.
 - **测试框架**：统一使用 `pytest`，测试代码置于 `tests/` 目录下，运行测试：`uv run pytest`。
 - **算法与数据处理**：核心因子基于 `py-alpha-lib` 向量化算子库，结合 `NumPy` 和 `Polars` 进行高效计算。
 - **数据库服务**：MSD 数据库服务默认地址为 `http://localhost:50510`。

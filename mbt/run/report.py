@@ -3,6 +3,7 @@
 
 import datetime
 import dataclasses
+from typing import Any
 from mbt import Account
 from mbt import DataProvider
 import polars as pl
@@ -92,6 +93,13 @@ class Report:
   diagnostics: dict | None = None
   benchmark_ror: np.ndarray | None = None
   benchmark_obj: str = ""
+  trades: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+  attribution: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+  account: Any = dataclasses.field(default=None, repr=False)
+  records: list[Any] = dataclasses.field(default_factory=list, repr=False)
+  dp: Any = dataclasses.field(default=None, repr=False)
+  pool_size: int = 0
+  traded_objs_count: int = 0
   
 
   def __init__(self, obj: str, dp: DataProvider , account: Account ):

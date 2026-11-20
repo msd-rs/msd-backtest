@@ -31,6 +31,13 @@ def test_get_limit_ratio_empty():
   assert ratios.dtype == np.float64
 
 
+def test_get_limit_ratio_single_stock_returns_ndarray():
+  ratios = get_limit_ratio(["SH600000"], repeat=1)
+  assert isinstance(ratios, np.ndarray)
+  assert ratios.shape == (1,)
+  np.testing.assert_allclose(ratios, np.array([0.1]))
+
+
 class _FakeTable:
   def __init__(self, rows: list[tuple[str, str]]):
     self._rows = rows

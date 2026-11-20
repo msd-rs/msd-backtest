@@ -1,8 +1,11 @@
 # Copyright 2026 MSD-RS Project LiJia
 # SPDX-License-Identifier: BSD-2-Clause
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import logging
+
+if TYPE_CHECKING:
+  from mbt.select.panel import Panel
 from mbt.account import (
   ACTION_BUY,
   ACTION_BUY_NO_CASH,
@@ -124,7 +127,7 @@ class RunnerContext(Context):
   def n_objs(self) -> int:
     return self.dp.groups
 
-  def slice_panel(self, lastN: int = 100):
+  def slice_panel(self, lastN: int = 100) -> "Panel":
     """Return a Panel sliced up to current bar (inclusive, no lookahead)."""
     if self._full_panel is None:
       self._full_panel = self.dp.to_panel()
@@ -133,7 +136,7 @@ class RunnerContext(Context):
     start_bar = end_bar - n_bars
     return self._full_panel.slice(start_bar, end_bar)
 
-  def panel(self, allow_future: bool = False, sliced: bool | None = None):
+  def panel(self, allow_future: bool = False, sliced: bool | None = None) -> "Panel":
     """Return a Panel view of the data provider.
 
     During strategy execute(), defaults to returning a strictly sliced Panel

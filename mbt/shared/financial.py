@@ -14,8 +14,8 @@ def to_statutory_disclosure_date(ts_series: pl.Series) -> pl.Series:
   - Annual / Q4 (month == 12): (year+1)-04-30
   - Non-standard: end of month (28th fallback)
   """
-  y = ts_series.dt.year()
-  m = ts_series.dt.month()
+  y = pl.col("report_ts").dt.year()
+  m = pl.col("report_ts").dt.month()
   df = pl.DataFrame({"report_ts": ts_series})
   ann = df.select(
     pl.when(m == 3).then(

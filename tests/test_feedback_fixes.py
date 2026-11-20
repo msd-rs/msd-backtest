@@ -241,3 +241,77 @@ def test_load_financial_sql_date_where_only_year():
   assert "ts.month = 12" in sql3
   assert "limit -2" in sql3
 
+
+def test_load_data_int_start_with_fin_fields(monkeypatch):
+  """Verify load_data handles integer start (limit -N) with fin_fields without UnboundLocalError."""
+  class FakeConnection:
+    def __init__(self, host):
+      pass
+
+    def query_join(self, sql, primary, modes, baseline):
+      mock_table = MagicMock()
+      mock_table.to_list.return_value = [
+        ("ts", np.array([20240101])),
+        ("close", np.array([10.0])),
+        ("open", np.array([10.0])),
+        ("high", np.array([10.0])),
+        ("low", np.array([10.0])),
+        ("price", np.array([10.0])),
+        ("volume", np.array([1000.0])),
+        ("amount", np.array([10000.0])),
+      ]
+      mock_table.rows = 1
+      return mock_table, ["SH600000"], 1
+
+    def query_concat(self, sql):
+      return {}
+
+  monkeypatch.setattr("pymsd.MsdConnection", FakeConnection)
+  monkeypatch.setattr("mbt.run.msd.get_limit_ratio", lambda objs, repeat: np.full(len(objs) * repeat, 0.1))
+
+  dp, objs = load_data(
+    "http://localhost:50510",
+    ["SH600000"],
+    start=10,  # type: ignore[arg-type]
+    end="2024-12-31",
+    fin_fields=["f001"],
+  )
+  assert objs == ["SH600000"]
+  assert dp.bars == 1
+
+
+def test_portfolio_context_optional_obj_fail_fast():
+  """Verify PortfolioContext accepts obj=None for 1-obj pools and fails fast for multi-obj pools."""
+  from mbt.portfolio import PortfolioContext
+
+  dp1 = DataProvider(
+    {
+      "ts": np.array([20240101, 20240102]),
+      "open": np.array([10.0, 10.5]),
+      "close": np.array([10.0, 10.5]),
+      "price": np.array([10.0, 10.5]),
+      "bw_price": np.array([10.0, 10.5]),
+    },
+    objs=["SH600000"],
+  )
+  ctx1 = PortfolioContext(PortfolioAccount(100000.0, dp1))
+  assert ctx1.holding_ror() == 0.0
+  assert ctx1.holding_pnl() == 0.0
+  assert ctx1.cost_price() == 0.0
+  assert ctx1.holding_days() == 0
+  assert ctx1.position().shares == 0.0
+
+  dp2 = DataProvider(
+    {
+      "ts": np.array([20240101, 20240102, 20240101, 20240102]),
+      "open": np.array([10.0, 10.5, 20.0, 20.5]),
+      "close": np.array([10.0, 10.5, 20.0, 20.5]),
+      "price": np.array([10.0, 10.5, 20.0, 20.5]),
+      "bw_price": np.array([10.0, 10.5, 20.0, 20.5]),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+  ctx2 = PortfolioContext(PortfolioAccount(100000.0, dp2))
+  with pytest.raises(ValueError, match="requires 'obj'"):
+    ctx2.holding_ror()
+

@@ -1,8 +1,15 @@
 # Copyright 2026 MSD-RS Project LiJia
 # SPDX-License-Identifier: BSD-2-Clause
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Callable
 from mbt.account import Operation, Position
 import numpy as np
+
+if TYPE_CHECKING:
+  from mbt.select.panel import Panel
+  from mbt.select.selector import Selector
 
 
 class Context:
@@ -97,7 +104,7 @@ class Context:
     """total number of stocks/groups in the context"""
     return 0
 
-  def panel(self, allow_future: bool = False, sliced: bool | None = None):
+  def panel(self, allow_future: bool = False, sliced: bool | None = None) -> Panel:
     """Return a Panel view of the underlying data provider.
 
     During strategy execute(), defaults to returning a strictly sliced Panel
@@ -106,10 +113,27 @@ class Context:
     """
     pass
 
-  def slice_panel(self, lastN: int = 100):
+  def slice_panel(self, lastN: int = 100) -> Panel:
     """
     return a Panel sliced up to the current bar (no lookahead)
     """
+    pass
+
+  def set_universe(self, objs: list[str] | set[str] | None):
+    """Set the active universe whitelist for buying (used in PortfolioStrategy)."""
+    pass
+
+  @property
+  def universe_objs(self) -> list[str]:
+    """List of objs in the active universe whitelist, or all objs if universe is not set."""
+    return self.objs()
+
+  def run_selector(
+    self,
+    selector: Selector | Callable[[Panel], list[str]],
+    lastN: int = 100,
+  ) -> list[str]:
+    """Execute a Selector on historical data up to current bar without lookahead."""
     pass
 
   def buy(self, flags: np.ndarray, percent: float = 1.0):

@@ -60,7 +60,7 @@ class MultiFactorRotationStrategy(mbt.PortfolioStrategy):
 
   portfolio: bool = True
   exec_mode: str = "next_open"
-  fin_fields: list[str] = ["f003", "f205"]
+  fin_fields: list[str] | None = ["f003", "f205"]
   warmup_bars: int = 60
 
   def __init__(
@@ -115,6 +115,7 @@ class MultiFactorRotationStrategy(mbt.PortfolioStrategy):
     base_indices = np.arange(n_objs) * ctx.bars + current_bar
 
     # 因子 1: 动量因子 (前复权价格变化率)
+    assert self.roc60 is not None
     mom_vals = self.roc60[base_indices]
 
     # 因子 2: 估值因子 BP (账面市值比 = 每股净资产 f003 / 真实未复权价格 raw_close)

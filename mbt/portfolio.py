@@ -60,10 +60,10 @@ class _EnginePositionProxy:
   def __len__(self) -> int:
     return self._acc.groups
 
-  def __getitem__(self, idx: int) -> Position:
+  def __getitem__(self, idx: int | np.integer | slice) -> Position:
     if isinstance(idx, slice):
       return [self[i] for i in range(*idx.indices(self._acc.groups))]  # type: ignore[return-value]
-    return self._acc.position(idx, current_bar=self._acc.dp.i)
+    return self._acc.position(int(idx), current_bar=self._acc.dp.i)
 
   def __iter__(self):
     eng = self._acc._engine
@@ -588,8 +588,8 @@ class PortfolioAccount:
     fee_item = self.fee.get(self.dates[ts])
     fee = fee_item.sell(sell_pos.value)
     self.cash += sell_pos.value - fee
-    self.positions[g] = pos - sell_pos
-    if self.positions[g].shares <= 0:
+    self._positions[g] = pos - sell_pos
+    if self._positions[g].shares <= 0:
       self.entry_bars[g] = -1
       self._held_groups.discard(g)
     self.deducted += fee
@@ -612,7 +612,7 @@ class PortfolioAccount:
         amount=float(sell_pos.value),
         fee=float(fee),
         cash=float(self.cash),
-        pos_shares=float(self.positions[g].shares),
+        pos_shares=float(self._positions[g].shares),
       )
     )
 
@@ -641,11 +641,11 @@ class PortfolioAccount:
         adj_cost = exec_price * (fw_p / raw_p)
     buy_pos._adj_cost_price = float(adj_cost)
 
-    if self.positions[g].shares <= 0:
+    if self._positions[g].shares <= 0:
       self.entry_bars[g] = ts
 
     self.cash -= buy_pos.value + fee
-    self.positions[g] = self.positions[g] + buy_pos
+    self._positions[g] = self._positions[g] + buy_pos
     self._held_groups.add(g)
     self.deducted += fee
     j = g * self.bars + ts
@@ -667,7 +667,7 @@ class PortfolioAccount:
         amount=float(buy_pos.value),
         fee=float(fee),
         cash=float(self.cash),
-        pos_shares=float(self.positions[g].shares),
+        pos_shares=float(self._positions[g].shares),
       )
     )
 
@@ -754,7 +754,7 @@ class PortfolioAccount:
     cur = self.bars if current_bar is None else current_bar
     return max(0, cur - int(self.entry_bars[g]))
 
-  def _resolve_group_idx(self, obj: str | int) -> int:
+  def _resolve_group_idx(self, obj: str | int | np.integer) -> int:
     if isinstance(obj, str):
       g = self._obj_to_group.get(obj)
       if g is not None and 0 <= g < self.groups:
@@ -877,7 +877,7 @@ class PortfolioAccount:
     if total_deficit > 0 and self.cash > 0:
       scale = min(1.0, self.cash / total_deficit)
       for g, deficit, dp_g in buy_deficits:
-        self._buy_group(g, ts, deficit * scale, dp_g)
+        self._buy_group(int(g), ts, deficit * scale, dp_g)
 
     self.update_mark_to_market(ts, mark_prices)
 
@@ -1169,22 +1169,32 @@ class PortfolioContext(Context):
       return self.dp.all(name, obj=obj)
     raise ValueError(f"data '{name}' not found")
 
-  def position(self, obj: str | int) -> Position:
+  def _require_obj(self, obj: str | int | None) -> str | int:
+    if obj is not None:
+      return obj
+    if self.dp.groups == 1:
+      return 0
+    raise ValueError(
+      "PortfolioContext requires 'obj' (symbol or group index) when multiple objs exist."
+    )
+
+  def position(self, obj: str | int | None = None) -> Position:
     """Get the current Position object for an obj or group index."""
-    return self.account.position(obj, current_bar=self.dp.i)
+    return self.account.position(self._require_obj(obj), current_bar=self.dp.i)
 
-  def holding_ror(self, obj: str | int) -> float:
+  def holding_ror(self, obj: str | int | None = None) -> float:
     """Return current holding rate of return for obj/group as a float (e.g. -0.05 for -5%)."""
+    target = self._require_obj(obj)
     if self.account._engine is not None:
-      g = self.account._resolve_group_idx(obj)
+      g = self.account._resolve_group_idx(target)
       return float(self.holding_rors()[g])
-    return self.account.holding_ror(obj)
+    return self.account.holding_ror(target)
 
-  def holding_pnl(self, obj: str | int) -> float:
+  def holding_pnl(self, obj: str | int | None = None) -> float:
     """Return current holding profit/loss amount for obj/group."""
-    return self.account.holding_pnl(obj)
+    return self.account.holding_pnl(self._require_obj(obj))
 
-  def cost_price(self, obj: str | int, adjusted: bool = False) -> float:
+  def cost_price(self, obj: str | int | None = None, adjusted: bool = False) -> float:
     """Return acquisition cost price.
 
     Args:
@@ -1192,11 +1202,11 @@ class PortfolioContext(Context):
       adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
         safe to compare with `ctx.close`. If False, returns raw execution cost price.
     """
-    return self.account.cost_price(obj, adjusted=adjusted)
+    return self.account.cost_price(self._require_obj(obj), adjusted=adjusted)
 
-  def holding_days(self, obj: str | int) -> int:
+  def holding_days(self, obj: str | int | None = None) -> int:
     """Return number of bars since position was first acquired."""
-    return self.account.holding_days(obj, current_bar=self.dp.i)
+    return self.account.holding_days(self._require_obj(obj), current_bar=self.dp.i)
 
   def holding_shares(self) -> np.ndarray:
     """Return 1D float64 array of currently held shares across all objs."""

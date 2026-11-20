@@ -377,7 +377,9 @@ class TimingResultView(ttk.Frame):
 
   def _on_row_selected(self, row: dict[str, Any]) -> None:
     obj = row.get("obj")
-    rep = self._reports_by_obj.get(obj)
+    if obj is None:
+      return
+    rep = self._reports_by_obj.get(str(obj))
     if rep is not None:
       self._show_obj_curve(rep)
 
@@ -444,9 +446,10 @@ class PortfolioResultView(ttk.Frame):
       f"耗时: {elapsed:.2f}s"
     )
 
+    ror_data = res.get("ror")
     self._chart.set_series(
       dates=res.get("dates") or [],
-      ror=res.get("ror"),
+      ror=ror_data if ror_data is not None else [],
       ror_original=res.get("ror_original"),
       benchmark_ror=res.get("benchmark_ror"),
       title=f"{name} 组合净值收益率",

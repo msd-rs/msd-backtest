@@ -129,11 +129,13 @@ def where_clause(objs: list[str], col: str = 'obj') -> str:
   return sql
 
 
-def get_limit_ratio(objs: list[str], repeat: int = 1) -> np.ndarray | float:
+def get_limit_ratio(objs: list[str], repeat: int = 1) -> np.ndarray:
   _ensure_stocks_loaded()
   if len(objs) == 1 and repeat <= 1:
     # fast path
-    return ALL_STOCKS.filter(pl.col("obj") == objs[0]).get_column("limit_ratio").item()
+    arr = ALL_STOCKS.filter(pl.col("obj") == objs[0]).get_column("limit_ratio").to_numpy()
+    if len(arr) == 1:
+      return arr
   df = pl.DataFrame({"obj": objs}, schema={"obj": pl.String})
   if repeat <= 1:
     return df.join(ALL_STOCKS, on="obj", how="left").get_column("limit_ratio").to_numpy()
@@ -385,10 +387,10 @@ if __name__ == "__main__":
   _ensure_stocks_loaded()
   #df = load_stocks_from_db()
   #print(df)
-  print(ALL_STOCKS)
-  print(len(A_STOCKS))
-  print(len(FOUNDS))
-  print(len(A_STOCKS_EXCLUDE_ST))
+  print(ALL_STOCKS)  # type: ignore[unbound-name]
+  print(len(A_STOCKS))  # type: ignore[unbound-name]
+  print(len(FOUNDS))  # type: ignore[unbound-name]
+  print(len(A_STOCKS_EXCLUDE_ST))  # type: ignore[unbound-name]
 
   r1 = get_limit_ratio(["SH600000", "SZ300750", "SZ300477"])  
   r2 = get_limit_ratio(["SH600000", "SZ300750", "SZ300477"], repeat=2)
@@ -397,5 +399,5 @@ if __name__ == "__main__":
   print(r2) # should be [0.1, 0.1, 0.2, 0.2, 0.05, 0.05]
 
   with open("a.txt", "w") as fp:
-    for obj in A_STOCKS_EXCLUDE_ST:
+    for obj in A_STOCKS_EXCLUDE_ST:  # type: ignore[unbound-name]
       fp.write(f"{obj}\n")

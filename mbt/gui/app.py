@@ -644,7 +644,7 @@ class MbtGuiApp:
         finished = True
         done_payload = payload
 
-    if not finished:
+    if not finished or done_payload is None:
       elapsed = time.perf_counter() - self._run_start_ts
       self._status_var.set(f"运行中... ({elapsed:.1f}s)")
       self.root.after(80, self._poll_worker)

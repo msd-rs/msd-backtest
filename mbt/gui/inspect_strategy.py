@@ -241,7 +241,9 @@ def _inspect_via_ast(abs_path: str, source: str) -> StrategyMetadata | None:
     default_mode = RUN_MODE_SELECT
 
   mod_doc = ast.get_docstring(tree) or ""
-  cls_doc = ast.get_docstring(strategy_node or selector_node) or ""
+  target_node = strategy_node if strategy_node is not None else selector_node
+  assert target_node is not None
+  cls_doc = ast.get_docstring(target_node) or ""
   doc = mod_doc or cls_doc
   first_line = doc.splitlines()[0].strip() if doc else ""
 

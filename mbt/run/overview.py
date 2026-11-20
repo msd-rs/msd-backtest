@@ -760,9 +760,9 @@ def render_strategy_overview(
   # 3. Unified 3-Panel Chart Card (Equity + Drawdown + Holding Count)
   _draw_card(fig, (0.035, 0.036, 0.930, 0.542), rounding=0.014, zorder=0)
 
-  ax_eq = fig.add_axes([0.135, 0.358, 0.795, 0.190], facecolor=PALETTE["card"], zorder=3)
-  ax_dd = fig.add_axes([0.135, 0.222, 0.795, 0.108], sharex=ax_eq, facecolor=PALETTE["card"], zorder=3)
-  ax_pos = fig.add_axes([0.135, 0.080, 0.795, 0.112], sharex=ax_eq, facecolor=PALETTE["card"], zorder=3)
+  ax_eq = fig.add_axes((0.135, 0.358, 0.795, 0.190), facecolor=PALETTE["card"], zorder=3)
+  ax_dd = fig.add_axes((0.135, 0.222, 0.795, 0.108), sharex=ax_eq, facecolor=PALETTE["card"], zorder=3)
+  ax_pos = fig.add_axes((0.135, 0.080, 0.795, 0.112), sharex=ax_eq, facecolor=PALETTE["card"], zorder=3)
 
   dates, _ = _parse_dates(report.date) if n_bars > 0 else ([], [])
   strat_pct = np.asarray(report.ror, dtype=np.float64) * 100.0
@@ -771,14 +771,14 @@ def render_strategy_overview(
 
   if n_bars > 0:
     ax_eq.axhline(0.0, color=PALETTE["border"], linewidth=1.0, linestyle="--", zorder=1)
-    ax_eq.plot(dates, bench_pct, color=PALETTE["benchmark"], linewidth=1.6, linestyle="--", label=f"基准 ({meta.benchmark_label})", zorder=2)
-    ax_eq.plot(dates, strat_pct, color=PALETTE["strategy"], linewidth=2.3, label="策略累计收益", zorder=4)
-    ax_eq.fill_between(dates, 0.0, strat_pct, color=PALETTE["strategy_fill"], alpha=0.35, zorder=2)
+    ax_eq.plot(dates, bench_pct, color=PALETTE["benchmark"], linewidth=1.6, linestyle="--", label=f"基准 ({meta.benchmark_label})", zorder=2)  # type: ignore[bad-argument-type]
+    ax_eq.plot(dates, strat_pct, color=PALETTE["strategy"], linewidth=2.3, label="策略累计收益", zorder=4)  # type: ignore[bad-argument-type]
+    ax_eq.fill_between(dates, 0.0, strat_pct, color=PALETTE["strategy_fill"], alpha=0.35, zorder=2)  # type: ignore[bad-argument-type]
 
     if rebal_events:
       ev_dates = [dates[ev.bar_idx] for ev in rebal_events]
       ev_vals = [strat_pct[ev.bar_idx] for ev in rebal_events]
-      ax_eq.scatter(ev_dates, ev_vals, s=24, color=PALETTE["rebal"], edgecolor="#FFFFFF", linewidth=1.0, zorder=5, label="调仓节点")
+      ax_eq.scatter(ev_dates, ev_vals, s=24, color=PALETTE["rebal"], edgecolor="#FFFFFF", linewidth=1.0, zorder=5, label="调仓节点")  # type: ignore[bad-argument-type]
 
     # End-of-line annotations
     ax_eq.annotate(
@@ -801,10 +801,10 @@ def render_strategy_overview(
     equity = 1.0 + np.asarray(report.ror, dtype=np.float64)
     peaks = np.maximum.accumulate(equity)
     dd_pct = ((equity - peaks) / np.where(peaks > 0, peaks, 1.0)) * 100.0
-    ax_dd.plot(dates, dd_pct, color=PALETTE["drawdown"], linewidth=1.3, zorder=3)
-    ax_dd.fill_between(dates, dd_pct, 0.0, color=PALETTE["drawdown_fill"], alpha=0.42, zorder=2)
+    ax_dd.plot(dates, dd_pct, color=PALETTE["drawdown"], linewidth=1.3, zorder=3)  # type: ignore[bad-argument-type]
+    ax_dd.fill_between(dates, dd_pct, 0.0, color=PALETTE["drawdown_fill"], alpha=0.42, zorder=2)  # type: ignore[bad-argument-type]
     min_dd_idx = int(np.argmin(dd_pct))
-    ax_dd.scatter([dates[min_dd_idx]], [dd_pct[min_dd_idx]], s=24, color=PALETTE["up"], zorder=4)
+    ax_dd.scatter([dates[min_dd_idx]], [dd_pct[min_dd_idx]], s=24, color=PALETTE["up"], zorder=4)  # type: ignore[bad-argument-type]
     dd_on_right = min_dd_idx > int(0.72 * n_bars)
     ax_dd.annotate(
       f"最大回撤 {dd_pct[min_dd_idx]:.2f}%",
@@ -819,8 +819,8 @@ def render_strategy_overview(
     )
 
     # Holding Count Step Curve
-    ax_pos.step(dates, holding_counts, where="post", color="#7C3AED", linewidth=1.7, zorder=3)
-    ax_pos.fill_between(dates, holding_counts, 0, step="post", color="#EDE9FE", alpha=0.70, zorder=2)
+    ax_pos.step(dates, holding_counts, where="post", color="#7C3AED", linewidth=1.7, zorder=3)  # type: ignore[bad-argument-type]
+    ax_pos.fill_between(dates, holding_counts, 0, step="post", color="#EDE9FE", alpha=0.70, zorder=2)  # type: ignore[bad-argument-type]
     max_pos = int(np.max(holding_counts)) if len(holding_counts) > 0 else 0
     ax_pos.set_ylim(0, max(1, int(max_pos * 1.25) + 1))
 

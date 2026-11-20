@@ -56,11 +56,11 @@ def find_date_index(
 
   if isinstance(first, datetime.datetime):
     dt = datetime.datetime.fromisoformat(target_str)
-    return int(np.searchsorted(dates, dt))
+    return int(np.searchsorted(dates, dt))  # type: ignore[no-matching-overload]
 
   if isinstance(first, datetime.date):
     d = datetime.date.fromisoformat(target_str)
-    return int(np.searchsorted(dates, d))
+    return int(np.searchsorted(dates, d))  # type: ignore[no-matching-overload]
 
   v0 = float(first)
   dt = datetime.datetime.fromisoformat(target_str).replace(tzinfo=datetime.timezone.utc)
@@ -158,6 +158,12 @@ def load_data(
   shares_ts_where = []
   limit = ""
   fin_limit = ""
+  fin_lookback = (
+    max(1, int(fin_lookback_days))
+    if fin_lookback_days is not None
+    else (1200 if fin_only_year else 500)
+  )
+  fin_start: str | None = None
   if isinstance(start, int):
     limit = f"limit -{start}"
     fin_limit = f"limit -{max(start // 50, 8)}"
@@ -172,12 +178,6 @@ def load_data(
       shares_start = str(query_start)
     shares_ts_where.append(f"ts >= '{shares_start}'")
 
-    if fin_lookback_days is not None:
-      fin_lookback = max(1, int(fin_lookback_days))
-    else:
-      # Default: 1200 days (~3.3 years) for annual reports to ensure 3-4 annual periods are covered;
-      # 500 days (~1.4 years) for quarterly reports.
-      fin_lookback = 1200 if fin_only_year else 500
     try:
       fin_start = (
         datetime.date.fromisoformat(str(query_start)[:10]) - datetime.timedelta(days=fin_lookback)
@@ -208,6 +208,7 @@ def load_data(
   where_ = objs_where(objs)
 
   # Check financial fields requested
+  fin_cols = ""
   fin_requested = fin_fields is not None and (
     isinstance(fin_fields, str) or len(fin_fields) > 0
   )
@@ -217,7 +218,7 @@ def load_data(
       fin_cols = "*"
     else:
       fin_cols = db_fields(fin_fields)
-    if query_start:
+    if fin_start is not None:
       logger.info(
         f"financial query lookback: {fin_lookback} days (fin_start={fin_start}, fin_only_year={fin_only_year})"
       )

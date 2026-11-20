@@ -120,10 +120,8 @@ class Panel:
 
   def column(self, name: str) -> np.ndarray:
     """(n_objs, bars) 二维视图; 与底层连续数组或视图共享内存 (零拷贝)"""
-    if self._views is not None and name in self._views:
+    if name in self._views:
       return self._views[name]
-    if self._views is None:
-      self._views = {}
     col_2d = self.frame.get_column(name).to_numpy().reshape(self.n_objs, self.bars)
     self._views[name] = col_2d
     return col_2d
@@ -315,7 +313,11 @@ class Panel:
       elif is_dt:
         valid = ~np.isnat(arr_2d)
         unit, _ = np.datetime_data(arr_2d.dtype)
-        fill_val = np.datetime64("NaT", unit) if unit else np.array("NaT", dtype=arr_2d.dtype)[()]
+        fill_val = (
+          np.datetime64("NaT", unit)  # type: ignore[no-matching-overload]
+          if unit
+          else np.array("NaT", dtype=arr_2d.dtype)[()]
+        )
       else:
         valid = None
         fill_val = arr_2d.dtype.type(0)
@@ -329,21 +331,21 @@ class Panel:
           safe_idx = np.minimum(first_idx, bars_len - 1)
           res_2d = np.where(has_valid, arr_2d[rows_idx, safe_idx], fill_val)
       elif name in ("high", "raw_high"):
-        if is_float:
+        if is_float and valid is not None:
           clean = np.where(valid, arr_2d, -np.inf)
           res_2d = np.maximum.reduceat(clean, starts, axis=1)
           res_2d = np.where(np.isneginf(res_2d), np.nan, res_2d)
         else:
           res_2d = np.maximum.reduceat(arr_2d, starts, axis=1)
       elif name in ("low", "raw_low"):
-        if is_float:
+        if is_float and valid is not None:
           clean = np.where(valid, arr_2d, np.inf)
           res_2d = np.minimum.reduceat(clean, starts, axis=1)
           res_2d = np.where(np.isposinf(res_2d), np.nan, res_2d)
         else:
           res_2d = np.minimum.reduceat(arr_2d, starts, axis=1)
       elif name in sum_cols:
-        clean = np.where(valid, arr_2d, 0.0) if is_float else arr_2d
+        clean = np.where(valid, arr_2d, 0.0) if (is_float and valid is not None) else arr_2d
         res_2d = np.add.reduceat(clean, starts, axis=1)
       else:
         # close/raw_close/price 及股本/财报等状态列：取周期内最后一个有效值

@@ -357,15 +357,20 @@ class Fee:
     def build_fee_item(x):
       return FeeItem(**x)
 
+    self.config: list[FeeItem]
     if isinstance(config, list):
-      if len(config) > 0 and isinstance(config[0], str):
-        self.config = [json.loads(x, object_hook=build_fee_item) for x in config]  # type: ignore
-        self.config.sort(key=lambda x: x.ts)
-      elif len(config) > 0 and isinstance(config[0], dict):
-        self.config = [FeeItem(**x) for x in config]  # type: ignore
-        self.config.sort(key=lambda x: x.ts)
-      else:
-        self.config = list(config)
+      items: list[FeeItem] = []
+      for x in config:
+        if isinstance(x, FeeItem):
+          items.append(x)
+        elif isinstance(x, str):
+          items.append(json.loads(x, object_hook=build_fee_item))
+        elif isinstance(x, dict):
+          items.append(FeeItem(**x))
+        else:
+          raise TypeError(f"Unsupported fee config item type: {type(x).__name__}")
+      items.sort(key=lambda x: x.ts)
+      self.config = items
     elif isinstance(config, (str, Path)):
       p = Path(config)
 
@@ -628,6 +633,8 @@ class Account:
     self.slippage = slippage
     """group index"""
     self.group = group
+    """execution mode ('close' or 'next_open')"""
+    self.exec_mode: str = "close"
 
     s = self.group * dp.bars
     e = s + dp.bars
@@ -745,7 +752,13 @@ class Account:
       raise ValueError(f"invalid operation: {operation}")
 
     fee = 0.0
-    if self.position.shares > 0:
+    if (
+      self.position.shares > 0
+      and self.dividends is not None
+      and self.transfer_shares is not None
+      and self.right_shares is not None
+      and self.right_prices is not None
+    ):
       dividend = self.dividends[ts]
       transfer_shares = self.transfer_shares[ts]
       right_share = self.right_shares[ts]

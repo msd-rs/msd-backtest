@@ -21,11 +21,11 @@ from mbt.gui.inspect_strategy import ParamSpec, StrategyMetadata
 class RenameDialog(tk.Toplevel):
   """Simple modal dialog for renaming a strategy."""
 
-  def __init__(self, parent: tk.Widget, initial_name: str, title: str = "重命名策略"):
+  def __init__(self, parent: tk.Misc, initial_name: str, title: str = "重命名策略"):
     super().__init__(parent)
     self.title(title)
     self.resizable(False, False)
-    self.transient(parent)
+    self.transient(parent)  # type: ignore[no-matching-overload]
     self.result: str | None = None
 
     self._name_var = tk.StringVar(value=initial_name)
@@ -49,7 +49,7 @@ class RenameDialog(tk.Toplevel):
     self.grab_set()
     self._center_on_parent(parent)
 
-  def _center_on_parent(self, parent: tk.Widget) -> None:
+  def _center_on_parent(self, parent: tk.Misc) -> None:
     self.update_idletasks()
     px = parent.winfo_rootx() + max(0, (parent.winfo_width() - self.winfo_width()) // 2)
     py = parent.winfo_rooty() + max(0, (parent.winfo_height() - self.winfo_height()) // 2)
@@ -69,7 +69,7 @@ class ShortcutDialog(tk.Toplevel):
 
   def __init__(
     self,
-    parent: tk.Widget,
+    parent: tk.Misc,
     shortcut: ShortcutConfig,
     metadata: StrategyMetadata | None,
     title: str = "编辑快捷路径",
@@ -80,7 +80,7 @@ class ShortcutDialog(tk.Toplevel):
     h = min(scaled(640, parent), max(520, self.winfo_screenheight() - 80))
     self.geometry(f"{w}x{h}")
     self.minsize(min(scaled(540, parent), w), min(scaled(500, parent), h))
-    self.transient(parent)
+    self.transient(parent)  # type: ignore[no-matching-overload]
 
     self._orig = shortcut
     self._metadata = metadata
@@ -109,7 +109,7 @@ class ShortcutDialog(tk.Toplevel):
     self.grab_set()
     self._center_on_parent(parent)
 
-  def _center_on_parent(self, parent: tk.Widget) -> None:
+  def _center_on_parent(self, parent: tk.Misc) -> None:
     self.update_idletasks()
     px = parent.winfo_rootx() + max(0, (parent.winfo_width() - self.winfo_width()) // 2)
     py = parent.winfo_rooty() + max(0, (parent.winfo_height() - self.winfo_height()) // 2)
@@ -184,7 +184,11 @@ class ShortcutDialog(tk.Toplevel):
     preset_btn.grid(row=0, column=1, padx=(6, 0))
 
     has_sel = self._metadata is not None and self._metadata.has_selector
-    sel_name = (self._metadata.selector_name or "Selector") if has_sel else "未检测到 Selector"
+    sel_name = (
+      (self._metadata.selector_name or "Selector")
+      if (self._metadata is not None and self._metadata.has_selector)
+      else "未检测到 Selector"
+    )
     self._internal_sel_chk = ttk.Checkbutton(
       run_box,
       text=f"使用本策略内置选股器 ({sel_name}) 生成初始股票池",

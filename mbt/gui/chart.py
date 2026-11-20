@@ -135,9 +135,9 @@ class EquityCurvePanel(ttk.Frame):
   def set_series(
     self,
     dates: Sequence[str],
-    ror: np.ndarray,
-    ror_original: np.ndarray | None = None,
-    benchmark_ror: np.ndarray | None = None,
+    ror: Sequence[float] | np.ndarray,
+    ror_original: Sequence[float] | np.ndarray | None = None,
+    benchmark_ror: Sequence[float] | np.ndarray | None = None,
     title: str = "收益曲线",
     orig_label: str = "买入持有",
     bench_label: str = "基准",

@@ -15,7 +15,7 @@ from typing import Any
 def check_env() -> dict[str, Any]:
   """Check Python runtime and core quantitative dependencies."""
   packages = ["polars", "numpy", "pymsd", "alpha", "orjson"]
-  installed = {}
+  installed: dict[str, str | None] = {}
   for pkg in packages:
     try:
       ver = importlib.metadata.version(pkg)

@@ -1,14 +1,17 @@
-# set the directory Pyrefly will search for files to type check
-project-includes = [
-    "mbt",
-    "tests",
-    ".",
-]
+project-includes = ["mbt"]
+project-excludes = ["**/.[!/.]*", "**/tests"]
+
+site-packages-path = [".venv/lib/python3.14/site-packages"]
+
+python-interpreter-path = ".venv/bin/python3"
 
 
 # a table mapping error codes to an `is-enabled` boolean
 [errors]
+# set the directory Pyrefly will search for files to type check
 # disable `bad-assignment` errors
 bad-assignment = false
 # disable `bad-return` errors
 bad-return = false
+# disable `unnecessary-type-conversion` warnings (intentional runtime coercions)
+unnecessary-type-conversion = false

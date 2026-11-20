@@ -1,7 +1,7 @@
 # Copyright 2026 MSD-RS Project LiJia
 # SPDX-License-Identifier: BSD-2-Clause
 
-from typing import Protocol
+from typing import Any, Protocol
 import numpy as np
 from numpy.typing import DTypeLike
 
@@ -50,10 +50,10 @@ class _LazySlicedDict(dict):
       return default
     return self._materialize(key)
 
-  def items(self):
+  def items(self):  # type: ignore[override]
     return [(k, self._materialize(k)) for k in self.keys()]
 
-  def values(self):
+  def values(self):  # type: ignore[override]
     return [self._materialize(k) for k in self.keys()]
 
   def copy(self):
@@ -95,6 +95,9 @@ class DataProvider:
     self.next_hook = next_hook
     self.groups = len(self.objs)
     self.bars = len(self.dates) // self.groups if self.groups > 0 else 0
+    self.warmup_bars: int = 0
+    self.fin_only_year: bool = False
+    self.financial_frame: Any = None
 
   @staticmethod
   def verify_data(objs: list[str], data: dict[str, np.ndarray], ts_name: str):

@@ -49,7 +49,7 @@ M_AUTHOR = ""  # 编写策略时建议定义模块常量 M_AUTHOR，填入当前
 class FundamentalTimingSelector(mbt.Selector):
   """基本面优质成长与合理估值选股器 (单文件选股端)."""
 
-  fin_fields: list[str] = ["f205", "f197", "f003"]
+  fin_fields: list[str] | None = ["f205", "f197", "f003"]
 
   def __init__(
     self,
@@ -153,7 +153,7 @@ class FundamentalTimingStrategy(mbt.PortfolioStrategy):
   portfolio: bool = True
   exec_mode: str = "close"
   warmup_bars: int = 60
-  fin_fields: list[str] = ["f205", "f197", "f003"]
+  fin_fields: list[str] | None = ["f205", "f197", "f003"]
 
   def __init__(
     self,

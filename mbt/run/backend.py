@@ -134,6 +134,23 @@ class RunRequest:
     self.end = end
     self.fin_fields = fin_fields
     self.fin_only_year = fin_only_year
+    self.portfolio: bool = False
+    self.cash: float = 1000000.0
+    self.summary: bool = False
+    self.benchmark: str = ""
+    self.selector: Any = None
+    self.warmup_bars: int = 0
+    self.exec_mode: str = "close"
+    self.fin_lookback_days: int | None = None
+    self.starts: list[str] | None = None
+    self.holdout: str | None = None
+    self.raw_objs: list[str] = []
+    self.kv_kwargs: dict[str, Any] | None = None
+    self.strategy_path: str = ""
+    self.notify: str | None = None
+    self.notify_on_trade: bool = False
+    self.notify_detail: Any = None
+    self.overview: str | None = None
 
   @staticmethod
   def load_strategy(
@@ -213,7 +230,7 @@ class RunRequest:
     objs: list[str] | None = None,
     start: str | None = None,
     end: str | None = None,
-    args: list | None = None,
+    args: list | dict[str, Any] | None = None,
     fin_fields: list[str] | str | None = None,
     fin_only_year: bool | None = None,
   ) -> "RunRequest":

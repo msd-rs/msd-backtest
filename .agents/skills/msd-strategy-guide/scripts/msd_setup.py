@@ -255,8 +255,8 @@ def is_server_healthy(msd_host: str, timeout: float = 1.0) -> bool:
   try:
     req = urllib.request.Request(health_url, headers={"User-Agent": "curl/7.68.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-      return resp.status == 200 and resp.read().strip() == b"OK"
-  except Exception:
+      return resp.status == 200 and b"OK" in resp.read()
+  except Exception as e:
     return False
 
 

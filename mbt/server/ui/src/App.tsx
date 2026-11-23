@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddStrategyDialog } from "@/components/AddStrategyDialog";
 import { HeaderBar } from "@/components/HeaderBar";
 import { ParamPanel } from "@/components/ParamPanel";
@@ -26,6 +26,17 @@ import type {
   SystemDefaults,
 } from "@/types/api";
 
+export function defaultTargetParamsForMode(
+  strat: StrategyRecord,
+  mode: RunMode,
+): { objs: string; use_internal_selector: boolean } {
+  const hasSelector = Boolean(strat.metadata?.has_selector);
+  if ((mode === "timing" || mode === "portfolio") && hasSelector) {
+    return { objs: "", use_internal_selector: true };
+  }
+  return { objs: "A_STOCKS_EXCLUDE_ST", use_internal_selector: false };
+}
+
 function buildDraftFromSelection(
   strat: StrategyRecord,
   sc: ShortcutRecord | null,
@@ -45,10 +56,25 @@ function buildDraftFromSelection(
     const val = p[k];
     return typeof val === "boolean" ? val : fallback;
   };
+  const targetDefaults = defaultTargetParamsForMode(strat, mode);
+  const rawObjs = s("objs");
+  const hasExplicitUseInternal = typeof p.use_internal_selector === "boolean";
+  const useInternal = sc
+    ? hasExplicitUseInternal
+      ? Boolean(p.use_internal_selector)
+      : rawObjs.trim() === ""
+        ? targetDefaults.use_internal_selector
+        : false
+    : targetDefaults.use_internal_selector;
+  const objs = sc
+    ? rawObjs.trim() === "" && !useInternal
+      ? targetDefaults.objs
+      : rawObjs
+    : targetDefaults.objs;
   return {
     mode,
-    objs: s("objs"),
-    use_internal_selector: b("use_internal_selector", false),
+    objs,
+    use_internal_selector: useInternal,
     begin: s("begin"),
     end: s("end"),
     select_date: s("select_date"),
@@ -123,6 +149,91 @@ function draftToShortcutParams(draft: DraftParams): Record<string, unknown> {
   };
 }
 
+function parseSelectionFromUrl(): SelectionTarget {
+  if (typeof window === "undefined") return null;
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  const scMatch = pathname.match(/^\/strategies\/([^/]+)\/shortcuts\/([^/]+)$/);
+  if (scMatch) {
+    return {
+      kind: "shortcut",
+      strategyId: decodeURIComponent(scMatch[1]),
+      shortcutId: decodeURIComponent(scMatch[2]),
+    };
+  }
+  const stratMatch = pathname.match(/^\/strategies\/([^/]+)$/);
+  if (stratMatch) {
+    return {
+      kind: "strategy",
+      strategyId: decodeURIComponent(stratMatch[1]),
+    };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const strategyId = params.get("strategy") || params.get("strategy_id");
+  if (strategyId) {
+    const shortcutId = params.get("shortcut") || params.get("shortcut_id");
+    if (shortcutId) {
+      return { kind: "shortcut", strategyId, shortcutId };
+    }
+    return { kind: "strategy", strategyId };
+  }
+  return null;
+}
+
+function buildUrlForSelection(target: SelectionTarget): string {
+  if (!target) return "/";
+  if (target.kind === "shortcut") {
+    return `/strategies/${encodeURIComponent(target.strategyId)}/shortcuts/${encodeURIComponent(target.shortcutId)}`;
+  }
+  return `/strategies/${encodeURIComponent(target.strategyId)}`;
+}
+
+function resolveRequestedSelection(
+  strats: StrategyRecord[],
+  requested: SelectionTarget,
+): { target: SelectionTarget; warning?: string } {
+  if (requested) {
+    const strat = strats.find((s) => s.id === requested.strategyId);
+    if (!strat) {
+      const fallback: SelectionTarget =
+        strats.length > 0
+          ? strats[0].shortcuts.length > 0
+            ? {
+                kind: "shortcut",
+                strategyId: strats[0].id,
+                shortcutId: strats[0].shortcuts[0].id,
+              }
+            : { kind: "strategy", strategyId: strats[0].id }
+          : null;
+      return {
+        target: fallback,
+        warning: `未找到 ID 为「${requested.strategyId}」的策略（可能已被移除）。`,
+      };
+    }
+    if (requested.kind === "shortcut") {
+      const sc = strat.shortcuts.find((c) => c.id === requested.shortcutId);
+      if (sc) {
+        return { target: { kind: "shortcut", strategyId: strat.id, shortcutId: sc.id } };
+      }
+      return {
+        target: { kind: "strategy", strategyId: strat.id },
+        warning: `策略「${strat.name}」下未找到 ID 为「${requested.shortcutId}」的快捷方式。`,
+      };
+    }
+    return { target: { kind: "strategy", strategyId: strat.id } };
+  }
+
+  if (strats.length > 0) {
+    const first = strats[0];
+    if (first.shortcuts.length > 0) {
+      return {
+        target: { kind: "shortcut", strategyId: first.id, shortcutId: first.shortcuts[0].id },
+      };
+    }
+    return { target: { kind: "strategy", strategyId: first.id } };
+  }
+  return { target: null };
+}
+
 export function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("mbt-theme");
@@ -168,20 +279,55 @@ export function App() {
     return strats;
   }, []);
 
+  const urlInitializedRef = useRef(false);
+  const skipHistoryPushRef = useRef(false);
+  const strategiesRef = useRef<StrategyRecord[]>([]);
+  strategiesRef.current = strategies;
+
   useEffect(() => {
     reloadAll()
       .then((strats) => {
-        if (strats.length > 0) {
-          const first = strats[0];
-          if (first.shortcuts.length > 0) {
-            setSelection({ kind: "shortcut", strategyId: first.id, shortcutId: first.shortcuts[0].id });
-          } else {
-            setSelection({ kind: "strategy", strategyId: first.id });
-          }
+        const requested = parseSelectionFromUrl();
+        const { target, warning } = resolveRequestedSelection(strats, requested);
+        if (warning) {
+          setToastError(warning);
         }
+        const nextUrl = buildUrlForSelection(target);
+        if (window.location.pathname + window.location.search !== nextUrl) {
+          window.history.replaceState(null, "", nextUrl);
+        }
+        urlInitializedRef.current = true;
+        skipHistoryPushRef.current = true;
+        setSelection(target);
       })
       .catch((err) => setToastError(err instanceof Error ? err.message : String(err)));
   }, [reloadAll]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const requested = parseSelectionFromUrl();
+      const { target, warning } = resolveRequestedSelection(strategiesRef.current, requested);
+      if (warning) {
+        setToastError(warning);
+      }
+      skipHistoryPushRef.current = true;
+      setSelection(target);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!urlInitializedRef.current) return;
+    if (skipHistoryPushRef.current) {
+      skipHistoryPushRef.current = false;
+      return;
+    }
+    const nextUrl = buildUrlForSelection(selection);
+    if (window.location.pathname + window.location.search !== nextUrl) {
+      window.history.pushState(null, "", nextUrl);
+    }
+  }, [selection]);
 
   const selectedStrategy = useMemo(() => {
     if (!selection) return null;
@@ -192,6 +338,15 @@ export function App() {
     if (!selectedStrategy || selection?.kind !== "shortcut") return null;
     return selectedStrategy.shortcuts.find((sc) => sc.id === selection.shortcutId) || null;
   }, [selectedStrategy, selection]);
+
+  useEffect(() => {
+    if (!selectedStrategy) {
+      document.title = "MSD Backtest Studio";
+      return;
+    }
+    const scPart = selectedShortcut ? ` / ${selectedShortcut.name}` : "";
+    document.title = `${selectedStrategy.name}${scPart} - MSD Backtest Studio`;
+  }, [selectedStrategy?.name, selectedShortcut?.name]);
 
   useEffect(() => {
     if (!selectedStrategy) {
@@ -314,10 +469,11 @@ export function App() {
 
   async function handleAddShortcutForStrategy(strat: StrategyRecord) {
     try {
+      const defTarget = defaultTargetParamsForMode(strat, strat.default_mode);
       const sc = await api.createShortcut(strat.id, {
         name: `方案 ${strat.shortcuts.length + 1}`,
         mode: strat.default_mode,
-        params: {},
+        params: defTarget,
       });
       const strats = await api.listStrategies();
       setStrategies(strats);

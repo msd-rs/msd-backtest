@@ -635,8 +635,8 @@ def test_cli_register_and_status(tmp_path, capsys):
     assert "OK, msd-backtest" in out_status
 
     assert server_main(["register", str(strat_file), "--name", "cli_demo", "--url", url]) == 0
-    out_reg = capsys.readouterr().out
-    assert "abc123" in out_reg
+    out_reg = capsys.readouterr().out.strip()
+    assert out_reg == f"{url}/strategies/abc123"
     assert len(received) == 1
     assert received[0]["path"] == os.path.realpath(str(strat_file))
     assert received[0]["name"] == "cli_demo"
@@ -800,5 +800,215 @@ def test_delta_fixed_int_parquet_encoding_and_compression(tmp_path):
   sum_slice = query_curve(out_dir, obj="__SUMMARY__", start_idx=50, end_idx=120, max_points=500)
   assert np.allclose(sum_slice["series"]["ror"], mean_ror[50:120], atol=2e-4)
   assert np.allclose(sum_slice["series"]["drawdown"], mean_dd[50:120], atol=2e-4)
+
+
+def test_cli_link_subcommand(tmp_path, capsys):
+  from mbt.server.__main__ import main as server_main
+
+  strat_file = _write_sample_strategy(tmp_path / "linked_strat.py")
+  symlink_path = tmp_path / "linked_strat_sym.py"
+  os.symlink(strat_file, symlink_path)
+  unreg_file = _write_sample_strategy(tmp_path / "unregistered.py")
+  canon_path = os.path.realpath(str(strat_file))
+
+  class _Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+      if self.path == "/api/strategies":
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(
+          json.dumps([{"id": "strat42", "path": canon_path}]).encode("utf-8")
+        )
+        return
+      self.send_response(404)
+      self.end_headers()
+
+    def log_message(self, *_args):
+      pass
+
+  srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+  t = threading.Thread(target=srv.serve_forever, daemon=True)
+  t.start()
+  try:
+    url = f"http://127.0.0.1:{srv.server_port}"
+    assert server_main(["link", str(symlink_path), "--url", url]) == 0
+    out_link = capsys.readouterr().out.strip()
+    assert out_link == f"{url}/strategies/strat42"
+
+    assert server_main(["link", str(unreg_file), "--url", url]) == 1
+    err_unreg = capsys.readouterr().err
+    assert "not registered" in err_unreg
+  finally:
+    srv.shutdown()
+    srv.server_close()
+
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    free_port = s.getsockname()[1]
+  assert server_main(["link", str(strat_file), "--url", f"http://127.0.0.1:{free_port}"]) == 1
+  err_conn = capsys.readouterr().err
+  assert "serve --daemon" in err_conn
+
+
+def test_cli_serve_daemon_register_link_and_spa(tmp_path, capsys):
+  import re
+  import signal
+  import urllib.request
+  from mbt.server.__main__ import main as server_main
+
+  cfg_dir = tmp_path / "cfg"
+  data_dir = tmp_path / "data"
+  strat_file = _write_sample_strategy(tmp_path / "daemon_strat.py")
+
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    free_port = s.getsockname()[1]
+
+  url = f"http://127.0.0.1:{free_port}"
+  pid: int | None = None
+  try:
+    rc = server_main([
+      "serve",
+      "--daemon",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      str(free_port),
+      "--config-dir",
+      str(cfg_dir),
+      "--data-dir",
+      str(data_dir),
+    ])
+    assert rc == 0
+    out_start = capsys.readouterr().out
+    m = re.search(r"pid:\s*(\d+)", out_start)
+    assert m is not None
+    pid = int(m.group(1))
+    assert (data_dir / "server.log").is_file()
+
+    # Second daemon invocation is idempotent
+    assert server_main([
+      "serve",
+      "--daemon",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      str(free_port),
+      "--config-dir",
+      str(cfg_dir),
+      "--data-dir",
+      str(data_dir),
+    ]) == 0
+    out_dup = capsys.readouterr().out
+    assert "already running" in out_dup
+
+    assert server_main(["register", str(strat_file), "--url", url]) == 0
+    reg_url = capsys.readouterr().out.strip()
+
+    assert server_main(["link", str(strat_file), "--url", url]) == 0
+    link_url = capsys.readouterr().out.strip()
+    assert reg_url == link_url
+    assert link_url.startswith(f"{url}/strategies/")
+
+    # Registering a missing file fails fast and prints error reason
+    assert server_main(["register", str(tmp_path / "missing.py"), "--url", url]) == 1
+    err_reg = capsys.readouterr().err
+    assert "Registration failed (404):" in err_reg
+    assert "missing.py" in err_reg
+
+    with urllib.request.urlopen(link_url, timeout=5.0) as resp:
+      assert resp.status == 200
+      assert "text/html" in resp.headers.get("Content-Type", "")
+      html = resp.read().decode("utf-8", errors="replace")
+      assert "MSD Backtest" in html
+  finally:
+    if pid is not None:
+      try:
+        os.kill(pid, signal.SIGTERM)
+      except OSError:
+        pass
+      deadline = time.monotonic() + 5.0
+      while time.monotonic() < deadline:
+        try:
+          os.kill(pid, 0)
+          time.sleep(0.05)
+        except OSError:
+          break
+
+
+def test_resolve_spec_default_objs_and_internal_selector(tmp_path):
+  from mbt.server.runner import RunManager
+
+  cfg_dir = tmp_path / "cfg"
+  data_dir = tmp_path / "data"
+  app = create_app(config_dir=cfg_dir, data_dir=data_dir)
+  rm: RunManager = app.state.run_manager
+  defaults = SystemDefaults()
+
+  sel_only = tmp_path / "sel_only.py"
+  sel_only.write_text(
+    "import mbt\nclass OnlySel(mbt.Selector):\n  def step00(self, stocks): return stocks\n",
+    encoding="utf-8",
+  )
+  strat_only = tmp_path / "strat_only.py"
+  strat_only.write_text(
+    "import mbt\nclass OnlyStrat(mbt.Strategy):\n  def execute(self, ctx): pass\n",
+    encoding="utf-8",
+  )
+  port_only = tmp_path / "port_only.py"
+  port_only.write_text(
+    "import mbt\nclass OnlyPort(mbt.PortfolioStrategy):\n  def execute(self, ctx): pass\n",
+    encoding="utf-8",
+  )
+  combo_timing = _write_sample_strategy(tmp_path / "combo_timing.py")
+  combo_port = tmp_path / "combo_port.py"
+  combo_port.write_text(
+    "import mbt\nclass CSelector(mbt.Selector):\n  def step00(self, stocks): return stocks\n"
+    "class CPort(mbt.PortfolioStrategy):\n  def execute(self, ctx): pass\n",
+    encoding="utf-8",
+  )
+  fac_file = _write_sample_factor(tmp_path / "fac.py")
+
+  with TestClient(app) as client:
+    s_sel = client.post("/api/strategies", json={"path": str(sel_only)}).json()
+    s_tim = client.post("/api/strategies", json={"path": str(strat_only)}).json()
+    s_prt = client.post("/api/strategies", json={"path": str(port_only)}).json()
+    s_ctim = client.post("/api/strategies", json={"path": str(combo_timing)}).json()
+    s_cprt = client.post("/api/strategies", json={"path": str(combo_port)}).json()
+    s_fac = client.post("/api/strategies", json={"path": str(fac_file)}).json()
+
+    # Select, factor, timing without selector, portfolio without selector -> A_STOCKS_EXCLUDE_ST
+    for strat in (s_sel, s_tim, s_prt, s_fac):
+      spec = rm.resolve_spec(defaults, strat)
+      assert spec["objs"] == "A_STOCKS_EXCLUDE_ST"
+      assert spec["use_internal_selector"] is False
+
+    # Timing and portfolio with embedded selector -> use_internal_selector=True
+    for strat in (s_ctim, s_cprt):
+      spec = rm.resolve_spec(defaults, strat)
+      assert spec["use_internal_selector"] is True
+      assert spec["objs"] == ""
+
+    # Switching combo strategy to select mode -> defaults to A_STOCKS_EXCLUDE_ST
+    spec_sel_mode = rm.resolve_spec(defaults, s_ctim, mode_override=RUN_MODE_SELECT)
+    assert spec_sel_mode["objs"] == "A_STOCKS_EXCLUDE_ST"
+    assert spec_sel_mode["use_internal_selector"] is False
+
+    # Explicitly disabling internal selector without objs falls back to A_STOCKS_EXCLUDE_ST
+    spec_fallback = rm.resolve_spec(
+      defaults,
+      s_cprt,
+      overrides={"objs": "", "use_internal_selector": False},
+    )
+    assert spec_fallback["objs"] == "A_STOCKS_EXCLUDE_ST"
+    assert spec_fallback["use_internal_selector"] is False
+
+    # Explicit objs is always respected
+    spec_explicit = rm.resolve_spec(defaults, s_cprt, overrides={"objs": "SH600000"})
+    assert spec_explicit["objs"] == "SH600000"
+    assert spec_explicit["use_internal_selector"] is False
+
+
 
 

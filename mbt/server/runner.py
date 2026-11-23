@@ -127,17 +127,23 @@ class RunManager:
     _apply_layer(sc_params, replace_strategy_args=False)
     _apply_layer(ovr, replace_strategy_args=("strategy_args" in ovr))
 
-    # For direct strategy runs (no shortcut) on portfolio with embedded selector and empty objs
+    # Default -s / internal selector when neither candidate pool nor internal selector is set:
+    # - timing/portfolio with embedded Selector -> use internal selector
+    # - select/factor, or timing/portfolio without embedded Selector -> A_STOCKS_EXCLUDE_ST
     meta = strategy.get("metadata") or {}
-    if (
-      shortcut is None
-      and mode == "portfolio"
-      and not str(spec.get("objs") or "").strip()
-      and not spec.get("use_internal_selector")
-      and meta.get("has_selector")
-      and "use_internal_selector" not in ovr
-    ):
-      spec["use_internal_selector"] = True
+    has_selector = bool(meta.get("has_selector"))
+    objs_empty = not str(spec.get("objs") or "").strip()
+    use_int = bool(spec.get("use_internal_selector"))
+
+    if not use_int and objs_empty:
+      if (
+        mode in ("timing", "portfolio")
+        and has_selector
+        and ovr.get("use_internal_selector") is not False
+      ):
+        spec["use_internal_selector"] = True
+      else:
+        spec["objs"] = "A_STOCKS_EXCLUDE_ST"
 
     return spec
 

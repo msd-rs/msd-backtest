@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Play, RotateCcw, Save, SaveAll, SlidersHorizontal, Square } from "lucide-react";
+import { Check, Link2, Play, RotateCcw, Save, SaveAll, SlidersHorizontal, Square } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,6 +62,7 @@ export function ParamPanel({
   const [newScName, setNewScName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const supportsPopover =
     typeof HTMLElement !== "undefined" &&
@@ -171,6 +172,21 @@ export function ParamPanel({
     }
   }
 
+  async function handleCopyLink() {
+    const base = window.location.origin;
+    const path = shortcut
+      ? `/strategies/${encodeURIComponent(strategy.id)}/shortcuts/${encodeURIComponent(shortcut.id)}`
+      : `/strategies/${encodeURIComponent(strategy.id)}`;
+    const link = `${base}${path}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedLink(true);
+      window.setTimeout(() => setCopiedLink(false), 1800);
+    } catch {
+      window.prompt("复制策略链接", link);
+    }
+  }
+
   return (
     <section ref={headerRef} className="mbt-param-anchor relative shrink-0 border-b bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
@@ -180,6 +196,22 @@ export function ParamPanel({
               {strategy.name}
               {shortcut ? ` / ${shortcut.name}` : " (默认参数)"}
             </h2>
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+              title="复制当前策略页面链接"
+              aria-label="复制当前策略页面链接"
+            >
+              {copiedLink ? (
+                <>
+                  <Check className="h-3 w-3 text-emerald-500" aria-hidden="true" />
+                  <span className="text-emerald-600 dark:text-emerald-400">已复制</span>
+                </>
+              ) : (
+                <Link2 className="h-3 w-3" aria-hidden="true" />
+              )}
+            </button>
             <Badge variant={draft.mode}>{RUN_MODE_LABELS[draft.mode]}</Badge>
             {isDirty && (
               <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
@@ -267,7 +299,27 @@ export function ParamPanel({
               <SelectNative
                 id="param-mode"
                 value={draft.mode}
-                onChange={(e) => setField("mode", e.target.value as RunMode)}
+                onChange={(e) => {
+                  const nextMode = e.target.value as RunMode;
+                  onChangeDraft((prev) => {
+                    const hasSelector = Boolean(meta?.has_selector);
+                    if ((nextMode === "timing" || nextMode === "portfolio") && hasSelector) {
+                      const trimmed = prev.objs.trim();
+                      return {
+                        ...prev,
+                        mode: nextMode,
+                        use_internal_selector: true,
+                        objs: trimmed === "A_STOCKS_EXCLUDE_ST" ? "" : prev.objs,
+                      };
+                    }
+                    return {
+                      ...prev,
+                      mode: nextMode,
+                      use_internal_selector: false,
+                      objs: prev.objs.trim() ? prev.objs : "A_STOCKS_EXCLUDE_ST",
+                    };
+                  });
+                }}
               >
                 {availableModes.map((m) => (
                   <option key={m} value={m}>

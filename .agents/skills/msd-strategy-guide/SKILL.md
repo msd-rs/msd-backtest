@@ -14,8 +14,7 @@ Strategy Framework: msd-backtest
 
 # Preparation
 
-- Ensure `msd-backtest[cli]` be installed use project package manager.
-- When your need to run in server mode, ensure `msd-backtest[server]` is installed. Normally, server mode is not required.
+- Ensure `msd-backtest[server]` (which includes `msd-backtest[cli]`) is installed via the project package manager (`uv add "msd-backtest[server]"` or `pip install "msd-backtest[server]"`). If running strictly in CLI mode without the Web UI, `msd-backtest[cli]` is sufficient.
 - Ensure `MSD_HOST` environment variable be set, can be find in `.env` file or test by shell command `env | grep MSD_HOST`. If not set, you can ask the user to set it first. When user can't provide it, you can ask and install it by [msd setup guide](./references/msd.md).
 - `MSD_BT_FEE` is optional. `./etc/fee.json` can be used to customize trade fees, defaulting to standard rates if omitted:
 
@@ -74,13 +73,23 @@ When you had written a strategy, user may ask you to need optimize it, such as a
 
 If the user has not explicitly asked you to optimize, please do not do so on your own.
 
-# Register Strategy with `mbt.server`
+# Register Strategy & Share Link with `mbt.server`
 
-After writing and verifying a strategy, selector, or factor file, you can register its path with the local `mbt.server` strategy management service (if running) so the user can immediately tune parameters and inspect results in the Web UI:
+When you finish writing (and optionally smoke-testing) a strategy, selector, or factor file, the recommended workflow is to ensure the local `mbt.server` is running in the background, register the file path, and present the strategy's clickable Web UI link to the user so they can immediately inspect parameters, run backtests, and explore results interactively:
+
+1. **Ensure `mbt.server` is running** (starts in the background if not already running; idempotent and exits 0 if already healthy):
+
+```bash
+uv run mbt-server serve --daemon
+```
+
+2. **Register the strategy / selector / factor file** (idempotent on canonical file path; directly prints the clickable Web UI link on success, or the failure reason on stderr):
 
 ```bash
 uv run mbt-server register <STRATEGY_PATH>
 ```
 
-Or via HTTP: `POST http://127.0.0.1:8765/api/strategies` with JSON `{"path": "<ABS_STRATEGY_PATH>"}` (idempotent on canonical file path).
+   This outputs the strategy URL (e.g., `http://127.0.0.1:8765/strategies/<id>`). Include this link in your response to the user so they can click directly to open it in the Web UI.
+
+- You can also look up the URL for an already-registered file without re-registering via `uv run mbt-server link <STRATEGY_PATH>`, check server health with `uv run mbt-server status`, or register via HTTP `POST http://127.0.0.1:8765/api/strategies` with JSON `{"path": "<ABS_STRATEGY_PATH>"}`.
 

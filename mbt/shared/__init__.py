@@ -17,6 +17,17 @@ from .stocks import (
   get_stock_industry_map,
 )
 from .financial import to_statutory_disclosure_date
+from .downsample import minmax_downsample
+from .inspect_strategy import (
+  ParamSpec,
+  RUN_MODE_FACTOR,
+  RUN_MODE_PORTFOLIO,
+  RUN_MODE_SELECT,
+  RUN_MODE_TIMING,
+  StrategyMetadata,
+  VALID_RUN_MODES,
+  inspect_strategy_file,
+)
 
 if TYPE_CHECKING:
   from .stocks import ALL_STOCKS, A_STOCKS, A_STOCKS_EXCLUDE_ST, FOUNDS
@@ -30,13 +41,22 @@ __all__ = [
   'KIND_INDEX',
   'KIND_FUND',
   'KIND_STOCK',
+  'ParamSpec',
+  'RUN_MODE_FACTOR',
+  'RUN_MODE_PORTFOLIO',
+  'RUN_MODE_SELECT',
+  'RUN_MODE_TIMING',
   'STATUS_NORMAL',
   'STATUS_ST',
   'STATUS_STAR_ST',
+  'StrategyMetadata',
+  'VALID_RUN_MODES',
   'get_limit_ratio',
   'get_industry_by_stocks',
   'get_stock_by_industries',
   'get_stock_industry_map',
+  'inspect_strategy_file',
+  'minmax_downsample',
   'to_statutory_disclosure_date',
 ]
 

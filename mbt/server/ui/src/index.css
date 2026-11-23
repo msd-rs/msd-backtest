@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light dark;
+  --background: oklch(0.985 0.002 247.8);
+  --foreground: oklch(0.145 0.015 256.8);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0.015 256.8);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0.015 256.8);
+  --primary: oklch(0.488 0.217 264.4);
+  --primary-foreground: oklch(0.985 0.002 247.8);
+  --secondary: oklch(0.955 0.007 247.9);
+  --secondary-foreground: oklch(0.208 0.02 256.8);
+  --muted: oklch(0.955 0.007 247.9);
+  --muted-foreground: oklch(0.51 0.02 256.8);
+  --accent: oklch(0.945 0.012 247.9);
+  --accent-foreground: oklch(0.208 0.02 256.8);
+  --destructive: oklch(0.577 0.245 27.3);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.895 0.009 252.8);
+  --input: oklch(0.895 0.009 252.8);
+  --ring: oklch(0.488 0.217 264.4);
+  --radius: 0.5rem;
+}
+
+html.light {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+  --background: oklch(0.145 0.014 258.3);
+  --foreground: oklch(0.96 0.005 247.8);
+  --card: oklch(0.185 0.016 258.3);
+  --card-foreground: oklch(0.96 0.005 247.8);
+  --popover: oklch(0.185 0.016 258.3);
+  --popover-foreground: oklch(0.96 0.005 247.8);
+  --primary: oklch(0.62 0.19 258.5);
+  --primary-foreground: oklch(0.145 0.014 258.3);
+  --secondary: oklch(0.24 0.018 258.3);
+  --secondary-foreground: oklch(0.96 0.005 247.8);
+  --muted: oklch(0.24 0.018 258.3);
+  --muted-foreground: oklch(0.7 0.015 256.8);
+  --accent: oklch(0.26 0.02 258.3);
+  --accent-foreground: oklch(0.96 0.005 247.8);
+  --destructive: oklch(0.62 0.21 25.3);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.29 0.018 258.3);
+  --input: oklch(0.29 0.018 258.3);
+  --ring: oklch(0.62 0.19 258.5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    margin: 0;
+  }
+}
+
+/* Modal scroll containment */
+[role="dialog"] {
+  overscroll-behavior: contain;
+}
+
+/* Anchored floating parameter panel */
+.mbt-param-anchor {
+  anchor-name: --mbt-param-bar;
+}
+
+.mbt-param-popover {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+@supports (top: anchor(bottom)) {
+  .mbt-param-popover {
+    position-anchor: --mbt-param-bar;
+    inset: auto;
+    margin: 0;
+    top: anchor(bottom);
+    left: anchor(left);
+    width: anchor-size(width);
+    max-block-size: min(68dvh, calc(100dvh - 108px));
+  }
+}
+
+@supports not (top: anchor(bottom)) {
+  .mbt-param-popover {
+    position: fixed;
+    inset: var(--param-popover-top, 102px) auto auto var(--param-popover-left, 260px);
+    width: var(--param-popover-width, calc(100% - 260px));
+    margin: 0;
+    max-block-size: min(68dvh, calc(100dvh - 108px));
+  }
+}

@@ -1,5 +1,5 @@
 project-includes = ["mbt"]
-project-excludes = ["**/.[!/.]*", "**/tests"]
+project-excludes = ["**/.[!/.]*", "**/tests", "**/node_modules", "**/dist"]
 
 site-packages-path = [".venv/lib/python3.14/site-packages"]
 

@@ -7,6 +7,15 @@ license = "BSD-2-Clause"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2.4.2"]
 
+[project.scripts]
+mbt-server = "mbt.server.__main__:main"
+mbt-run = "mbt.run.cli:main"
+mbt-review = "mbt.run.review:main"
+mbt-select = "mbt.select.cli:main"
+mbt-factor = "mbt.factor.cli:main"
+mbt-gui = "mbt.gui.__main__:main"
+mbt-doctor = "mbt.doctor:run_doctor"
+
 [dependency-groups]
 dev = ["pytest>=9.0.2", "pytest-benchmark>=5.2.3", "xlrd>=2.0.2"]
 excel = ["openpyxl>=3.1.5"]
@@ -33,8 +42,15 @@ log_cli = true
 addopts = "--benchmark-skip"
 
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["mbt*"]
+exclude = ["mbt.server.ui*"]
+
+[tool.setuptools.package-data]
+"mbt.server" = ["ui/dist/*", "ui/dist/**/*"]
 
 [tool.uv.sources]
 py-alpha-lib = { path = "../alpha-lib-rs/py-binding", editable = true }

@@ -1,0 +1,3 @@
+recursive-include mbt/server/ui/dist *
+prune mbt/server/ui/node_modules
+prune mbt/server/ui/.vite

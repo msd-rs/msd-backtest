@@ -1,11 +1,15 @@
 {
     "cSpell.words": [
         "backtest",
+        "dtype",
         "elsejj",
+        "fastapi",
         "GCASH",
         "GSHARE",
         "numpy",
-        "pymsd"
+        "pymsd",
+        "pytest",
+        "setuptools"
     ],
     "python.testing.pytestArgs": [
         "tests"

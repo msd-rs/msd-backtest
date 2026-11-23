@@ -73,3 +73,14 @@ You can inspect or import templates directly via `from mbt import strategy_templ
 When you had written a strategy, user may ask you to need optimize it, such as adjust the parameters, choose time range, etc. You should read the [guide of optimize](./references/optimize.md) to do that.
 
 If the user has not explicitly asked you to optimize, please do not do so on your own.
+
+# Register Strategy with `mbt.server`
+
+After writing and verifying a strategy, selector, or factor file, you can register its path with the local `mbt.server` strategy management service (if running) so the user can immediately tune parameters and inspect results in the Web UI:
+
+```bash
+uv run mbt-server register <STRATEGY_PATH>
+```
+
+Or via HTTP: `POST http://127.0.0.1:8765/api/strategies` with JSON `{"path": "<ABS_STRATEGY_PATH>"}` (idempotent on canonical file path).
+

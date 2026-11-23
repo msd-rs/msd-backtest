@@ -19,3 +19,8 @@ dev
 optimize
 
 notify.json
+
+# Web UI build artifacts & node dependencies
+mbt/server/ui/node_modules/
+mbt/server/ui/dist/
+mbt/server/ui/.vite/

@@ -384,7 +384,7 @@ uv run python -m mbt.factor \
 │   │   ├── cli.py           # 回测命令行界面
 │   │   ├── report.py        # 报告生成与统计指标（Markdown / Excel / JSON）
 │   │   ├── msd.py           # 交易端 MSD 数据加载与复权处理
-│   │   └── server.py        # REST API 回测服务
+│   ├── server/              # 策略管理与回测/因子评估服务及 Web UI
 │   └── shared/              # 共享金融工具与常数（财务字段、股票列表定义）
 ├── strategy/                # 策略与选股器示例
 ├── tests/                   # 单元测试与性能测试集

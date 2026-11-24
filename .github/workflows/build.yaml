@@ -47,8 +47,8 @@ jobs:
         run: |
           (cd .agents/skills && zip -r "${GITHUB_WORKSPACE}/msd-strategy-guide.zip" msd-strategy-guide)
 
-      - name: Publish
-        run: uv publish
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Create Release
         uses: softprops/action-gh-release@v3

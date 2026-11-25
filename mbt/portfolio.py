@@ -631,7 +631,7 @@ class PortfolioAccount:
     if buy_pos.shares <= 0:
       return
 
-    # Calculate forward-adjustment ratio if available
+    # Calculate adjustment ratio if available
     j = g * self.bars + ts
     adj_cost = exec_price
     if hasattr(self.dp, "data") and "close" in self.dp.data and "price" in self.dp.data:
@@ -734,7 +734,7 @@ class PortfolioAccount:
 
     Args:
       obj: Symbol or group index.
-      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+      adjusted: If True, returns adjusted equivalent cost (adj_cost_price),
         safe to compare with `ctx.close`. If False, returns raw execution cost price.
     """
     pos = self.position(obj)
@@ -1199,7 +1199,7 @@ class PortfolioContext(Context):
 
     Args:
       obj: Symbol or group index.
-      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+      adjusted: If True, returns adjusted equivalent cost (adj_cost_price),
         safe to compare with `ctx.close`. If False, returns raw execution cost price.
     """
     return self.account.cost_price(self._require_obj(obj), adjusted=adjusted)

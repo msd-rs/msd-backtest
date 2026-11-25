@@ -88,7 +88,7 @@ npx skills add msd-rs/msd-backtest
   - `execute()`：单向时间步推进，响应动态账户状态（如持仓收益率 `ror_hold`）、执行下单与调仓。
   - `finalize()`：回测收尾阶段统一统计诊断指标、平仓/退出原因归因，自动并入报告中。
 - **严密的价格与基本面语义隔离**：
-  - 前复权价格（`close`, `open`, `high`, `low`）：专用于平滑时序技术指标与动量计算。
+  - 等比后复权价格（`close`, `open`, `high`, `low`, `vwap` via `BW_SPLIT_FACTOR`）：专用于平滑时序技术指标与动量计算（恒正、零前视、收益率与日内比例保真）。
   - 原始不复权价格（`raw_close` / `price`, `raw_open` 等）：强制用于基本面估值（如市净率 PB = `raw_close / f003`）与总市值计算，杜绝因高送转复权导致估值失真的严重陷阱。
 - **开箱即用的专业回测生态**：
   - 内置 MSD 数据库无缝驱动与 `stock_financial` 财报数据 Asof 关联。

@@ -6,7 +6,7 @@ import itertools
 import time
 from typing import Tuple
 
-from mbt.shared import get_limit_ratio, to_statutory_disclosure_date
+from mbt.shared import apply_price_adjustment, get_limit_ratio, to_statutory_disclosure_date
 import pymsd
 from mbt.select.panel import Panel
 from mbt.select.selector import SelectorDataProvider
@@ -184,21 +184,8 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {date_where} limit -{start[2]
       is_limit_down = valid_ref & (data["close"] == data["low"]) & (data["close"] <= limit_down_price)
       data["limited"] = np.where(is_limit_up, 1, np.where(is_limit_down, -1, 0))
 
-      # Preserve unadjusted raw prices before forward adjustment
-      data["raw_open"] = data["open"].copy()
-      data["raw_high"] = data["high"].copy()
-      data["raw_low"] = data["low"].copy()
-      data["raw_close"] = data["close"].copy()
-      data["price"] = data["close"].copy()
-      if "volume" in data and "amount" in data:
-        with np.errstate(divide="ignore", invalid="ignore"):
-          data["raw_vwap"] = np.where(data["volume"] > 0, data["amount"] / data["volume"], np.nan)
-
-      # Apply forward adjustment factor to price related columns
-      data["open"] = al.FW_SPLIT(data["open"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-      data["high"] = al.FW_SPLIT(data["high"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-      data["low"] = al.FW_SPLIT(data["low"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-      data["close"] = al.FW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
+    # Apply geometric split/dividend adjustment factors (BW_SPLIT_FACTOR default)
+    apply_price_adjustment(data, groups=len(loaded))
 
     full_df = pl.DataFrame(data)
 

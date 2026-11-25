@@ -62,6 +62,12 @@ def build_tradability_masks(
   open_ = np.asarray(panel.column("open"), dtype=np.float64)
 
   valid_price = np.isfinite(close) & (close > 0.0) & np.isfinite(open_) & (open_ > 0.0)
+  if "raw_close" in panel.columns:
+    raw_close = np.asarray(panel.column("raw_close"), dtype=np.float64)
+    valid_price = valid_price & np.isfinite(raw_close) & (raw_close > 0.0)
+  if "raw_open" in panel.columns:
+    raw_open = np.asarray(panel.column("raw_open"), dtype=np.float64)
+    valid_price = valid_price & np.isfinite(raw_open) & (raw_open > 0.0)
   if "volume" in panel.columns:
     vol = np.asarray(panel.column("volume"), dtype=np.float64)
     valid_bar = valid_price & np.isfinite(vol) & (vol > 0.0)
@@ -100,11 +106,12 @@ def compute_forward_returns(
   exclude_limit: bool = True,
   min_listed_days: int = 0,
 ) -> ForwardReturnSet:
-  """Compute forward total returns on forward-adjusted prices with tradability masks.
+  """Compute forward total returns on backward-adjusted (geometric ``BW_SPLIT_FACTOR``) prices with tradability masks.
 
-  Forward returns use forward-adjusted ``open`` / ``close`` prices so dividends,
+  Forward returns use backward-adjusted ``open`` / ``close`` prices so dividends,
   bonus shares, and splits within the holding window are accurately included in
-  total return. Tradability masks use ``volume`` and unadjusted-basis ``limited``.
+  total return without negative prices or lookahead bias. Tradability masks use
+  ``raw_close`` / ``raw_open``, ``volume``, and unadjusted-basis ``limited``.
 
   Entry Alignment Modes:
     * ``"next_open"`` (default): Signal at bar ``t`` close -> enter at bar

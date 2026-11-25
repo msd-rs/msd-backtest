@@ -15,7 +15,7 @@
   - 明确声明 `fin_fields = ["f003", "f205"]`，确保底层按需加载财务特征，避免内存浪费.
   - 声明 `warmup_bars = 60`，确保滚动因子平稳就绪.
 - 核心最佳实践：
-  * 复权隔离：动量因子基于前复权价格 `ctx.close` 计算；估值账面市值比 (BP) 严格使用未复权价格 `ctx.raw_close` 计算.
+  * 复权隔离：动量因子基于等比后复权价格 `ctx.close` 计算；估值账面市值比 (BP) 严格使用未复权价格 `ctx.raw_close` 计算.
   * 稳健截面处理：使用 `np.errstate(divide="ignore", invalid="ignore")` 防御处理除零与缺失值；对单因子进行标准化 (Z-score).
   * 官方调仓 API：直接调用 `ctx.rebalance_objs(target_weights, tolerance=0.01)`，由引擎自动完成被剔除标的平仓与新选标的配资建仓.
 
@@ -114,7 +114,7 @@ class MultiFactorRotationStrategy(mbt.PortfolioStrategy):
     # flat_idx = i * bars + current_bar
     base_indices = np.arange(n_objs) * ctx.bars + current_bar
 
-    # 因子 1: 动量因子 (前复权价格变化率)
+    # 因子 1: 动量因子 (等比后复权价格变化率)
     assert self.roc60 is not None
     mom_vals = self.roc60[base_indices]
 
@@ -141,8 +141,8 @@ class MultiFactorRotationStrategy(mbt.PortfolioStrategy):
     )
 
     # 4. 排序选取得分最高的 Top K 标的
-    # 过滤无效标的（例如已停牌或无有效价格数据标的）
-    valid_mask = np.isfinite(total_scores) & (ctx.close[base_indices] > 0.0)
+    # 过滤无效标的（例如未上市、已停牌或无有效价格数据标的）
+    valid_mask = np.isfinite(total_scores) & (raw_close > 0.0) & (ctx.close[base_indices] > 0.0)
     valid_indices = np.where(valid_mask)[0]
 
     if len(valid_indices) == 0:

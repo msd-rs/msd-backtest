@@ -31,8 +31,8 @@ class Position:
     raw_cost_price (float): Average unadjusted acquisition price per share (真实成交未复权加权买入均价).
     cost_basis (float): Total acquisition cost of currently held shares (shares * raw_cost_price).
     raw_mark_price (float): Latest unadjusted mark-to-market price per share (最新未复权收盘价/现价).
-    adj_cost_price (float): Forward-adjusted equivalent cost price (前复权等效成本价),
-      which can be directly compared with forward-adjusted prices like `ctx.close`.
+    adj_cost_price (float): Adjusted equivalent cost price (复权等效成本价),
+      which can be directly compared with adjusted prices like `ctx.close`.
     dividends (float): Accumulated cash dividends received during holding this position.
     holding_ror (float): Rate of return of current position as a decimal (e.g. 0.05 for +5%).
     holding_pnl (float): Net profit/loss amount of current position.
@@ -92,10 +92,10 @@ class Position:
   def price(self) -> float:
     """[AMBIGUOUS] Backward-compatible price accessor.
 
-    WARNING: Do NOT mix pos.price with forward-adjusted `ctx.close`!
+    WARNING: Do NOT mix pos.price with adjusted `ctx.close`!
     - For holding rate of return / stop-loss: use `pos.holding_ror` or `acc.holding_ror(obj)`.
     - For unadjusted acquisition cost: use `pos.raw_cost_price`.
-    - For forward-adjusted equivalent cost: use `pos.adj_cost_price`.
+    - For adjusted equivalent cost: use `pos.adj_cost_price`.
     - For current unadjusted market price: use `pos.raw_mark_price`.
     """
     if self.raw_mark_price > 0:
@@ -127,9 +127,9 @@ class Position:
 
   @property
   def adj_cost_price(self) -> float:
-    """Forward-adjusted equivalent cost price (前复权等效成本价).
+    """Adjusted equivalent cost price (复权等效成本价).
 
-    Safe to compare directly with forward-adjusted prices such as `ctx.close`.
+    Safe to compare directly with adjusted prices such as `ctx.close`.
     """
     return self._adj_cost_price
 
@@ -883,7 +883,7 @@ class Account:
     if position.shares <= 0:
       return Operation.buy_no_cash(Position(0, 0)), 0.0
 
-    # Initialize forward-adjusted equivalent price if data available
+    # Initialize adjusted equivalent price if data available
     j = self.group * self.dp.bars + ts
     adj_cost = position.price
     if hasattr(self.dp, "data") and "close" in self.dp.data and "price" in self.dp.data:
@@ -940,7 +940,7 @@ class Account:
     """Return position acquisition cost price.
 
     Args:
-      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+      adjusted: If True, returns adjusted equivalent cost (adj_cost_price),
         safe to compare with `ctx.close`. If False, returns unadjusted raw execution cost.
     """
     return self.position.adj_cost_price if adjusted else self.position.raw_cost_price

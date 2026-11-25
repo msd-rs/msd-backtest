@@ -127,8 +127,8 @@ After writing a strategy, you can run it to verify it works as expected.
 
 - `ctx.data(name: str, /, obj: str | None = None) -> np.ndarray`
   the primary method to get data, `name` is the data name, `obj` is used only when comparison, keep `None` for no explicit requirements. `name` can be:
-  - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level (`open`, `high`, `low`, `close`, `vwap` are forward-adjusted to share a consistent scale for technical indicators)
-  - `price`, `raw_open`, `raw_vwap`: unadjusted raw prices. **Important**: When computing market cap (`ctx.price * ctx.total_shares`) or comparing with per-share financial fields (such as PB = `ctx.price / ctx.f003` or PE), always use unadjusted `ctx.price` rather than forward-adjusted `ctx.close`.
+  - `open`, `high`, `low`, `close`, `volume`, `amount`, `vwap` on bar level (`open`, `high`, `low`, `close`, `vwap` are geometric backward-adjusted via `BW_SPLIT_FACTOR` to share a consistent scale for technical indicators; `bw_factor`/`fw_factor` and `bw_price`/`fw_price` are also available)
+  - `price`, `raw_open`, `raw_vwap`: unadjusted raw prices. **Important**: When computing market cap (`ctx.price * ctx.total_shares`) or comparing with per-share financial fields (such as PB = `ctx.price / ctx.f003` or PE), always use unadjusted `ctx.price` rather than adjusted `ctx.close`.
   - `ror` for rate of return since first bar
   - `ror_hold` for rate of return of holding since last buy after clearance.
   - `limited` used to check whether the bar had reached the daily limit. `0` for no limit, `1` for limit up, `-1` for limit down

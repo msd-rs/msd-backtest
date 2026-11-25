@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class PriceCrossDimensionVisitor(ast.NodeVisitor):
-  """Detects cross-dimensional arithmetic between forward-adjusted and raw position prices.
+  """Detects cross-dimensional arithmetic between adjusted and raw position prices.
 
-  Specifically checks for patterns where forward-adjusted price indicators (`ctx.close`, `ctx.open`,
+  Specifically checks for patterns where adjusted price indicators (`ctx.close`, `ctx.open`,
   `ctx.high`, `ctx.low`) are mixed in arithmetic operations (subtraction, division) with position
   execution or acquisition prices (`pos.price`, `pos.cost_price`, `positions[...].price`).
   """
@@ -68,11 +68,11 @@ class PriceCrossDimensionVisitor(ast.NodeVisitor):
           lineno = getattr(stmt, "lineno", "?")
           msg = (
             f"{self.filename}:{lineno}: [ANTI-PATTERN DETECTED] Cross-dimensional price arithmetic detected! "
-            f"Mixing forward-adjusted price ('ctx.close/open') with raw position price ('pos.price/cost_price'). "
-            f"Forward-adjusted prices and raw execution prices have mismatched baselines. "
+            f"Mixing adjusted price ('ctx.close/open') with raw position price ('pos.price/cost_price'). "
+            f"Adjusted prices and raw execution prices have mismatched baselines. "
             f"Upon stock splits or bonus shares (e.g. 10送10), this causes catastrophic false drawdowns (-50% false crash). "
             f"Fix: Use 'ctx.holding_ror(obj)' or 'pos.holding_ror' for holding returns/stop-loss, "
-            f"or 'pos.adj_cost_price' if a forward-adjusted cost baseline is required."
+            f"or 'pos.adj_cost_price' if an adjusted cost baseline is required."
           )
           if msg not in self.warnings:
             self.warnings.append(msg)

@@ -61,7 +61,7 @@ class MyMultiFactor(Factor):
     self.mom_window = int(mom_window)
 
   def compute(self, panel: Panel) -> dict[str, np.ndarray]:
-    # Price-volume momentum uses forward-adjusted `close`
+    # Price-volume momentum uses geometric backward-adjusted `close` (`BW_SPLIT_FACTOR`)
     close = np.asarray(panel.column("close"), dtype=np.float64)
     ref_c = panel.compute(al.REF, "close", self.mom_window)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -89,9 +89,9 @@ uv run python -m mbt.factor strategy/demo_factor.py \
 ## 2. Hard Invariants & Guardrails (Fail-Fast)
 
 1. **Price-Basis Isolation**:
-   - Forward-adjusted (`open`, `high`, `low`, `close`, `vwap`) -> price-volume indicators & forward total returns.
+   - Geometric backward-adjusted (`open`, `high`, `low`, `close`, `vwap` via `BW_SPLIT_FACTOR`) -> price-volume indicators & forward total returns (strictly positive, zero pre-IPO safe, strictly causal).
    - Unadjusted (`raw_close`, `raw_open`, ...) -> valuation multiples (`f003 / raw_close`) & market cap (`cap = raw_close * total_shares`).
-   - Dividing per-share financials (`f001`–`f006`) by forward-adjusted `close` is automatically rejected by AST validation.
+   - Dividing per-share financials (`f001`–`f006`) by adjusted price columns (`close`/`bw_price`/`fw_price`) is automatically rejected by AST validation.
 2. **Strict Causality (Zero Lookahead)**:
    - Lookahead operators (`fret`, `backset`) and negative lags (`ts_delay(close, -1)`) are rejected statically.
    - A dynamic **causality probe** runs by default: it truncates the panel at historical probe bars, re-runs `compute()`, and fails fast if any value changes when future bars are removed.

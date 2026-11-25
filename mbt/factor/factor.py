@@ -83,9 +83,10 @@ class Factor:
 
     Args:
       panel: Rectangular ``(n_objs, bars)`` market and financial data panel.
-        Use forward-adjusted columns (``open``, ``high``, ``low``, ``close``,
-        ``vwap``) for price-volume indicators, and unadjusted raw columns
-        (``raw_close``, ``raw_open``, ...) for valuation ratios and market cap.
+        Use geometric backward-adjusted columns (``open``, ``high``, ``low``,
+        ``close``, ``vwap`` via ``BW_SPLIT_FACTOR``) for price-volume indicators,
+        and unadjusted raw columns (``raw_close``, ``raw_open``, ...) for
+        valuation ratios and market cap.
 
     Returns:
       Either a single factor array of shape ``(n_objs, bars)`` (or flat
@@ -136,7 +137,7 @@ class _FactorAntiPatternVisitor(ast.NodeVisitor):
         self._check_call(stmt)
       if isinstance(stmt, ast.Assign):
         col = self._extract_panel_column_name(stmt.value)
-        if col in ("close", "open", "high", "low"):
+        if col in ("close", "open", "high", "low", "vwap", "bw_price", "fw_price"):
           for t in stmt.targets:
             if isinstance(t, ast.Name):
               fw_close_vars.add(t.id)
@@ -154,10 +155,10 @@ class _FactorAntiPatternVisitor(ast.NodeVisitor):
         if (left_fw and right_fin) or (right_fw and left_fin):
           lineno = getattr(stmt, "lineno", "?")
           msg = (
-            f"{self.filename}:{lineno}: [ANTI-PATTERN DETECTED] Dividing forward-adjusted "
-            "price ('close/open/high/low') with per-share financial field ('f001'-'f006'). "
+            f"{self.filename}:{lineno}: [ANTI-PATTERN DETECTED] Dividing adjusted "
+            "price ('close/open/high/low/vwap/bw_price/fw_price') with per-share financial field ('f001'-'f006'). "
             "Per-share financials are reported on unadjusted share bases; mixing them with "
-            "forward-adjusted prices distorts historical valuation multiples after stock splits. "
+            "adjusted prices distorts historical valuation multiples after stock splits. "
             "Fix: Use 'raw_close' (e.g. panel.column('raw_close')) instead."
           )
           if msg not in self.errors:
@@ -252,7 +253,7 @@ class _FactorAntiPatternVisitor(ast.NodeVisitor):
     if isinstance(node, ast.Name) and node.id in fw_vars:
       return True
     col = self._extract_panel_column_name(node)
-    return col in ("close", "open", "high", "low")
+    return col in ("close", "open", "high", "low", "vwap", "bw_price", "fw_price")
 
   def _is_per_share_fin(self, node: ast.AST, fin_vars: set[str]) -> bool:
     if isinstance(node, ast.Name) and node.id in fin_vars:

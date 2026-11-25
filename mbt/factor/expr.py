@@ -30,7 +30,7 @@ _ADV_RE = re.compile(r"^ADV(\d*)$")
 _ADV_AMT_RE = re.compile(r"^(?:ADV_AMT|ADTV)(\d+)$")
 _INLINE_NAME_RE = re.compile(r"^([a-zA-Z_]\w*)\s*=(?!=)\s*(.+)$")
 _PER_SHARE_FIN_UPPER = {"F001", "F002", "F003", "F004", "F005", "F006"}
-_FW_PRICE_UPPER = {"OPEN", "HIGH", "LOW", "CLOSE", "VWAP"}
+_ADJ_PRICE_UPPER = {"OPEN", "HIGH", "LOW", "CLOSE", "VWAP", "BW_PRICE", "FW_PRICE"}
 _FORBIDDEN_OPS = {"FRET", "BACKSET"}
 _LAG_CHECK_OPS = {"TS_DELAY", "DELAY", "REF", "TS_DELTA", "DELTA"}
 _ROLLING_WINDOW_OPS = {
@@ -47,8 +47,9 @@ _ROLLING_WINDOW_OPS = {
 }
 
 KNOWN_FIELDS: set[str] = {
-  # Forward-adjusted market columns
+  # Adjusted market columns & geometric adjustment factors
   "OPEN", "HIGH", "LOW", "CLOSE", "VWAP", "VOLUME", "VOL", "AMOUNT",
+  "BW_PRICE", "FW_PRICE", "BW_FACTOR", "FW_FACTOR", "ADJ_FACTOR",
   # Unadjusted raw price columns (for valuation & market cap)
   "RAW_OPEN", "RAW_HIGH", "RAW_LOW", "RAW_CLOSE", "RAW_VWAP", "PRICE",
   # Share capital & market cap
@@ -245,6 +246,10 @@ class PanelExecContext(al.ExecContext):
       return self.VOLUME
     if key == "AMOUNT":
       return self.AMOUNT
+    if key == "ADJ_FACTOR":
+      if "BW_FACTOR" in self._cols_lower:
+        return self._buf(self._cols_lower["BW_FACTOR"])
+      return np.ones_like(self.CLOSE)
     if key in self._cache:
       return self._cache[key]
 
@@ -563,14 +568,14 @@ def compile_expression(
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
       lv = _resolve_var(node.left)
       rv = _resolve_var(node.right)
-      if (lv in _PER_SHARE_FIN_UPPER and rv in _FW_PRICE_UPPER) or (
-        rv in _PER_SHARE_FIN_UPPER and lv in _FW_PRICE_UPPER
+      if (lv in _PER_SHARE_FIN_UPPER and rv in _ADJ_PRICE_UPPER) or (
+        rv in _PER_SHARE_FIN_UPPER and lv in _ADJ_PRICE_UPPER
       ):
         raise ValueError(
           f"[ANTI-PATTERN DETECTED] Factor expression '{name}' divides per-share financial "
-          f"field ('{lv if lv in _PER_SHARE_FIN_UPPER else rv}') with forward-adjusted price "
-          f"('{rv if rv in _FW_PRICE_UPPER else lv}'). "
-          "Fix: Use 'raw_close' instead of 'close' for valuation ratios (e.g. 'f003 / raw_close')."
+          f"field ('{lv if lv in _PER_SHARE_FIN_UPPER else rv}') with adjusted price "
+          f"('{rv if rv in _ADJ_PRICE_UPPER else lv}'). "
+          "Fix: Use 'raw_close' instead of adjusted prices for valuation ratios (e.g. 'f003 / raw_close')."
         )
 
   fin_fields = tuple(sorted(v.lower() for v in variables if _FIN_FIELD_RE.match(v)))
@@ -817,7 +822,7 @@ def format_operator_catalog() -> str:
     "# mbt.factor Expression Specification (Canonical WorldQuant BRAIN + WQ101/GTJA191 Compatible)",
     "",
     "## Data Fields",
-    "- **Forward-adjusted prices (for price-volume/momentum)**: `open`, `high`, `low`, `close`, `vwap`, `returns` (`ret`)",
+    "- **Backward-adjusted prices (geometric `BW_SPLIT_FACTOR`, for price-volume/momentum)**: `open`, `high`, `low`, `close`, `vwap`, `returns` (`ret`), `bw_price`, `fw_price`, `bw_factor` (`adj_factor`), `fw_factor`",
     "- **Unadjusted raw prices (REQUIRED for valuation/market cap)**: `raw_open`, `raw_high`, `raw_low`, `raw_close` (`price`), `raw_vwap`",
     "- **Volume & Amount**: `volume` (`vol`), `amount`, `adv{N}` = `MA(volume, N)`, `adv_amt{N}` / `adtv{N}` = `MA(amount, N)`",
     "- **Market Cap & Shares**: `total_shares`, `tradable_shares`, `cap` (`raw_close * total_shares`), `float_cap` (`raw_close * tradable_shares`)",
@@ -840,7 +845,7 @@ def format_operator_catalog() -> str:
     "",
     "## Guardrails (Fail-Fast)",
     "- Use `^` instead of `**` for power.",
-    "- Never divide per-share financials (`f001`-`f006`) by forward-adjusted `close`; always use `raw_close`.",
+    "- Never divide per-share financials (`f001`-`f006`) by adjusted `close` (`bw_price`/`fw_price`); always use `raw_close`.",
     "- Lookahead operators (`fret`, `backset`) and negative lags (`ts_delay(x, -1)`) are rejected.",
   ]
   return "\n".join(lines)

@@ -186,7 +186,7 @@ class Context:
       - `pos.ror`: rate of return as decimal (e.g. -0.05 for -5% loss).
       - `pos.unrealized_pnl`: net unrealized profit/loss amount.
       - `pos.holding_days`: number of bars/trading days this position has been held.
-      - `pos.adj_cost_price`: equivalent forward-adjusted cost basis, safe to compare with `ctx.close`.
+      - `pos.adj_cost_price`: equivalent adjusted cost basis, safe to compare with `ctx.close`.
       - `pos.is_holding`: True if currently holding shares (shares > 0).
     """
     pass
@@ -195,7 +195,7 @@ class Context:
     """Return holding rate of return as a decimal (e.g. -0.05 for -5%).
 
     Safe, cross-dimensional and corporate-action-aware holding return calculator.
-    Eliminates forward-adjusted vs raw price mismatch and dividend/split distortions.
+    Eliminates adjusted vs raw price mismatch and dividend/split distortions.
     """
     pass
 
@@ -208,7 +208,7 @@ class Context:
 
     Args:
       obj: Symbol or group index.
-      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price),
+      adjusted: If True, returns adjusted equivalent cost (adj_cost_price),
         safe to compare with `ctx.close`. If False, returns raw execution cost price.
     """
     pass

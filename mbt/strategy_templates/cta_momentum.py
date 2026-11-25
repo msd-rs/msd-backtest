@@ -18,7 +18,7 @@
     1. 动态 ATR 波动率追踪止损：以买入后的最高价 - N * ATR 建立动态跟踪防线，让利润奔跑的同时锁住回撤.
     2. 兜底硬止损：统一调用官方一等公民 API `ctx.holding_ror(obj)` 触发最大亏损截断.
     3. 通道下轨破位离场：跌破 N 日最低价顺势离场.
-  * 价格语义隔离：形态突破与波幅计算使用前复权价格（`ctx.close`, `ctx.high`, `ctx.low`）；
+  * 价格语义隔离：形态突破与波幅计算使用等比后复权价格（`ctx.close`, `ctx.high`, `ctx.low`）；
     成本等效比对使用 `pos.adj_cost_price` 或 `ctx.cost_price(obj, adjusted=True)`.
 
 【CLI 运行范例】：
@@ -159,7 +159,7 @@ class CtaMomentumStrategy(mbt.Strategy):
     cur_atr = self.atr[idx]
 
     if np.any(held):
-      # 跟踪持仓期间的最高前复权价格（用于动态 ATR 追踪止损）
+      # 跟踪持仓期间的最高复权价格（用于动态 ATR 追踪止损）
       self.highest_price[held] = np.maximum(self.highest_price[held], cur_high[held])
 
     manageable = held & ~self.pending_exit

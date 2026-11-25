@@ -81,7 +81,14 @@ class SelectorDataProvider:
 
     Column semantics
     ----------------
-    * `open/high/low/close`: forward-adjusted (split/bonus/dividend applied). Use for technical indicators.
+    * `open/high/low/close/vwap`: backward-adjusted using geometric ``BW_SPLIT_FACTOR``
+      (split/bonus/dividend applied). Strictly positive on listed bars, preserves
+      0.0 pre-IPO, keeps total-return & OHLC ratios exact, and is strictly causal.
+      Use for technical indicators and momentum.
+    * `bw_price` / `fw_price`: geometric backward-adjusted / forward-adjusted close
+      (``raw_close * bw_factor`` / ``raw_close * fw_factor``).
+    * `bw_factor` / `fw_factor`: geometric cumulative backward / forward adjustment
+      factors computed from ``raw_close``.
     * `raw_open/raw_high/raw_low/raw_close` (and `price` alias for `raw_close`): UNADJUSTED raw prices.
       Always use `raw_close` when computing valuation multiples with per-share financials (e.g. PB = raw_close / f003)
       or total market capitalization (raw_close * total_shares).

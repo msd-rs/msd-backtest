@@ -9,7 +9,7 @@ import polars as pl
 import alpha as al
 import pymsd
 from mbt import DataProvider
-from mbt.shared import get_limit_ratio, to_statutory_disclosure_date
+from mbt.shared import apply_price_adjustment, get_limit_ratio, to_statutory_disclosure_date
 
 logger = logging.getLogger("msd_loader")
 
@@ -397,21 +397,8 @@ SELECT * FROM stock_shares WHERE obj in ({where_}) {shares_ts_cond}{shares_limit
     is_limit_down = (data["price"] == data["low"]) & (data["price"] <= limit_down_price)
     data["limited"] = np.where(is_limit_up, 1, np.where(is_limit_down, -1, 0))
 
-    data["bw_price"] = al.BW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-    data["fw_price"] = al.FW_SPLIT(data["close"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-
-    logger.info("adjustment factors generated")
-    # apply forward factor to all price related columns used to do technical analysis
-    data["open"] = al.FW_SPLIT(data["open"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-    data["high"] = al.FW_SPLIT(data["high"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-    data["low"] = al.FW_SPLIT(data["low"], data["dividend"], data["transfer_shares"], data["right_shares"], data["right_price"])
-    data["close"] = data["fw_price"]
-    with np.errstate(divide="ignore", invalid="ignore"):
-      raw_vwap = np.where(data["volume"] > 0, data["amount"] / data["volume"], np.nan)
-      fw_factor = np.where(data["price"] > 0, data["fw_price"] / data["price"], 1.0)
-    data["raw_vwap"] = raw_vwap
-    data["vwap"] = raw_vwap * fw_factor
-    logger.info("adjustment factors applied")
+  apply_price_adjustment(data, groups=dp.groups)
+  logger.info("geometric adjustment factors generated and applied")
 
   if dp.bars == 0:
     raise ValueError("No data found for the given objs and date range.")

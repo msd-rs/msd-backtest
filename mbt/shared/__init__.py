@@ -16,6 +16,7 @@ from .stocks import (
   get_stock_by_industries,
   get_stock_industry_map,
 )
+from .adjust import apply_price_adjustment
 from .financial import to_statutory_disclosure_date
 from .downsample import minmax_downsample
 from .inspect_strategy import (
@@ -51,6 +52,7 @@ __all__ = [
   'STATUS_STAR_ST',
   'StrategyMetadata',
   'VALID_RUN_MODES',
+  'apply_price_adjustment',
   'get_limit_ratio',
   'get_industry_by_stocks',
   'get_stock_by_industries',

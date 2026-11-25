@@ -46,6 +46,9 @@ def test_load_data_real():
   assert "vwap" in dp.data
   assert "fw_price" in dp.data
   assert "bw_price" in dp.data
+  assert "bw_factor" in dp.data
+  assert "fw_factor" in dp.data
+  assert np.allclose(dp.data["close"], dp.data["bw_price"], equal_nan=True)
   assert "limited" in dp.data
   assert "limit_ratio" in dp.data
   # Verify lookback populates share fields at bar 0 of Jan 2025

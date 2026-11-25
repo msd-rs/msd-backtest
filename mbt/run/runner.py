@@ -293,7 +293,7 @@ class RunnerContext(Context):
 
     Args:
       obj: Symbol or group index (optional).
-      adjusted: If True, returns forward-adjusted equivalent cost (adj_cost_price).
+      adjusted: If True, returns adjusted equivalent cost (adj_cost_price).
         If False, returns raw execution cost price.
     """
     pos = self.position(obj)

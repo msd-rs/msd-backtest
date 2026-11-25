@@ -20,7 +20,7 @@ VALID_NEUTRALIZE = ("industry", "mktcap")
 def compute_log_mktcap(panel: Panel) -> np.ndarray:
   """Compute ``log(raw_close * total_shares)`` of shape ``(n_objs, bars)``.
 
-  Strictly uses unadjusted ``raw_close`` (never forward-adjusted ``close``) to
+  Strictly uses unadjusted ``raw_close`` (never adjusted ``close``) to
   preserve true point-in-time market capitalization semantics.
   """
   if "raw_close" in panel.columns:

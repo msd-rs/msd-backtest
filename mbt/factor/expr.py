@@ -464,7 +464,7 @@ def compile_expression(
 
   Raises:
     ValueError: On syntax errors, unknown operators/fields, lookahead primitives,
-      negative lags, or forward-adjusted valuation anti-patterns.
+      negative lags, or adjusted-price valuation anti-patterns.
   """
   expr = expression.strip()
   if not expr:

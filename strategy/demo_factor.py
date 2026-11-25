@@ -4,7 +4,7 @@
 """Reference multi-factor example for ``mbt.factor.cli``.
 
 Demonstrates Agent-First factor evaluation best practices:
-  * Forward-adjusted ``close`` for momentum / reversal factors.
+  * Geometric backward-adjusted ``close`` for momentum / reversal factors.
   * Unadjusted ``raw_close`` for fundamental valuation ratio (BP = f003 / raw_close).
   * Explicit ``fin_fields`` and ``warmup_bars`` declarations.
   * Returning a multi-factor dictionary for leaderboard & correlation comparison.

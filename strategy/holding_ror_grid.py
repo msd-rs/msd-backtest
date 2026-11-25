@@ -13,7 +13,7 @@
 【架构与风控规范】：
 - 持仓收益率统一调用 `ctx.holding_ror(g)`，底层自动兼容现金分红与送转股成本稀释，
   避免高送转除权导致虚假暴跌并误触发补仓。
-- 技术均线 `MA60` 在 `prepare()` 阶段基于前复权 `ctx.close` 一次性向量化预计算。
+- 技术均线 `MA60` 在 `prepare()` 阶段基于等比后复权 `ctx.close` 一次性向量化预计算。
 
 【CLI 运行示例】：
   uv run python -m mbt.run.cli strategy/holding_ror_grid.py -s SH600000 -b 2023-01-01 -e 2023-12-31 -S

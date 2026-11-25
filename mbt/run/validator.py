@@ -31,7 +31,7 @@ class PriceCrossDimensionVisitor(ast.NodeVisitor):
     self.generic_visit(node)
 
   def _check_function_scope(self, func_node: ast.FunctionDef | ast.AsyncFunctionDef):
-    # Track variables assigned from forward-adjusted prices (ctx.close, ctx.open, etc.)
+    # Track variables assigned from adjusted prices (ctx.close, ctx.open, etc.)
     fw_vars: set[str] = set()
     # Track variables assigned from position prices (pos.price, pos.cost_price, etc.)
     pos_price_vars: set[str] = set()

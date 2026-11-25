@@ -20,6 +20,7 @@ from .account import (
   Fee,
   Operation,
   Position,
+  update_adj_cost_for_paid_rights,
 )
 from .data_provider import DataProvider
 from .select.panel import Panel
@@ -556,7 +557,6 @@ class PortfolioAccount:
         if pos.shares > 0:
           ratio = old_shares / pos.shares
           pos.raw_cost_price *= ratio
-          pos._adj_cost_price *= ratio
       if r_share > 0 and not np.isnan(r_share):
         max_r = pos.shares * r_share
         if r_price > 0 and not np.isnan(r_price):
@@ -568,13 +568,24 @@ class PortfolioAccount:
           actual_r = max_r
           right_cost = 0.0
         if actual_r > 0:
+          old_shares = pos.shares
           old_cost = pos.cost_basis
-          old_raw_cost = pos.raw_cost_price
           pos.shares += actual_r
           if pos.shares > 0:
             pos.raw_cost_price = (old_cost + right_cost) / pos.shares
-            if old_raw_cost > 0:
-              pos._adj_cost_price = pos._adj_cost_price * (pos.raw_cost_price / old_raw_cost)
+            if right_cost > 0:
+              pos._adj_cost_price = update_adj_cost_for_paid_rights(
+                pos._adj_cost_price,
+                old_shares,
+                pos.shares,
+                actual_r,
+                float(r_price),
+                float(div),
+                float(trans),
+                getattr(self.dp, "data", None),
+                g * self.bars,
+                ts,
+              )
 
   def _sell_group(self, g: int, ts: int, shares_to_sell: float, deal_price: float):
     pos = self.positions[g]
@@ -1466,7 +1477,15 @@ class PortfolioRunner:
         for i in dp:
           bar_ctx.end = i + 1
           bar_ctx.apply()
-          engine.apply_corporate_actions(i, div_all, trans_all, rs_all, rp_all)
+          engine.apply_corporate_actions(
+            i,
+            div_all,
+            trans_all,
+            rs_all,
+            rp_all,
+            raw_prices=prices,
+            fw_prices=fw_prices_all,
+          )
           strategy.execute(self.ctx)
 
           sig_i = i - 1 if is_next_open else i

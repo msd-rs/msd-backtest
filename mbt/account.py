@@ -23,6 +23,62 @@ ACTION_SELL_NO_HOLD = 6
 logger = logging.getLogger(__name__)
 
 
+def _resolve_adj_factors(
+  data: dict[str, np.ndarray],
+  off: int,
+  ts: int,
+) -> tuple[float, float, float] | None:
+  """Return (f_prev, f_cur, prev_raw) where f = close / price for paid-rights scaling."""
+  if "price" not in data or "close" not in data:
+    return None
+  raw_arr = data["price"]
+  fw_arr = data["close"]
+  idx = off + ts
+  raw_cur = float(raw_arr[idx])
+  fw_cur = float(fw_arr[idx])
+  if np.isnan(raw_cur) or raw_cur <= 0.0 or np.isnan(fw_cur) or fw_cur <= 0.0:
+    return None
+  f_cur = fw_cur / raw_cur
+  f_prev = f_cur
+  prev_raw = 0.0
+  for k in range(ts - 1, -1, -1):
+    p_idx = off + k
+    rp = float(raw_arr[p_idx])
+    fp = float(fw_arr[p_idx])
+    if not np.isnan(rp) and rp > 0.0 and not np.isnan(fp) and fp > 0.0:
+      prev_raw = rp
+      f_prev = fp / rp
+      break
+  return (f_prev, f_cur, prev_raw)
+
+
+def update_adj_cost_for_paid_rights(
+  adj_cost: float,
+  old_shares: float,
+  new_shares: float,
+  actual_r: float,
+  r_price: float,
+  div: float,
+  trans: float,
+  data: dict[str, np.ndarray] | None,
+  off: int,
+  ts: int,
+) -> float:
+  """Reweight adjusted equivalent cost price on paid rights subscription."""
+  if new_shares <= 0.0 or actual_r <= 0.0 or r_price <= 0.0 or np.isnan(r_price) or not data:
+    return adj_cost
+  adj_info = _resolve_adj_factors(data, off, ts)
+  if adj_info is None:
+    return adj_cost
+  f_prev, f_cur, prev_raw = adj_info
+  step_factor = (f_cur / f_prev) if f_prev > 0.0 else 1.0
+  if div > 0.0 and not np.isnan(div) and prev_raw > div:
+    step_factor *= (prev_raw - div) / prev_raw
+  if trans > 0.0 and not np.isnan(trans):
+    step_factor /= 1.0 + trans
+  return float((old_shares * adj_cost * step_factor + actual_r * r_price * f_cur) / new_shares)
+
+
 class Position:
   """Position represents a stock holding position in an account.
 
@@ -786,7 +842,6 @@ class Account:
           if self.position.shares > 0:
             ratio = old_shares / self.position.shares
             self.position.raw_cost_price *= ratio
-            self.position._adj_cost_price *= ratio
         if right_share > 0 and not np.isnan(right_share):
           max_right_shares = self.position.shares * right_share
           if right_price > 0 and not np.isnan(right_price):
@@ -798,14 +853,23 @@ class Account:
             actual_right = max_right_shares
             right_cost = 0.0
           if actual_right > 0:
+            old_shares = self.position.shares
             old_cost = self.position.cost_basis
-            old_raw_cost = self.position.raw_cost_price
             self.position.shares += actual_right
             if self.position.shares > 0:
               self.position.raw_cost_price = (old_cost + right_cost) / self.position.shares
-              if old_raw_cost > 0:
-                self.position._adj_cost_price = self.position._adj_cost_price * (
-                  self.position.raw_cost_price / old_raw_cost
+              if right_cost > 0:
+                self.position._adj_cost_price = update_adj_cost_for_paid_rights(
+                  self.position._adj_cost_price,
+                  old_shares,
+                  self.position.shares,
+                  actual_right,
+                  float(right_price),
+                  float(dividend),
+                  float(transfer_shares),
+                  getattr(self.dp, "data", None),
+                  self.group * self.dp.bars,
+                  ts,
                 )
 
     op_price = operation.position.price

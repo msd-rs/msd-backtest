@@ -10,7 +10,7 @@
 |---|---|---|
 | **核心定位** | **Agent-First（AI Agent 优先）的确定性因子投研与防错引擎** | **AI/ML 优先的端到端量化研究平台** |
 | **核心工作流** | 面向单因子/批量表达式的**极小验证闭环**：定义因子 → 自动依赖推断 → 因果与复权校验 → 截面评估 → 进入 `mbt.select` / `mbt.run` 策略 | 面向**机器学习全流程（`qrun`）**：原始/Alpha158 特征工程 → `DatasetH` 切分 → 模型训练（LightGBM/PyTorch）→ 信号预测 → `PortAnaRecord` 组合回测 |
-| **错误处理哲学** | **Fail-Fast（零容忍静默降级）**：错误参数、未来函数、前复权混算基本面、样本不足等直接抛异常阻断 | **配置驱动与科研灵活性**：容忍宽泛的表达式与 `Processor` 组合，依赖研究者自身配置正确性（如自行区分 `infer` 与 `learn` 处理器） |
+| **错误处理哲学** | **Fail-Fast（零容忍静默降级）**：错误参数、未来函数、复权价格混算基本面、样本不足等直接抛异常阻断 | **配置驱动与科研灵活性**：容忍宽泛的表达式与 `Processor` 组合，依赖研究者自身配置正确性（如自行区分 `infer` 与 `learn` 处理器） |
 | **典型交互入口** | CLI 一行命令（`-E` 内联表达式、`.txt/.json` 批量文件、`.py` 子类）或 Python API (`evaluate_factor`) | YAML 配置文件（`qrun`）+ Python SDK (`D.features` / `DataHandlerLP` / `Recorder`) + Jupyter Notebook |
 
 > [!NOTE]
@@ -24,7 +24,7 @@
 |---|---|---|
 | **存储与数据源** | 默认连接 MSD HTTP 数据库服务（`http://localhost:50510`），通过 Polars/NumPy 加载行情、股本、申万行业与财报 | 本地列式二进制存储（`.bin` 按股票-字段独立文件 + 日历/股票池索引），支持 `QlibDataLoader` 与 `StaticDataLoader` |
 | **核心数据结构** | [Panel](file:///home/jia/repo/msd-backtest/mbt/select/panel.py#L16-L35)：严格矩形 `(n_objs, bars)` 2D 连续 NumPy 缓冲区（块布局 `i*bars .. (i+1)*bars`），携带 `objs` 元数据并支持零拷贝视图与 Polars 惰性物化 | `pandas.DataFrame`（通常为 `(datetime, instrument)` 或 `(instrument, datetime)` 双层 MultiIndex），配合 `DiskExpressionCache` / `DiskDatasetCache` 缓存表达式结果 |
-| **复权价格体系** | **显式双轨制**（[PanelExecContext](file:///home/jia/repo/msd-backtest/mbt/factor/expr.py#L67-L135)）：<br>• 前复权：`open` / `high` / `low` / `close` / `vwap`<br>• 未复权：`raw_open` / `raw_high` / `raw_low` / `raw_close` (`price`) / `raw_vwap` | 通常默认存储**后复权或前复权价格 + `$factor` 复权因子**（`$close` 为复权价，真实未复权价格需由 `$close / $factor` 等方式换算） |
+| **复权价格体系** | **显式双轨制**（[PanelExecContext](file:///home/jia/repo/msd-backtest/mbt/factor/expr.py#L67-L135)）：<br>• 等比后复权（`BW_SPLIT_FACTOR`）：`open` / `high` / `low` / `close` / `vwap`<br>• 未复权：`raw_open` / `raw_high` / `raw_low` / `raw_close` (`price`) / `raw_vwap` | 通常默认存储**后复权或前复权价格 + `$factor` 复权因子**（`$close` 为复权价，真实未复权价格需由 `$close / $factor` 等方式换算） |
 | **基准与日历对齐** | 强制以 `--benchmark`（默认 `SH000300`）作为交易日历对齐基准，在加载后将基准从截面中剥离（防止污染 IC/分位数），同时透传 `benchmark_close` / `benchmark_open` 给因子与超额基准 | 通过 `instruments`（如 `csi300`）与 `calendar` 对齐时间轴；跨标的引用基准需在表达式中显式使用 `ChangeInstrument("SH000300", ...)` |
 | **Warmup 预热管理** | 表达式 AST **自动推断**滚动窗口所需的 `warmup_bars`（并在评估前自动加载、评估指标时自动剔除），支持 `--warmup-bars` 覆盖 | `QlibDataLoader` 按表达式依赖自动向前扩窗读取 `.bin` 历史片段，再裁剪到 `start_time ~ end_time` |
 
@@ -58,7 +58,7 @@
    - **`mbt.factor`**：底层统一按**法定披露截止日**（04-30 / 08-31 / 10-31）做 backward asof 对齐，支持 `fin_only_year` 与 `fin_lookback_days`，无需策略作者手写 PIT 逻辑。
    - **`Qlib`**：提供独立的 `qlib.data.pit` 模块（`P()`、`PRef()` 算子与 `$$field_q` 语法），基于公告日 `date` 与报告期 `period` 构建双索引二进制存储；需要用户单独准备并转换 PIT 格式财务数据库。
 2. **价格复权语义隔离（`mbt` 独有强校验）**：
-   - **`mbt.factor`**：静态 AST 检查（[compile_expression](file:///home/jia/repo/msd-backtest/mbt/factor/expr.py#L563-L574) 与 [_FactorAntiPatternVisitor](file:///home/jia/repo/msd-backtest/mbt/factor/factor.py#L148-L165)）直接禁止将每股财务指标（`f001`–`f006`）与前复权价格（`close`/`open`/`high`/`low`）相除，强制要求使用 `raw_close`，从源头杜绝送转股导致的估值扭曲。
+   - **`mbt.factor`**：静态 AST 检查（[compile_expression](file:///home/jia/repo/msd-backtest/mbt/factor/expr.py#L563-L574) 与 [_FactorAntiPatternVisitor](file:///home/jia/repo/msd-backtest/mbt/factor/factor.py#L148-L165)）直接禁止将每股财务指标（`f001`–`f006`）与复权价格（`close`/`open`/`high`/`low`/`bw_price`/`fw_price`）相除，强制要求使用 `raw_close`，从源头杜绝送转股导致的估值扭曲。
    - **`Qlib`**：框架层不做跨语义的 AST 报错拦截，若将复权 `$close` 与未复权财务数据直接混算，不会抛出异常。
 3. **因果性与前视偏差防线**：
    - **`mbt.factor`（双重防线）**：

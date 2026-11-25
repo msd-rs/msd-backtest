@@ -21,7 +21,7 @@ dev = ["pytest>=9.0.2", "pytest-benchmark>=5.2.3", "xlrd>=2.0.2"]
 excel = ["openpyxl>=3.1.5"]
 
 [project.optional-dependencies]
-alpha = ["py-alpha-lib>=0.5"]
+alpha = ["py-alpha-lib>=0.5.2"]
 msd = ["pymsd>=0.1", "polars>=1.0.0", "xlsxwriter>=3.2.9"]
 server = ["fastapi[standard]>=0.135.1", "uvicorn>=0.54", "msd-backtest[cli]"]
 cli = [

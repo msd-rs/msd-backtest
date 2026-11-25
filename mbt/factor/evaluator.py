@@ -21,12 +21,14 @@ from mbt.factor.factor import (
 from mbt.factor.metrics import (
   ICSummary,
   QuantileAnalysis,
+  assign_quantiles,
   compute_annual_breakdown,
   compute_factor_correlation_matrix,
   compute_holdout_breakdown,
   compute_ic_series,
   compute_industry_breakdown,
-  compute_quantile_analysis,
+  compute_quantile_analyses,
+  compute_rank_ic_series,
   compute_turnover_and_autocorr,
   summarize_ic,
 )
@@ -327,7 +329,7 @@ def evaluate_panel(
     # Market cap exposure diagnostic
     mktcap_corr: float | None = None
     if log_mktcap is not None:
-      _, cap_ric = compute_ic_series(proc_mat, log_mktcap, min_obs=min_obs)
+      cap_ric = compute_rank_ic_series(proc_mat, log_mktcap, min_obs=min_obs)
       v_cap = cap_ric[np.isfinite(cap_ric)]
       if len(v_cap) > 0:
         mktcap_corr = float(np.mean(v_cap))
@@ -335,26 +337,29 @@ def evaluate_panel(
     ic_summaries: dict[int, ICSummary] = {}
     ic_series_map: dict[int, np.ndarray] = {}
     rank_ic_series_map: dict[int, np.ndarray] = {}
-    qa_map: dict[int, QuantileAnalysis] = {}
 
     for p in norm_periods:
       ic_s, ric_s = compute_ic_series(proc_mat, fwd_set.forward_returns[p], min_obs=min_obs)
       ic_series_map[p] = ic_s
       rank_ic_series_map[p] = ric_s
       ic_summaries[p] = summarize_ic(ic_s, ric_s, period=p)
-      qa_map[p] = compute_quantile_analysis(
-        proc_mat,
-        fwd_set,
-        p,
-        n_quantiles=quantiles,
-        cost_bps=cost_bps,
-        benchmark_daily_ret=bench_daily_ret,
-      )
+
+    bins = assign_quantiles(proc_mat, n_quantiles=quantiles)
+    qa_map = compute_quantile_analyses(
+      proc_mat,
+      fwd_set,
+      norm_periods,
+      n_quantiles=quantiles,
+      cost_bps=cost_bps,
+      benchmark_daily_ret=bench_daily_ret,
+      bins=bins,
+    )
 
     turnover_stats = compute_turnover_and_autocorr(
       proc_mat,
       n_quantiles=quantiles,
       min_obs=min_obs,
+      bins=bins,
     )
 
     annual_rows = compute_annual_breakdown(

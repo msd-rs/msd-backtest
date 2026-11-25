@@ -98,28 +98,6 @@ class QuantileAnalysis:
     return d
 
 
-def _pearson_cross_section(
-  x: np.ndarray,
-  y: np.ndarray,
-  min_obs: int = 10,
-) -> np.ndarray:
-  """Vectorized cross-sectional Pearson correlation along axis 0 for ``(n_objs, bars)`` arrays."""
-  valid = np.isfinite(x) & np.isfinite(y)
-  cnt = np.sum(valid, axis=0)
-  xv = np.where(valid, x, 0.0)
-  yv = np.where(valid, y, 0.0)
-
-  with np.errstate(divide="ignore", invalid="ignore"):
-    xm = np.where(cnt > 0, np.sum(xv, axis=0) / cnt, 0.0)
-    ym = np.where(cnt > 0, np.sum(yv, axis=0) / cnt, 0.0)
-    xc = np.where(valid, x - xm[None, :], 0.0)
-    yc = np.where(valid, y - ym[None, :], 0.0)
-    num = np.sum(xc * yc, axis=0)
-    den = np.sqrt(np.sum(xc * xc, axis=0) * np.sum(yc * yc, axis=0))
-    corr = np.where((cnt >= min_obs) & (den > 1e-12), num / den, np.nan)
-  return corr
-
-
 def compute_ic_series(
   factor: np.ndarray,
   fwd_ret: np.ndarray,
@@ -128,8 +106,8 @@ def compute_ic_series(
 ) -> tuple[np.ndarray, np.ndarray]:
   """Compute daily cross-sectional Pearson IC and Spearman RankIC series.
 
-  Uses Rust-accelerated ``alpha.CC_RANK`` on the common valid mask for exact
-  Spearman rank correlation with tie averaging.
+  Uses Rust-accelerated ``alpha.CC_IC`` on mutually finite observations per bar
+  with average-rank tie breaking.
 
   Args:
     factor: 2D factor matrix of shape ``(n_objs, bars)``.
@@ -139,19 +117,20 @@ def compute_ic_series(
   Returns:
     Tuple ``(ic_series, rank_ic_series)``, each of shape ``(bars,)``.
   """
-  n_objs, bars = factor.shape
-  ic = _pearson_cross_section(factor, fwd_ret, min_obs=min_obs)
+  ic, rank_ic = al.CC_IC(factor, fwd_ret, min_obs=int(min_obs))
+  return np.asarray(ic, dtype=np.float64), np.asarray(rank_ic, dtype=np.float64)
 
-  valid = np.isfinite(factor) & np.isfinite(fwd_ret)
-  f_masked = np.ascontiguousarray(np.where(valid, factor, np.nan), dtype=np.float64)
-  r_masked = np.ascontiguousarray(np.where(valid, fwd_ret, np.nan), dtype=np.float64)
 
-  with al.Context(groups=n_objs, flags=al.FLAG_SKIP_NAN, start=0, end=bars):
-    f_rank = np.asarray(al.CC_RANK(f_masked.reshape(-1)), dtype=np.float64).reshape(n_objs, bars)
-    r_rank = np.asarray(al.CC_RANK(r_masked.reshape(-1)), dtype=np.float64).reshape(n_objs, bars)
-
-  rank_ic = _pearson_cross_section(f_rank, r_rank, min_obs=min_obs)
-  return ic, rank_ic
+def compute_rank_ic_series(
+  factor: np.ndarray,
+  fwd_ret: np.ndarray,
+  *,
+  min_obs: int = 10,
+  lag: int = 0,
+) -> np.ndarray:
+  """Compute daily cross-sectional Spearman RankIC series via ``alpha.CC_SPEARMAN``."""
+  ric = al.CC_SPEARMAN(factor, fwd_ret, min_obs=int(min_obs), lag=int(lag))
+  return np.asarray(ric, dtype=np.float64)
 
 
 def _newey_west_t_stat(series: np.ndarray, max_lag: int) -> float:
@@ -334,23 +313,173 @@ def _spearman_1d(a: np.ndarray, b: np.ndarray) -> float:
   return float(np.dot(ra, rb) / den)
 
 
-def _bucket_turnover_lag(mask_q: np.ndarray, lag: int) -> float:
-  """Compute average one-way membership turnover for a boolean ``(n_objs, bars)`` bucket mask."""
-  bars = mask_q.shape[1]
-  if bars <= lag or lag <= 0:
-    return 0.0
-  prev = mask_q[:, :-lag]
-  curr = mask_q[:, lag:]
-  prev_cnt = np.sum(prev, axis=0)
-  curr_cnt = np.sum(curr, axis=0)
-  both = np.sum(prev & curr, axis=0)
-  valid = (prev_cnt > 0) & (curr_cnt > 0)
-  if not np.any(valid):
-    return 0.0
-  # Symmetric one-way turnover: 1 - |A & B| / mean(|A|, |B|) or 1 - |A & B| / |B|
-  with np.errstate(divide="ignore", invalid="ignore"):
-    turn = 1.0 - both[valid] / curr_cnt[valid]
-  return float(np.mean(np.clip(turn, 0.0, 1.0)))
+def compute_quantile_analyses(
+  factor: np.ndarray,
+  fwd_set: ForwardReturnSet,
+  periods: Sequence[int],
+  *,
+  n_quantiles: int = 5,
+  cost_bps: float = 0.0,
+  benchmark_daily_ret: np.ndarray | None = None,
+  bins: np.ndarray | None = None,
+) -> dict[int, QuantileAnalysis]:
+  """Evaluate stratified quantile performance across multiple holding periods in one pass.
+
+  Simulates ``p`` overlapping equal-weight tranches via ``alpha.TRANCHE_RETURNS``
+  alongside ``alpha.BUCKET_MEANS`` and ``alpha.BUCKET_TURNOVER`` so all periods
+  and quantile buckets are aggregated simultaneously in Rust.
+  """
+  if n_quantiles < 2:
+    raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+  p_list = [int(p) for p in periods]
+  if not p_list:
+    return {}
+
+  n_objs, bars = factor.shape
+  bins_arr = assign_quantiles(factor, n_quantiles=n_quantiles) if bins is None else bins
+
+  buy_mask = fwd_set.buy_mask
+  entry_mode = fwd_set.entry
+  if entry_mode in ("next_open", "open_close"):
+    entry_ok_at_s = np.zeros((n_objs, bars), dtype=bool)
+    if bars > 1:
+      entry_ok_at_s[:, :-1] = buy_mask[:, 1:]
+  else:
+    entry_ok_at_s = buy_mask
+
+  tranche_all = al.TRANCHE_RETURNS(
+    bins_arr,
+    fwd_set.step_first,
+    fwd_set.step_cont,
+    p_list,
+    n_quantiles,
+    entry_lag=fwd_set.entry_lag,
+    entry_mask=entry_ok_at_s,
+  )
+
+  has_bench = benchmark_daily_ret is not None and len(benchmark_daily_ret) == bars
+  b_ret: np.ndarray | None = None
+  bench_nav_cached: np.ndarray | None = None
+  if has_bench:
+    b_ret = np.asarray(benchmark_daily_ret, dtype=np.float64)
+    _, bench_nav_cached = _portfolio_stats_from_daily(
+      b_ret, label="Benchmark", mean_period_ret=0.0
+    )
+
+  q_ranks = np.arange(1, n_quantiles + 1, dtype=np.float64)
+  results: dict[int, QuantileAnalysis] = {}
+
+  for pi, period in enumerate(p_list):
+    fwd_ret = fwd_set.forward_returns[period]
+    mkt_daily = tranche_all[pi, n_quantiles]
+    _, market_nav = _portfolio_stats_from_daily(
+      mkt_daily, label="Market", mean_period_ret=0.0
+    )
+
+    b_means = al.BUCKET_MEANS(bins_arr, fwd_ret, n_quantiles)
+    period_turns = al.BUCKET_TURNOVER(
+      bins_arr, n_quantiles, lag=period, entry_mask=entry_ok_at_s
+    )
+
+    q_daily_rets: list[np.ndarray] = []
+    q_mean_fwd: list[float] = []
+    q_turnovers: list[float] = []
+    q_metrics: list[QuantileMetrics] = []
+    q_navs: dict[str, np.ndarray] = {}
+
+    for q in range(n_quantiles):
+      label = f"Q{q + 1}"
+      row_mean = b_means[q]
+      fin_q = np.isfinite(row_mean)
+      mean_fwd = float(np.mean(row_mean[fin_q])) if np.any(fin_q) else 0.0
+      q_mean_fwd.append(mean_fwd)
+
+      daily_turn = float(period_turns[q]) / float(period)
+      q_turnovers.append(daily_turn)
+
+      daily_r = tranche_all[pi, q]
+      if cost_bps > 0.0:
+        drag = 2.0 * daily_turn * float(cost_bps) * 1e-4
+        daily_r = np.where(np.isfinite(daily_r), daily_r - drag, np.nan)
+      else:
+        daily_r = np.array(daily_r, dtype=np.float64, copy=True)
+      q_daily_rets.append(daily_r)
+
+      qm, qnav = _portfolio_stats_from_daily(
+        daily_r,
+        label=label,
+        mean_period_ret=mean_fwd,
+        daily_turnover=daily_turn,
+      )
+      q_metrics.append(qm)
+      q_navs[label] = qnav
+
+    top_daily = q_daily_rets[-1]
+    bot_daily = q_daily_rets[0]
+
+    ls_daily = np.where(
+      np.isfinite(top_daily) & np.isfinite(bot_daily),
+      top_daily - bot_daily,
+      np.nan,
+    )
+    ls_metrics, ls_nav = _portfolio_stats_from_daily(
+      ls_daily,
+      label=f"Q{n_quantiles}-Q1",
+      mean_period_ret=q_mean_fwd[-1] - q_mean_fwd[0],
+      daily_turnover=q_turnovers[-1] + q_turnovers[0],
+    )
+
+    row_mkt_mean = b_means[n_quantiles]
+    fin_m = np.isfinite(row_mkt_mean)
+    mkt_mean_fwd = float(np.mean(row_mkt_mean[fin_m])) if np.any(fin_m) else 0.0
+
+    lex_daily = np.where(
+      np.isfinite(top_daily) & np.isfinite(mkt_daily),
+      top_daily - mkt_daily,
+      np.nan,
+    )
+    lex_metrics, lex_nav = _portfolio_stats_from_daily(
+      lex_daily,
+      label=f"Q{n_quantiles}-Mkt",
+      mean_period_ret=q_mean_fwd[-1] - mkt_mean_fwd,
+      daily_turnover=q_turnovers[-1],
+    )
+
+    lb_metrics: QuantileMetrics | None = None
+    bench_nav: np.ndarray | None = None
+    if b_ret is not None and bench_nav_cached is not None:
+      bench_nav = np.array(bench_nav_cached, dtype=np.float64, copy=True)
+      lb_daily = np.where(
+        np.isfinite(top_daily) & np.isfinite(b_ret),
+        top_daily - b_ret,
+        np.nan,
+      )
+      lb_metrics, _ = _portfolio_stats_from_daily(
+        lb_daily,
+        label=f"Q{n_quantiles}-Bench",
+        mean_period_ret=0.0,
+        daily_turnover=q_turnovers[-1],
+      )
+
+    mono = _spearman_1d(q_ranks, np.asarray(q_mean_fwd, dtype=np.float64))
+
+    results[period] = QuantileAnalysis(
+      period=period,
+      n_quantiles=int(n_quantiles),
+      quantiles=q_metrics,
+      long_short=ls_metrics,
+      long_excess_market=lex_metrics,
+      long_excess_benchmark=lb_metrics,
+      monotonicity=mono,
+      quantile_navs=q_navs,
+      long_short_nav=ls_nav,
+      long_excess_nav=lex_nav,
+      market_nav=market_nav,
+      benchmark_nav=bench_nav,
+      cost_bps=float(cost_bps),
+    )
+
+  return results
 
 
 def compute_quantile_analysis(
@@ -361,6 +490,7 @@ def compute_quantile_analysis(
   n_quantiles: int = 5,
   cost_bps: float = 0.0,
   benchmark_daily_ret: np.ndarray | None = None,
+  bins: np.ndarray | None = None,
 ) -> QuantileAnalysis:
   """Evaluate stratified quantile performance using non-inflating tranche portfolios.
 
@@ -376,180 +506,22 @@ def compute_quantile_analysis(
     n_quantiles: Number of quantile groups (e.g. 5 or 10).
     cost_bps: One-way transaction cost (commission + slippage + half-tax) in bps.
     benchmark_daily_ret: Optional 1D benchmark daily return array of shape ``(bars,)``.
+    bins: Optional precomputed quantile bin matrix from :func:`assign_quantiles`.
 
   Returns:
     :class:`QuantileAnalysis` with per-quantile metrics, Long-Short, Long-Excess,
     monotonicity, and NAV time series.
   """
-  n_objs, bars = factor.shape
-  fwd_ret = fwd_set.forward_returns[period]
-  # Bin only stocks that have both a valid factor value and a tradable entry
-  # Note: for tranche simulation, entry tradability is checked on the entry day itself
-  bins = assign_quantiles(factor, n_quantiles=n_quantiles)
-
-  step_first = fwd_set.step_first
-  step_cont = fwd_set.step_cont
-  buy_mask = fwd_set.buy_mask
-  entry_lag = fwd_set.entry_lag
-  entry_mode = fwd_set.entry
-
-  # Entry-day mask aligned to signal bar s
-  if entry_mode in ("next_open", "open_close"):
-    entry_ok_at_s = np.zeros((n_objs, bars), dtype=bool)
-    if bars > 1:
-      entry_ok_at_s[:, :-1] = buy_mask[:, 1:]
-  else:
-    entry_ok_at_s = buy_mask
-
-  q_daily_rets: list[np.ndarray] = []
-  q_mean_fwd: list[float] = []
-  q_turnovers: list[float] = []
-
-  # Also compute equal-weight market tranche returns across all binned stocks
-  mkt_mask = np.isfinite(bins) & entry_ok_at_s
-
-  def _tranche_daily_return(bucket_mask: np.ndarray) -> np.ndarray:
-    sum_ret = np.zeros(bars, dtype=np.float64)
-    cnt_tranche = np.zeros(bars, dtype=np.float64)
-
-    for age in range(period):
-      shift = entry_lag + age
-      if shift >= bars:
-        break
-      m = bucket_mask[:, : bars - shift]
-      r_mat = step_first[:, shift:] if age == 0 else step_cont[:, shift:]
-      valid = m & np.isfinite(r_mat)
-      n_v = np.sum(valid, axis=0)
-      s_v = np.sum(np.where(valid, r_mat, 0.0), axis=0)
-      has_v = n_v > 0
-      tr_ret = np.zeros(bars - shift, dtype=np.float64)
-      tr_ret[has_v] = s_v[has_v] / n_v[has_v]
-      sum_ret[shift:] += np.where(has_v, tr_ret, 0.0)
-      cnt_tranche[shift:] += has_v.astype(np.float64)
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-      return np.where(cnt_tranche > 0, sum_ret / cnt_tranche, np.nan)
-
-  mkt_daily = _tranche_daily_return(mkt_mask)
-  _, market_nav = _portfolio_stats_from_daily(
-    mkt_daily, label="Market", mean_period_ret=0.0
-  )
-
-  q_metrics: list[QuantileMetrics] = []
-  q_navs: dict[str, np.ndarray] = {}
-
-  for q in range(n_quantiles):
-    label = f"Q{q + 1}"
-    q_mask_raw = bins == q
-    q_mask_tradable = q_mask_raw & entry_ok_at_s
-
-    # Mean period forward return across valid bars
-    valid_fwd = q_mask_raw & np.isfinite(fwd_ret)
-    cnt_bar = np.sum(valid_fwd, axis=0)
-    sum_bar = np.sum(np.where(valid_fwd, fwd_ret, 0.0), axis=0)
-    has_bar = cnt_bar > 0
-    if np.any(has_bar):
-      mean_fwd = float(np.mean(sum_bar[has_bar] / cnt_bar[has_bar]))
-    else:
-      mean_fwd = 0.0
-    q_mean_fwd.append(mean_fwd)
-
-    # Tranche daily turnover: each day 1/p of portfolio rolls from signal(t-p) to signal(t)
-    period_turn = _bucket_turnover_lag(q_mask_tradable, period)
-    daily_turn = period_turn / float(period)
-    q_turnovers.append(daily_turn)
-
-    daily_r = _tranche_daily_return(q_mask_tradable)
-    if cost_bps > 0.0:
-      # Round-trip cost on rolled slice = 2 * daily_one_way_turnover * cost_bps * 1e-4
-      drag = 2.0 * daily_turn * float(cost_bps) * 1e-4
-      daily_r = np.where(np.isfinite(daily_r), daily_r - drag, np.nan)
-    q_daily_rets.append(daily_r)
-
-    qm, qnav = _portfolio_stats_from_daily(
-      daily_r,
-      label=label,
-      mean_period_ret=mean_fwd,
-      daily_turnover=daily_turn,
-    )
-    q_metrics.append(qm)
-    q_navs[label] = qnav
-
-  top_daily = q_daily_rets[-1]
-  bot_daily = q_daily_rets[0]
-
-  # Long-Short: Top - Bottom
-  ls_daily = np.where(
-    np.isfinite(top_daily) & np.isfinite(bot_daily),
-    top_daily - bot_daily,
-    np.nan,
-  )
-  ls_metrics, ls_nav = _portfolio_stats_from_daily(
-    ls_daily,
-    label=f"Q{n_quantiles}-Q1",
-    mean_period_ret=q_mean_fwd[-1] - q_mean_fwd[0],
-    daily_turnover=q_turnovers[-1] + q_turnovers[0],
-  )
-
-  # Long-Only Excess over Equal-Weight Market: Top - Market
-  valid_mkt_fwd = np.isfinite(bins) & np.isfinite(fwd_ret)
-  cnt_m = np.sum(valid_mkt_fwd, axis=0)
-  sum_m = np.sum(np.where(valid_mkt_fwd, fwd_ret, 0.0), axis=0)
-  has_m = cnt_m > 0
-  mkt_mean_fwd = float(np.mean(sum_m[has_m] / cnt_m[has_m])) if np.any(has_m) else 0.0
-
-  lex_daily = np.where(
-    np.isfinite(top_daily) & np.isfinite(mkt_daily),
-    top_daily - mkt_daily,
-    np.nan,
-  )
-  lex_metrics, lex_nav = _portfolio_stats_from_daily(
-    lex_daily,
-    label=f"Q{n_quantiles}-Mkt",
-    mean_period_ret=q_mean_fwd[-1] - mkt_mean_fwd,
-    daily_turnover=q_turnovers[-1],
-  )
-
-  # Optional Long-Only Excess over Benchmark
-  lb_metrics: QuantileMetrics | None = None
-  bench_nav: np.ndarray | None = None
-  if benchmark_daily_ret is not None and len(benchmark_daily_ret) == bars:
-    b_ret = np.asarray(benchmark_daily_ret, dtype=np.float64)
-    _, bench_nav = _portfolio_stats_from_daily(
-      b_ret, label="Benchmark", mean_period_ret=0.0
-    )
-    lb_daily = np.where(
-      np.isfinite(top_daily) & np.isfinite(b_ret),
-      top_daily - b_ret,
-      np.nan,
-    )
-    lb_metrics, _ = _portfolio_stats_from_daily(
-      lb_daily,
-      label=f"Q{n_quantiles}-Bench",
-      mean_period_ret=0.0,
-      daily_turnover=q_turnovers[-1],
-    )
-
-  mono = _spearman_1d(
-    np.arange(1, n_quantiles + 1, dtype=np.float64),
-    np.asarray(q_mean_fwd, dtype=np.float64),
-  )
-
-  return QuantileAnalysis(
-    period=int(period),
-    n_quantiles=int(n_quantiles),
-    quantiles=q_metrics,
-    long_short=ls_metrics,
-    long_excess_market=lex_metrics,
-    long_excess_benchmark=lb_metrics,
-    monotonicity=mono,
-    quantile_navs=q_navs,
-    long_short_nav=ls_nav,
-    long_excess_nav=lex_nav,
-    market_nav=market_nav,
-    benchmark_nav=bench_nav,
-    cost_bps=float(cost_bps),
-  )
+  p = int(period)
+  return compute_quantile_analyses(
+    factor,
+    fwd_set,
+    (p,),
+    n_quantiles=n_quantiles,
+    cost_bps=cost_bps,
+    benchmark_daily_ret=benchmark_daily_ret,
+    bins=bins,
+  )[p]
 
 
 def compute_turnover_and_autocorr(
@@ -558,22 +530,21 @@ def compute_turnover_and_autocorr(
   n_quantiles: int = 5,
   lags: Sequence[int] = (1, 5, 10, 20),
   min_obs: int = 10,
+  bins: np.ndarray | None = None,
 ) -> dict[str, Any]:
   """Compute top/bottom quantile daily turnover, rank autocorrelation, and half-life."""
   bars = factor.shape[1]
-  bins = assign_quantiles(factor, n_quantiles=n_quantiles)
-  top_mask = bins == (n_quantiles - 1)
-  bot_mask = bins == 0
-
-  top_turn_1d = _bucket_turnover_lag(top_mask, 1)
-  bot_turn_1d = _bucket_turnover_lag(bot_mask, 1)
+  bins_arr = assign_quantiles(factor, n_quantiles=n_quantiles) if bins is None else bins
+  turns_1d = al.BUCKET_TURNOVER(bins_arr, n_quantiles, lag=1)
+  top_turn_1d = float(turns_1d[n_quantiles - 1])
+  bot_turn_1d = float(turns_1d[0])
 
   autocorr: dict[int, float] = {}
   for lag in lags:
     lag_i = int(lag)
     if lag_i <= 0 or bars <= lag_i:
       continue
-    _, ric = compute_ic_series(factor[:, :-lag_i], factor[:, lag_i:], min_obs=min_obs)
+    ric = compute_rank_ic_series(factor, factor, min_obs=min_obs, lag=lag_i)
     v = ric[np.isfinite(ric)]
     autocorr[lag_i] = float(np.mean(v)) if len(v) > 0 else float("nan")
 
@@ -778,14 +749,10 @@ def compute_factor_correlation_matrix(
 ) -> dict[str, dict[str, float]]:
   """Compute pairwise average cross-sectional Spearman rank correlation matrix."""
   names = list(factors.keys())
-  matrix: dict[str, dict[str, float]] = {n: {} for n in names}
-  for i, ni in enumerate(names):
-    matrix[ni][ni] = 1.0
-    for j in range(i + 1, len(names)):
-      nj = names[j]
-      _, ric = compute_ic_series(factors[ni], factors[nj], min_obs=min_obs)
-      v = ric[np.isfinite(ric)]
-      val = float(np.mean(v)) if len(v) > 0 else float("nan")
-      matrix[ni][nj] = val
-      matrix[nj][ni] = val
-  return matrix
+  if not names:
+    return {}
+  corr_arr = al.CC_SPEARMAN_MATRIX([factors[n] for n in names], min_obs=int(min_obs))
+  return {
+    ni: {nj: float(corr_arr[i, j]) for j, nj in enumerate(names)}
+    for i, ni in enumerate(names)
+  }

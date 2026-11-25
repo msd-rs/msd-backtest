@@ -70,65 +70,22 @@ def winsorize(
   if m not in VALID_WINSORIZE:
     raise ValueError(f"Invalid winsorize method {method!r}. Supported: {VALID_WINSORIZE}.")
 
-  out = np.array(mat, dtype=np.float64, copy=True)
-  if m == "none" or out.size == 0:
-    return out
-
-  fin = np.isfinite(out)
-  has_any = np.any(fin, axis=0)
-  if not np.any(has_any):
-    return out
-
-  if m == "mad":
-    valid_cols = np.flatnonzero(has_any)
-    sub_valid = out[:, valid_cols]
-    with np.errstate(all="ignore"):
-      med = np.nanmedian(sub_valid, axis=0)
-      abs_dev = np.abs(sub_valid - med[None, :])
-      mad = np.nanmedian(abs_dev, axis=0)
-    scaled = 1.4826 * mad * float(mad_k)
-    # Guard zero-MAD cross-sections (e.g. >50% identical values) against collapsing signal
-    active_local = np.isfinite(med) & np.isfinite(scaled) & (scaled > 1e-12)
-    if np.any(active_local):
-      target_cols = valid_cols[active_local]
-      lo = med[active_local] - scaled[active_local]
-      hi = med[active_local] + scaled[active_local]
-      sub = out[:, target_cols]
-      out[:, target_cols] = np.where(
-        np.isfinite(sub), np.clip(sub, lo[None, :], hi[None, :]), np.nan
-      )
-    return out
-
-  if m == "sigma":
-    cnt = np.sum(fin, axis=0)
-    sums = np.sum(np.where(fin, out, 0.0), axis=0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-      mean = np.where(cnt > 0, sums / cnt, np.nan)
-      diff = np.where(fin, out - mean[None, :], 0.0)
-      var = np.where(cnt > 1, np.sum(diff * diff, axis=0) / cnt, np.nan)
-      std = np.sqrt(var)
-    active = np.isfinite(mean) & np.isfinite(std) & (std > 1e-12)
-    if np.any(active):
-      lo = mean[active] - float(sigma_k) * std[active]
-      hi = mean[active] + float(sigma_k) * std[active]
-      sub = out[:, active]
-      out[:, active] = np.where(np.isfinite(sub), np.clip(sub, lo[None, :], hi[None, :]), np.nan)
-    return out
-
-  # percentile
-  if not (0.0 <= pct_low < pct_high <= 1.0):
+  if m == "percentile" and not (0.0 <= pct_low < pct_high <= 1.0):
     raise ValueError(f"Invalid percentile bounds: pct_low={pct_low}, pct_high={pct_high}")
-  valid_cols = np.flatnonzero(has_any)
-  with np.errstate(all="ignore"):
-    lo_vals = np.nanpercentile(out[:, valid_cols], pct_low * 100.0, axis=0)
-    hi_vals = np.nanpercentile(out[:, valid_cols], pct_high * 100.0, axis=0)
-  sub = out[:, valid_cols]
-  out[:, valid_cols] = np.where(
-    np.isfinite(sub),
-    np.clip(sub, lo_vals[None, :], hi_vals[None, :]),
-    np.nan,
-  )
-  return out
+
+  if m == "none" or mat.size == 0:
+    return np.array(mat, dtype=np.float64, copy=True)
+
+  n_objs, bars = mat.shape
+  flat = np.ascontiguousarray(mat, dtype=np.float64).reshape(-1)
+  with al.Context(groups=n_objs, flags=al.FLAG_SKIP_NAN, start=0, end=bars):
+    if m == "mad":
+      out = al.CC_WINSORIZE_MAD(flat, float(mad_k))
+    elif m == "sigma":
+      out = al.CC_WINSORIZE_SIGMA(flat, float(sigma_k))
+    else:
+      out = al.CC_WINSORIZE_PCT(flat, float(pct_low), float(pct_high))
+  return np.asarray(out, dtype=np.float64).reshape(n_objs, bars)
 
 
 def _demean_by_industry(mat: np.ndarray, ind_codes: np.ndarray) -> np.ndarray:

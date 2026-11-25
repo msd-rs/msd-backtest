@@ -110,7 +110,7 @@ class PortfolioAccount:
     Args:
       initial_cash: Starting cash for the portfolio.
       dp: DataProvider supplying prices and corporate action data.
-      fee: Fee configuration.
+      fee: Fee configuration (defaults to `Fee.default()`, matching CLI; pass `Fee.zero()` for zero fees).
       unit: Lot size (shares per trading unit, default 100).
       slippage: Slippage fraction applied to executions.
       tradable_start: (Legacy) Index of the first tradable group. Defaults to 0.
@@ -122,7 +122,7 @@ class PortfolioAccount:
     self.initial_cash = float(initial_cash)
     self._cash = float(initial_cash)
     self.dp = dp
-    self.fee = fee if fee is not None else Fee()
+    self.fee = fee if fee is not None else Fee.default()
     self.unit = unit
     self.slippage = slippage
     self.tolerance = float(tolerance)

@@ -1,6 +1,6 @@
 from pathlib import Path
 import numpy as np
-from mbt import Account, DataProvider, Runner
+from mbt import Account, DataProvider, Fee, Runner
 from mbt.account import ACTION_BUY, ACTION_BUY_NO_CASH, ACTION_SELL
 from mbt.run.backend import RunRequest
 
@@ -150,13 +150,13 @@ def test_context_vectorized_holding_apis():
       elif ctx.bar == 2:
         seen.append((ctx.holding_shares().copy(), ctx.holding_rors().copy()))
 
-  Runner(Account(10_000.0, dp)).run(ProbeStrat())
+  Runner(Account(10_000.0, dp, fee=Fee.zero())).run(ProbeStrat())
   assert len(seen) == 1
   assert seen[0][0].tolist() == [1000.0, 0.0]
   assert np.allclose(seen[0][1], [0.2, 0.0])
 
   seen.clear()
-  p_acc = PortfolioAccount(10_000.0, dp)
+  p_acc = PortfolioAccount(10_000.0, dp, fee=Fee.zero())
   PortfolioRunner(p_acc).run(ProbeStrat())
   assert len(seen) == 1
   assert seen[0][0].tolist() == [1000.0, 0.0]

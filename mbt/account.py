@@ -339,11 +339,11 @@ DEFAULT_FEE_CONFIG: list[dict] = [
     "ts": 4102416000,
     "commission_buy": 0.0010,
     "min_commission_buy": 5.0,
-    "tax_buy": 0.001,
+    "tax_buy": 0.0,
     "transaction_fee_buy": 0.0001,
     "commission_sell": 0.0010,
     "min_commission_sell": 5.0,
-    "tax_sell": 0.0,
+    "tax_sell": 0.0005,
     "transaction_fee_sell": 0.0,
   }
 ]
@@ -354,6 +354,12 @@ class Fee:
     self,
     config: list[FeeItem] | list[str] | list[dict] | str | Path | bytes | None = None,
   ):
+    """Initialize a Fee calculator.
+
+    When `config` is None, creates a zero-fee model (`[FeeItem()]`).
+    Use `Fee.default()` to load the project default A-share fee schedule
+    (`etc/fee.json`), or `Fee.zero()` for an explicit zero-fee model.
+    """
     def build_fee_item(x):
       return FeeItem(**x)
 
@@ -447,6 +453,11 @@ class Fee:
 
     if applied:
       logger.info("Fee configuration overridden by parameters: %s", applied)
+
+  @classmethod
+  def zero(cls) -> "Fee":
+    """Return a zero-fee model for frictionless analytical tests."""
+    return cls([FeeItem()])
 
   @classmethod
   def default(cls) -> "Fee":
@@ -605,6 +616,7 @@ class Account:
         - "dividend": dividend per share in dividend
         - "right_shares": right share per share in dividend
         - "right_price": right price per share in dividend
+      fee: Fee model (defaults to `Fee.default()`, matching CLI; pass `Fee.zero()` for zero fees).
       unit: trading unit, default is 100
       slippage: slippage of the buy and sell operations, for buy: deal_price = price * (1 + slippage), for sell: deal_price = price * (1 - slippage)
     """
@@ -628,7 +640,7 @@ class Account:
     self._records: list[Record] | None = []
     self._raw_trades: tuple[dict[str, np.ndarray], int, int] | None = None
     """fee calculator"""
-    self.fee = fee if fee is not None else Fee()
+    self.fee = fee if fee is not None else Fee.default()
     """slippage of the buy and sell operations"""
     self.slippage = slippage
     """group index"""

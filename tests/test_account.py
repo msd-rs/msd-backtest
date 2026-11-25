@@ -1,6 +1,7 @@
 from mbt import (
   Account,
   DataProvider,
+  Fee,
   Operation,
   Position,
 )
@@ -22,7 +23,7 @@ def test_account_buy_sell():
       "right_price": np.zeros(20),
     }
   )
-  account = Account(1000.0, dp)
+  account = Account(1000.0, dp, fee=Fee.zero())
 
   prices = dp.all("price")
 

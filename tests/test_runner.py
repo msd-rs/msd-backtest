@@ -1,4 +1,4 @@
-from mbt import Runner, Context, Strategy, Account, DataProvider
+from mbt import Runner, Context, Strategy, Account, Fee, DataProvider
 import numpy as np
 import logging
 
@@ -14,7 +14,7 @@ class TestStrategy(Strategy):
 
 
 def run_strategy(dp: DataProvider):
-  account = Account(1000.0, dp)
+  account = Account(1000.0, dp, fee=Fee.zero())
   runner = Runner(account)
   runner.run(TestStrategy())
 
@@ -139,7 +139,7 @@ def test_runner_limit_and_next_open():
     },
     objs=["a"],
   )
-  acc2 = Account(10000.0, dp_open)
+  acc2 = Account(10000.0, dp_open, fee=Fee.zero())
   runner2 = Runner(acc2, exec_mode="next_open")
   runner2.run(BuyAtBar1SellAtBar2())
   # Signal at bar 1 bought at bar 2 open=10.0 (1000 shares), signal at bar 2 sold at bar 3 open=20.0 -> 20000 cash

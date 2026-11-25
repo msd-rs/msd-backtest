@@ -59,6 +59,164 @@ def _calc_shares_1d(actions: np.ndarray, action_shares: np.ndarray) -> np.ndarra
   return shares
 
 
+def _calc_cagr(profit: float, n_bars: int) -> float:
+  """Compute annualized compound growth rate (CAGR) assuming 252 trading bars/year."""
+  if n_bars <= 0:
+    return 0.0
+  final_eq = 1.0 + float(profit)
+  if final_eq <= 0.0:
+    return -1.0
+  return float(final_eq ** (252.0 / max(1, n_bars)) - 1.0)
+
+
+def _extract_years_array(dates: np.ndarray) -> np.ndarray | None:
+  """Parse a date array into calendar years in [1900, 2200], or None for synthetic indices."""
+  if dates is None or len(dates) == 0:
+    return None
+  arr = np.asarray(dates)
+  if np.issubdtype(arr.dtype, np.datetime64):
+    years = arr.astype("datetime64[Y]").astype(np.int64) + 1970
+    if years.size > 0 and int(years.min()) >= 1900 and int(years.max()) <= 2200:
+      return years
+    return None
+  if np.issubdtype(arr.dtype, np.integer):
+    v_min = int(arr.min())
+    v_max = int(arr.max())
+    if 19000101 <= v_min and v_max <= 22001231:
+      years = arr.astype(np.int64) // 10000
+      if int(years.min()) >= 1900 and int(years.max()) <= 2200:
+        return years
+      return None
+    if v_min > 1e8:
+      scale = 1.0
+      for threshold, sc in ((1e17, 1e9), (1e14, 1e6), (1e11, 1e3), (1e8, 1.0)):
+        if v_min > threshold:
+          scale = sc
+          break
+      years_list = [
+        datetime.datetime.fromtimestamp(int(v) / scale, tz=datetime.timezone.utc).year
+        for v in arr.tolist()
+      ]
+      years = np.asarray(years_list, dtype=np.int64)
+      if int(years.min()) >= 1900 and int(years.max()) <= 2200:
+        return years
+    return None
+  # String or date/datetime objects
+  years_list = []
+  for val in arr.tolist():
+    if isinstance(val, (datetime.date, datetime.datetime)):
+      y = val.year
+    else:
+      s = str(val).strip()
+      if len(s) >= 4 and s[:4].isdigit():
+        y = int(s[:4])
+      else:
+        return None
+    if y < 1900 or y > 2200:
+      return None
+    years_list.append(y)
+  return np.asarray(years_list, dtype=np.int64)
+
+
+def compute_annual_breakdown(report: "Report") -> list[dict[str, Any]]:
+  """Compute calendar-year return, benchmark comparison, max drawdown, and Sharpe."""
+  if len(report.ror) < 2:
+    return []
+  years = _extract_years_array(report.date)
+  if years is None or len(years) != len(report.ror):
+    return []
+
+  equity = 1.0 + np.asarray(report.ror, dtype=np.float64)
+  has_bench = (
+    report.benchmark_ror is not None
+    and len(report.benchmark_ror) == len(report.ror)
+  )
+  bench_eq = (
+    1.0 + np.asarray(report.benchmark_ror, dtype=np.float64)
+    if has_bench
+    else None
+  )
+
+  rows: list[dict[str, Any]] = []
+  for y in sorted(int(v) for v in np.unique(years)):
+    idx = np.flatnonzero(years == y)
+    if idx.size == 0:
+      continue
+    first_i = int(idx[0])
+    last_i = int(idx[-1])
+    base_eq = float(equity[first_i - 1]) if first_i > 0 else 1.0
+    year_eq = np.concatenate(([base_eq], equity[idx]))
+    strat_ret = (float(equity[last_i]) / base_eq - 1.0) if base_eq > 0.0 else 0.0
+
+    if bench_eq is not None:
+      base_b = float(bench_eq[first_i - 1]) if first_i > 0 else 1.0
+      bench_ret = (float(bench_eq[last_i]) / base_b - 1.0) if base_b > 0.0 else 0.0
+    else:
+      bench_ret = 0.0
+
+    peaks = np.maximum.accumulate(year_eq)
+    safe_peaks = np.where(peaks > 0.0, peaks, 1.0)
+    mdd = float(np.min((year_eq - peaks) / safe_peaks))
+
+    if len(year_eq) >= 3:
+      prev = year_eq[:-1]
+      valid_prev = prev > 0.0
+      daily = np.where(valid_prev, np.diff(year_eq) / np.where(valid_prev, prev, 1.0), 0.0)
+      std = float(np.std(daily, ddof=1))
+      sharpe = float(np.mean(daily) / std * np.sqrt(252.0)) if std > 0.0 else 0.0
+    else:
+      sharpe = 0.0
+
+    rows.append({
+      "year": y,
+      "bars": int(idx.size),
+      "return": round(strat_ret, 4),
+      "benchmark_return": round(bench_ret, 4),
+      "excess_return": round(strat_ret - bench_ret, 4),
+      "max_drawdown": round(mdd, 4),
+      "sharpe": round(sharpe, 4),
+    })
+  return rows
+
+
+def _compute_portfolio_holding_counts(
+  records: list[Any],
+  total_bars: int,
+  slice_start: int,
+  eff_bars: int,
+) -> np.ndarray:
+  """Reconstruct daily held stock count across [slice_start, slice_start + eff_bars)."""
+  if eff_bars <= 0 or total_bars <= 0:
+    return np.zeros(0, dtype=np.int32)
+  if not records:
+    return np.zeros(eff_bars, dtype=np.int32)
+
+  by_bar: dict[int, list[Any]] = {}
+  for rec in records:
+    b = int(getattr(rec, "bar", 0))
+    if 0 <= b < total_bars:
+      by_bar.setdefault(b, []).append(rec)
+
+  shares_by_obj: dict[str, float] = {}
+  counts = np.zeros(total_bars, dtype=np.int32)
+  for b in range(total_bars):
+    for rec in by_bar.get(b, ()):
+      obj = str(getattr(rec, "obj", ""))
+      if hasattr(rec, "pos_shares"):
+        rem = float(getattr(rec, "pos_shares", 0.0))
+        shares_by_obj[obj] = rem if rem > 1e-6 else 0.0
+      else:
+        action = str(getattr(rec, "action", "")).upper()
+        sh = float(getattr(rec, "shares", 0.0))
+        if action == "BUY":
+          shares_by_obj[obj] = shares_by_obj.get(obj, 0.0) + sh
+        elif action == "SELL":
+          rem = shares_by_obj.get(obj, 0.0) - sh
+          shares_by_obj[obj] = rem if rem > 1e-6 else 0.0
+    counts[b] = sum(1 for v in shares_by_obj.values() if v > 1e-6)
+  return counts[slice_start : slice_start + eff_bars]
+
+
 @dataclasses.dataclass
 class Report:
   obj: str
@@ -90,6 +248,13 @@ class Report:
   fee_rate: float
   trade_count: int
   rebalance_count: int = 0
+  cagr: float = 0.0
+  annual_fee_drag: float = 0.0
+  fee_to_turnover: float = 0.0
+  avg_holdings: float = 0.0
+  empty_days_ratio: float = 0.0
+  avg_position_ratio: float = 0.0
+  annual_breakdown: list[dict[str, Any]] = dataclasses.field(default_factory=list)
   diagnostics: dict | None = None
   benchmark_ror: np.ndarray | None = None
   benchmark_obj: str = ""
@@ -176,6 +341,13 @@ class Report:
     r.fee_rate = d.get('fee_rate', 0.0)
     r.trade_count = d.get('trade_count', 0)
     r.rebalance_count = d.get('rebalance_count', r.trade_count)
+    r.cagr = d.get('cagr', round(_calc_cagr(r.profit, len(r.ror)), 4) if len(r.ror) > 0 else 0.0)
+    r.annual_fee_drag = d.get('annual_fee_drag', 0.0)
+    r.fee_to_turnover = d.get('fee_to_turnover', 0.0)
+    r.avg_holdings = d.get('avg_holdings', 0.0)
+    r.empty_days_ratio = d.get('empty_days_ratio', 0.0)
+    r.avg_position_ratio = d.get('avg_position_ratio', 0.0)
+    r.annual_breakdown = d.get('annual_breakdown', [])
     r.daily_win_rate = d.get('daily_win_rate', r.win_rate)
     r.trade_win_rate = d.get('trade_win_rate', r.win_rate)
     r.trade_avg_win = d.get('trade_avg_win', r.avg_win)
@@ -354,12 +526,34 @@ class Report:
     self.fee_rate = np.round(account.deducted / account.initial_cash, 4)
     self.trade_count = len(trade_profits)
     self.rebalance_count = self.trade_count
-    
+    eff_bars = len(self.ror)
+    self.cagr = float(np.round(_calc_cagr(self.profit, eff_bars), 4))
+    self.avg_holdings = float(np.round(np.mean(holding), 4)) if len(holding) > 0 else 0.0
+    self.empty_days_ratio = float(np.round(np.mean(~holding), 4)) if len(holding) > 0 else 0.0
+    self.avg_position_ratio = 0.0
+    avg_asset = float(np.mean(assets)) if len(assets) > 0 else float(account.initial_cash)
+    self.annual_fee_drag = (
+      float(np.round((account.deducted / avg_asset) * (252.0 / eff_bars), 4))
+      if avg_asset > 0.0 and eff_bars > 0
+      else 0.0
+    )
+    if (
+      len(self.actions) > 0
+      and len(action_shares) == len(self.actions)
+      and len(self.price) == len(self.actions)
+    ):
+      turnover = float(np.sum(np.where((self.actions == 1) | (self.actions == 2), action_shares * self.price, 0.0)))
+    else:
+      turnover = 0.0
+    self.fee_to_turnover = float(np.round(account.deducted / turnover, 6)) if turnover > 0.0 else 0.0
+    self.annual_breakdown = compute_annual_breakdown(self)
+
 
   def metrics(self, with_obj: bool = False) -> dict:
     d = {
       "obj": self.obj,
       "profit": self.profit,
+      "cagr": getattr(self, "cagr", 0.0),
       "profit_original": self.profit_original,
       "benchmark_profit": self.benchmark_profit,
       "alpha": self.alpha,
@@ -380,6 +574,11 @@ class Report:
       "trade_avg_loss": getattr(self, "trade_avg_loss", self.avg_loss),
       "trade_profit_factor": getattr(self, "trade_profit_factor", self.profit_factor),
       "fee_rate": self.fee_rate,
+      "annual_fee_drag": getattr(self, "annual_fee_drag", 0.0),
+      "fee_to_turnover": getattr(self, "fee_to_turnover", 0.0),
+      "avg_holdings": getattr(self, "avg_holdings", 0.0),
+      "empty_days_ratio": getattr(self, "empty_days_ratio", 0.0),
+      "avg_position_ratio": getattr(self, "avg_position_ratio", 0.0),
       "trade_count": self.trade_count,
       "rebalance_count": self.rebalance_count,
     }
@@ -606,6 +805,42 @@ def build_report(
   profit_list = (ror_2d[:, -1].tolist() if eff_bars > 0 else [0.0] * g_count)
   profit_orig_list = (ror_original_2d[:, -1].tolist() if eff_bars > 0 else [0.0] * g_count)
 
+  if eff_bars > 0:
+    final_eq_arr = 1.0 + ror_2d[:, -1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+      cagr_arr = np.where(
+        final_eq_arr > 0.0,
+        np.power(np.maximum(final_eq_arr, 0.0), 252.0 / eff_bars) - 1.0,
+        -1.0,
+      )
+    avg_holdings_arr = np.mean(holding_2d, axis=1)
+    empty_days_arr = np.mean(~holding_2d, axis=1)
+    avg_assets_arr = np.mean(assets_2d, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+      annual_fee_drag_arr = np.where(
+        avg_assets_arr > 0.0,
+        (deducteds / avg_assets_arr) * (252.0 / eff_bars),
+        0.0,
+      )
+    turnover_arr = np.sum(
+      np.where((actions_2d == 1) | (actions_2d == 2), action_shares_2d * prices_2d, 0.0),
+      axis=1,
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+      fee_to_turnover_arr = np.where(turnover_arr > 0.0, deducteds / turnover_arr, 0.0)
+  else:
+    cagr_arr = np.zeros(g_count, dtype=np.float64)
+    avg_holdings_arr = np.zeros(g_count, dtype=np.float64)
+    empty_days_arr = np.zeros(g_count, dtype=np.float64)
+    annual_fee_drag_arr = np.zeros(g_count, dtype=np.float64)
+    fee_to_turnover_arr = np.zeros(g_count, dtype=np.float64)
+
+  cagr_list = _clean_round4_list(cagr_arr)
+  avg_holdings_list = _clean_round4_list(avg_holdings_arr)
+  empty_days_list = _clean_round4_list(empty_days_arr)
+  annual_fee_drag_list = _clean_round4_list(annual_fee_drag_arr)
+  fee_to_turnover_list = np.where(np.isnan(fee_to_turnover_arr), 0.0, np.round(fee_to_turnover_arr, 6)).tolist()
+
   reports: list[Report] = []
   for i, obj in enumerate(objs):
     r = Report.__new__(Report)
@@ -654,9 +889,23 @@ def build_report(
     tc = trade_counts[i]
     r.trade_count = tc
     r.rebalance_count = tc
+    r.cagr = cagr_list[i]
+    r.annual_fee_drag = annual_fee_drag_list[i]
+    r.fee_to_turnover = float(fee_to_turnover_list[i])
+    r.avg_holdings = avg_holdings_list[i]
+    r.empty_days_ratio = empty_days_list[i]
+    r.avg_position_ratio = 0.0
+    r.annual_breakdown = compute_annual_breakdown(r) if g_count == 1 else []
     r.diagnostics = diagnostics
     r.benchmark_ror = benchmark_ror
     r.benchmark_obj = benchmark_obj
+    r.trades = []
+    r.attribution = []
+    r.account = None
+    r.records = []
+    r.dp = None
+    r.pool_size = 0
+    r.traded_objs_count = 0
     reports.append(r)
 
   return reports
@@ -1054,6 +1303,39 @@ def build_portfolio_report(
   r.trade_count = len(records) if len(records) > 0 else trade_bars
   r.rebalance_count = trade_bars
 
+  slice_start = w if (w > 0 and bars > w) else 0
+  eff_assets = account.portfolio_assets[slice_start:bars] if bars > slice_start else np.zeros(0, dtype=np.float64)
+  eff_cash = account.portfolio_cash[slice_start:bars] if bars > slice_start else np.zeros(0, dtype=np.float64)
+  avg_asset = float(np.mean(eff_assets)) if len(eff_assets) > 0 else float(account.initial_cash)
+  if len(eff_assets) > 0 and len(eff_cash) == len(eff_assets):
+    with np.errstate(divide="ignore", invalid="ignore"):
+      pos_ratio = np.where(eff_assets > 0.0, np.clip((eff_assets - eff_cash) / eff_assets, 0.0, 1.0), 0.0)
+    r.avg_position_ratio = float(np.round(np.mean(pos_ratio), 4))
+  else:
+    r.avg_position_ratio = 0.0
+
+  h_counts = _compute_portfolio_holding_counts(
+    records,
+    total_bars=bars,
+    slice_start=slice_start,
+    eff_bars=eff_bars,
+  )
+  r.avg_holdings = float(np.round(np.mean(h_counts), 2)) if eff_bars > 0 else 0.0
+  r.empty_days_ratio = float(np.round(np.mean(h_counts == 0), 4)) if eff_bars > 0 else 0.0
+  total_turnover = float(sum(float(getattr(rec, "amount", 0.0)) for rec in r.records))
+  r.cagr = float(np.round(_calc_cagr(r.profit, eff_bars), 4))
+  r.annual_fee_drag = (
+    float(np.round((account.deducted / avg_asset) * (252.0 / eff_bars), 4))
+    if avg_asset > 0.0 and eff_bars > 0
+    else 0.0
+  )
+  r.fee_to_turnover = (
+    float(np.round(account.deducted / total_turnover, 6))
+    if total_turnover > 0.0
+    else 0.0
+  )
+  r.annual_breakdown = compute_annual_breakdown(r)
+
   return [r]
 
 
@@ -1069,6 +1351,8 @@ def build_json_report(reports: list[Report]) -> dict:
       d["trades"] = report.trades
     if hasattr(report, "attribution") and report.attribution:
       d["attribution"] = report.attribution
+    if getattr(report, "annual_breakdown", None):
+      d["annual_breakdown"] = report.annual_breakdown
     if getattr(report, "diagnostics", None):
       d["diagnostics"] = report.diagnostics
     data[report.obj] = d
@@ -1077,6 +1361,7 @@ def build_json_report(reports: list[Report]) -> dict:
 
 SUMMARY_METRICS = [
   "profit",
+  "cagr",
   "profit_original",
   "benchmark_profit",
   "alpha",
@@ -1092,6 +1377,8 @@ SUMMARY_METRICS = [
   "avg_loss",
   "profit_factor",
   "fee_rate",
+  "annual_fee_drag",
+  "empty_days_ratio",
   "trade_count",
   "rebalance_count",
 ]
@@ -1113,7 +1400,12 @@ def build_markdown_summary(
     1 for r in reports if r.profit > float(getattr(r, "benchmark_profit", 0.0))
   )
 
-  is_portfolio = (total == 1 and reports[0].obj == "PORTFOLIO") or (getattr(reports[0], "records", None) is not None)
+  r0_acc = getattr(reports[0], "account", None) or account
+  is_portfolio = (
+    (total == 1 and reports[0].obj == "PORTFOLIO")
+    or hasattr(r0_acc, "portfolio_assets")
+    or bool(getattr(reports[0], "records", None))
+  )
   pool_note = " (Pool Buy&Hold)" if is_portfolio else ""
   exec_mode = getattr(account, "exec_mode", "close") if account else "close"
   exec_info = f" | **Exec Mode**: `{exec_mode}`" if exec_mode != "close" else ""
@@ -1158,6 +1450,14 @@ def build_markdown_summary(
 
   if total == 1:
     r = reports[0]
+    cagr = getattr(r, "cagr", None)
+    if cagr is None:
+      cagr = _calc_cagr(r.profit, len(r.ror))
+    annual_fee_drag = float(getattr(r, "annual_fee_drag", 0.0))
+    fee_to_turnover = float(getattr(r, "fee_to_turnover", 0.0))
+    avg_holdings = float(getattr(r, "avg_holdings", 0.0))
+    empty_days_ratio = float(getattr(r, "empty_days_ratio", 0.0))
+    avg_position_ratio = float(getattr(r, "avg_position_ratio", 0.0))
     lines.extend([
       "",
       "## Strategy Metrics",
@@ -1165,6 +1465,7 @@ def build_markdown_summary(
       "| Metric | Value |",
       "| :--- | ---: |",
       f"| profit | {r.profit:+.2%} |",
+      f"| cagr (Annualized) | {cagr:+.2%} |",
       f"| benchmark_profit | {bench_ret:+.2%} |",
       f"| profit_original{pool_note} | {r.profit_original:+.2%} |",
       f"| alpha | {r.alpha:.4f} |",
@@ -1179,10 +1480,37 @@ def build_markdown_summary(
       f"| trade_avg_win | {getattr(r, 'trade_avg_win', r.avg_win):+.2%} |",
       f"| trade_avg_loss | {getattr(r, 'trade_avg_loss', r.avg_loss):+.2%} |",
       f"| profit_factor | {r.profit_factor:.4f} |",
-      f"| fee_rate | {r.fee_rate:.2%} |",
+      f"| annual_fee_drag (Fee / Avg NAV / Yr) | {annual_fee_drag:.2%} |",
+      f"| fee_to_turnover (Effective Rate) | {fee_to_turnover:.4%} |",
+      f"| fee_to_init_cash (Cum Fee / Init Cash) | {r.fee_rate:.2%} |",
+    ])
+    if is_portfolio:
+      lines.extend([
+        f"| avg_holdings | {avg_holdings:.2f} |",
+        f"| empty_days_ratio | {empty_days_ratio:.2%} |",
+        f"| avg_position_ratio | {avg_position_ratio:.2%} |",
+      ])
+    else:
+      lines.append(f"| empty_days_ratio | {empty_days_ratio:.2%} |")
+    lines.extend([
       f"| trade_count | {r.trade_count} |",
       f"| rebalance_count | {getattr(r, 'rebalance_count', r.trade_count)} |",
     ])
+
+    annual = getattr(r, "annual_breakdown", None) or compute_annual_breakdown(r)
+    if annual:
+      lines.extend([
+        "",
+        "## Annual Performance",
+        "",
+        "| Year | Strategy | Benchmark | Excess | MaxDD | Sharpe | Bars |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
+      ])
+      for row in annual:
+        lines.append(
+          f"| {row['year']} | {row['return']:+.2%} | {row['benchmark_return']:+.2%} | "
+          f"{row['excess_return']:+.2%} | {row['max_drawdown']:.2%} | {row['sharpe']:.2f} | {row['bars']} |"
+        )
   else:
     lines.extend([
       "",
@@ -1251,7 +1579,11 @@ def build_markdown_summary(
   if records is None and len(reports) > 0:
     records = getattr(reports[0], "records", None)
 
-  is_portfolio = (total == 1 and reports[0].obj == "PORTFOLIO") or (records is not None)
+  is_portfolio = (
+    (total == 1 and reports[0].obj == "PORTFOLIO")
+    or hasattr(acc, "portfolio_assets")
+    or bool(records)
+  )
   if is_portfolio and (acc is not None or records is not None):
     dp_ref = getattr(acc, "dp", None) if acc else getattr(reports[0], "dp", None)
     trades = getattr(reports[0], "trades", None)

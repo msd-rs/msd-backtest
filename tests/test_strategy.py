@@ -3,6 +3,7 @@ from mbt import (
   Context,
   Strategy,
   Account,
+  Fee,
   DataProvider,
   ACTION_BUY,
   ACTION_BUY_NO_CASH,
@@ -48,7 +49,7 @@ def test_strategy_actions_and_assets_with_unrounded_data():
   )
 
   # Initial cash 1500.0
-  account = Account(1500.0, dp)
+  account = Account(1500.0, dp, fee=Fee.zero())
   runner = Runner(account)
   runner.run(SyntheticStrategy())
 

@@ -196,3 +196,50 @@ def test_cli_parse_args_with_fee_overrides(tmp_path, monkeypatch):
   assert fee.get(0).commission_sell == 0.0003
   assert fee.get(0).min_commission_buy == 1.0
   assert fee.get(0).min_commission_sell == 1.0
+
+
+def test_default_fee_config_matches_etc_fee_json():
+  etc_fee = Path(__file__).resolve().parent.parent / "etc" / "fee.json"
+  file_data = json.loads(etc_fee.read_text(encoding="utf-8"))
+  assert DEFAULT_FEE_CONFIG == file_data
+  assert DEFAULT_FEE_CONFIG[0]["tax_buy"] == 0.0
+  assert DEFAULT_FEE_CONFIG[0]["tax_sell"] == 0.0005
+
+
+def test_fee_zero_and_account_defaults_match_cli():
+  import numpy as np
+  from mbt import Account, DataProvider, PortfolioAccount, Runner, Strategy
+
+  zero = Fee.zero()
+  item = zero.get(0)
+  assert item.buy(100000.0) == 0.0
+  assert item.sell(100000.0) == 0.0
+
+  dp = DataProvider(
+    {
+      "ts": np.arange(3),
+      "open": np.array([10.0, 10.0, 10.0]),
+      "close": np.array([10.0, 10.0, 10.0]),
+      "price": np.array([10.0, 10.0, 10.0]),
+      "dividend": np.zeros(3),
+      "transfer_shares": np.zeros(3),
+      "right_shares": np.zeros(3),
+      "right_price": np.zeros(3),
+    },
+    objs=["SH600000"],
+  )
+  cli_default = Fee.load("")
+  acc = Account(100000.0, dp)
+  p_acc = PortfolioAccount(100000.0, dp)
+  assert acc.fee.get(0) == cli_default.get(0)
+  assert p_acc.fee.get(0) == cli_default.get(0)
+
+  class _BuyOnce(Strategy):
+    def execute(self, ctx):
+      ctx.buy(ctx.bar == 1, 1.0)
+
+  res_default = Runner.run_sweep(dp, _BuyOnce, [{}], initial_cash=100000.0)
+  res_cli = Runner.run_sweep(dp, _BuyOnce, [{}], initial_cash=100000.0, fee=cli_default)
+  res_zero = Runner.run_sweep(dp, _BuyOnce, [{}], initial_cash=100000.0, fee=Fee.zero())
+  assert res_default[0]["mean_profit"] == res_cli[0]["mean_profit"]
+  assert res_default[0]["mean_profit"] < res_zero[0]["mean_profit"]

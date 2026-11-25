@@ -222,7 +222,8 @@ def test_account_batch_execute_holding_ror_and_position_apis():
         if ctx.holding_ror(0) >= 0.2:
           ctx.sell(0, 1.0)
 
-  acc = Account(10_000.0, dp)
+  from mbt import Fee
+  acc = Account(10_000.0, dp, fee=Fee.zero())
   runner = Runner(acc)
   runner.run(InspectPositionStrat())
 

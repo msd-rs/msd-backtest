@@ -1,4 +1,4 @@
-from mbt import DataProvider, Position, Account, Operation
+from mbt import DataProvider, Position, Account, Fee, Operation
 from mbt.portfolio import PortfolioAccount, PortfolioContext
 from mbt.run.validator import check_strategy_source
 import numpy as np
@@ -52,7 +52,7 @@ def test_corporate_action_split_dilution():
     },
     objs=["SZ000001"],
   )
-  acc = PortfolioAccount(100000.0, dp)
+  acc = PortfolioAccount(100000.0, dp, fee=Fee.zero())
 
   # Bar 0: Buy 1000 shares @ 20.0 (cost = 20,000)
   acc._buy_group(0, 0, 20000.0, 20.0)
@@ -93,7 +93,7 @@ def test_corporate_action_cash_dividend():
     },
     objs=["SH600000"],
   )
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   acc._buy_group(0, 0, 10000.0, 10.0)
 
   # Bar 1: Dividend distributed
@@ -120,7 +120,7 @@ def test_portfolio_account_holding_inquiry_apis():
     },
     objs=["SH600000"],
   )
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   ctx = PortfolioContext(acc)
 
   # Initial check

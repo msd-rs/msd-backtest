@@ -167,7 +167,7 @@ def test_build_markdown_summary():
 
 
 def test_portfolio_markdown_summary_with_trades():
-  from mbt import PortfolioAccount, PortfolioContext, PortfolioRunner, Strategy
+  from mbt import Fee, PortfolioAccount, PortfolioContext, PortfolioRunner, Strategy
   from mbt.run.report import build_portfolio_report, build_markdown_summary, extract_portfolio_trades
 
   prices_a = np.array([10.0, 20.0, 20.0, 20.0])
@@ -195,7 +195,7 @@ def test_portfolio_markdown_summary_with_trades():
       elif ctx.dp.i == 2:
         ctx.rebalance(np.array([0.0, 1.0]))
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   runner.run(RotateStrategy())
 
@@ -317,5 +317,133 @@ def test_review_cli_trades_and_attribution(tmp_path, monkeypatch, capsys):
   out_attrib = capsys.readouterr().out
   assert "SH600000" in out_attrib
   assert "SZ000001" in out_attrib
+
+
+def test_cagr_annual_breakdown_position_utilization_and_fee_metrics():
+  from mbt import Fee, PortfolioAccount, PortfolioContext, PortfolioRunner, Strategy
+  from mbt.run.report import (
+    build_json_report,
+    build_markdown_summary,
+    build_portfolio_report,
+    compute_annual_breakdown,
+  )
+
+  # 2-year daily dates (2023 and 2024, 4 bars each) with known returns
+  dates = np.array(
+    [
+      np.datetime64("2023-01-03", "us"),
+      np.datetime64("2023-06-01", "us"),
+      np.datetime64("2023-12-29", "us"),
+      np.datetime64("2024-01-02", "us"),
+      np.datetime64("2024-06-03", "us"),
+      np.datetime64("2024-12-31", "us"),
+    ]
+  )
+  # Strategy equity: 1.0 -> 1.1 -> 1.2 -> 1.2 -> 1.32 -> 1.50
+  # Benchmark ror:   0.0 -> 0.05 -> 0.10 -> 0.12 -> 0.15 -> 0.20
+  ror = np.array([0.0, 0.10, 0.20, 0.20, 0.32, 0.50])
+  bench_ror = np.array([0.0, 0.05, 0.10, 0.12, 0.15, 0.20])
+  r = Report.from_dict(
+    "PORTFOLIO",
+    {
+      "date": dates,
+      "ror": ror,
+      "benchmark_ror": bench_ror,
+      "profit": 0.50,
+      "benchmark_profit": 0.20,
+      "trade_count": 2,
+      "rebalance_count": 2,
+    },
+  )
+  expected_cagr = round((1.50 ** (252.0 / 6.0)) - 1.0, 4)
+  assert np.isclose(r.cagr, expected_cagr)
+
+  annual = compute_annual_breakdown(r)
+  assert [row["year"] for row in annual] == [2023, 2024]
+  assert annual[0]["bars"] == 3
+  assert annual[1]["bars"] == 3
+  assert np.isclose(annual[0]["return"], 0.20)
+  assert np.isclose(annual[0]["benchmark_return"], 0.10)
+  assert np.isclose(annual[0]["excess_return"], 0.10)
+  # 2024 base is 2023-12-29 equity 1.20 -> 1.50 / 1.20 - 1 = +25%
+  assert np.isclose(annual[1]["return"], 0.25)
+  # 2024 benchmark base is 1.10 -> 1.20 / 1.10 - 1 = +0.0909
+  assert np.isclose(annual[1]["benchmark_return"], round(1.20 / 1.10 - 1.0, 4))
+
+  # Synthetic bar indices (0, 1, 2, 3) should NOT produce bogus calendar years
+  r_syn = Report.from_dict("SH600000", {"date": np.arange(4), "ror": np.array([0.0, 0.1, 0.2, 0.3])})
+  assert compute_annual_breakdown(r_syn) == []
+
+  # Portfolio high-compounding scenario: verify fee normalization & holding utilization metrics
+  n_bars = 10
+  ts_arr = np.array([np.datetime64("2024-01-02", "us") + np.timedelta64(i, "D") for i in range(n_bars)])
+  # Price doubles each trade cycle so NAV grows ~8x, driving fee_rate (vs initial cash) high
+  prices_a = np.array([10.0, 10.0, 20.0, 20.0, 40.0, 40.0, 80.0, 80.0, 80.0, 80.0])
+  prices_b = np.array([10.0, 10.0, 10.0, 20.0, 20.0, 40.0, 40.0, 80.0, 80.0, 80.0])
+  dp = DataProvider(
+    {
+      "ts": np.tile(ts_arr, 2),
+      "open": np.concatenate([prices_a, prices_b]),
+      "close": np.concatenate([prices_a, prices_b]),
+      "price": np.concatenate([prices_a, prices_b]),
+      "bw_price": np.concatenate([prices_a, prices_b]),
+      "dividend": np.zeros(2 * n_bars),
+      "transfer_shares": np.zeros(2 * n_bars),
+      "right_shares": np.zeros(2 * n_bars),
+      "right_price": np.zeros(2 * n_bars),
+    },
+    objs=["SH600000", "SZ000001"],
+  )
+
+  class ChurnStrat(Strategy):
+    def execute(self, ctx: PortfolioContext):  # type: ignore[override]
+      # Bar 1-2: hold SH600000; Bar 3: rotate to SZ000001; Bar 8: stay empty
+      if ctx.bar == 1:
+        ctx.rebalance(np.array([1.0, 0.0]))
+      elif ctx.bar == 2:
+        ctx.rebalance(np.array([0.0, 1.0]))
+      elif ctx.bar == 4:
+        ctx.rebalance(np.array([1.0, 0.0]))
+      elif ctx.bar == 6:
+        ctx.rebalance(np.array([0.0, 1.0]))
+      elif ctx.bar == 8:
+        ctx.rebalance(np.array([0.0, 0.0]))
+
+  # Use a high fee (5% per side) to trigger > 100% cumulative fee vs initial cash under compounding
+  high_fee = Fee.load('[{"ts": 0, "commission_buy": 0.05, "commission_sell": 0.05}]')
+  acc = PortfolioAccount(10000.0, dp, fee=high_fee)
+  PortfolioRunner(acc).run(ChurnStrat())
+  reports = build_portfolio_report(dp, acc)
+  rep = reports[0]
+
+  assert rep.fee_rate > 1.0  # Cum fee vs initial cash exceeds 100%
+  assert 0.04 <= rep.fee_to_turnover <= 0.06  # Effective rate stays ~5%
+  assert rep.annual_fee_drag > 0.0
+  # Bars 0, 8, 9 are empty -> 3 / 10 = 0.30
+  assert np.isclose(rep.empty_days_ratio, 0.3)
+  assert 0.5 <= rep.avg_holdings <= 1.0
+  assert 0.0 < rep.avg_position_ratio <= 1.0
+  assert len(rep.annual_breakdown) == 1
+  assert rep.annual_breakdown[0]["year"] == 2024
+
+  md = build_markdown_summary(reports, account=acc)
+  assert "cagr (Annualized)" in md
+  assert "annual_fee_drag (Fee / Avg NAV / Yr)" in md
+  assert "fee_to_turnover (Effective Rate)" in md
+  assert "fee_to_init_cash (Cum Fee / Init Cash)" in md
+  assert "avg_holdings" in md
+  assert "empty_days_ratio" in md
+  assert "avg_position_ratio" in md
+  assert "## Annual Performance" in md
+  assert "| 2024 |" in md
+
+  json_data = build_json_report(reports)
+  assert "cagr" in json_data["PORTFOLIO"]
+  assert "annual_fee_drag" in json_data["PORTFOLIO"]
+  assert "fee_to_turnover" in json_data["PORTFOLIO"]
+  assert "avg_holdings" in json_data["PORTFOLIO"]
+  assert "empty_days_ratio" in json_data["PORTFOLIO"]
+  assert "avg_position_ratio" in json_data["PORTFOLIO"]
+  assert "annual_breakdown" in json_data["PORTFOLIO"]
 
 

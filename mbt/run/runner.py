@@ -541,7 +541,7 @@ class Runner:
       strategy_cls: Strategy class (or factory callable) accepting `**params`.
       param_grid: List of keyword-argument dicts defining parameter combinations.
       initial_cash: Starting cash per obj.
-      fee: Fee model (defaults to Fee.default() / zero Fee).
+      fee: Fee model (defaults to Fee.default(), matching CLI; pass Fee.zero() for zero fees).
       unit: Trading lot size.
       slippage: Execution slippage fraction.
       exec_mode: Execution mode ('close' or 'next_open'); defaults to strategy_cls.exec_mode.
@@ -559,7 +559,7 @@ class Runner:
     if eff_mode not in ("close", "next_open"):
       raise ValueError(f"unsupported exec_mode: {eff_mode}, expected 'close' or 'next_open'")
 
-    fee_obj = fee if fee is not None else Fee()
+    fee_obj = fee if fee is not None else Fee.default()
     warmup_b = int(getattr(dp, "warmup_bars", 0))
     market = MarketData.from_dict(
       dp.data,

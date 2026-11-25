@@ -2,6 +2,7 @@ import numpy as np
 import polars as pl
 from mbt import (
   DataProvider,
+  Fee,
   PortfolioAccount,
   PortfolioContext,
   PortfolioRecord,
@@ -43,7 +44,7 @@ def test_portfolio_shared_cash_rebalance():
         # Bar 2: rotate 100% from Stock A (@ 20.0) into Stock B (@ 10.0 -> 1000 shares = 10000)
         ctx.rebalance(np.array([0.0, 1.0]))
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   runner.run(RotateStrategy())
 
@@ -85,7 +86,7 @@ def test_selector_strategy_integration():
       self.factors = df
       return df["obj"].head(1).to_list()
 
-  acc = PortfolioAccount(12000.0, dp)
+  acc = PortfolioAccount(12000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   strat = SelectorStrategy(MomentumTop1Selector(), rebalance_period=1, min_bars=1, max_holdings=1)
   runner.run(strat)
@@ -159,7 +160,7 @@ class MyPortfolioStrategy(mbt.PortfolioStrategy):
     },
     objs=["SH000300", "SH600000", "SZ000001"],
   )
-  acc = PortfolioAccount(200000.0, dp, tradable_start=1)
+  acc = PortfolioAccount(200000.0, dp, fee=Fee.zero(), tradable_start=1)
   runner = PortfolioRunner(acc)
   runner.run(req.strategy)
 
@@ -200,7 +201,7 @@ def test_portfolio_records_and_trades_df():
       elif ctx.dp.i == 2:
         ctx.rebalance(np.array([0.0, 1.0]))
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   # Empty before run
   assert len(acc.records) == 0
   empty_df = acc.trades_df()
@@ -361,7 +362,7 @@ def test_portfolio_context_run_selector():
         for s in ctx.universe:
           ctx.buy(s, percent=1.0)
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   runner.run(AdaptiveStrategy())
 
@@ -405,7 +406,7 @@ def test_portfolio_rebalance_tolerance_band():
         # Full liquidation on SZ000001 even within tolerance
         ctx.rebalance(np.array([1.0, 0.0]), tolerance=0.05)
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   runner.run(TolStrategy())
 
@@ -453,7 +454,7 @@ def test_portfolio_context_panel_warning_and_slice(caplog):
         p_slice2 = ctx.slice_panel(lastN=2)
         assert p_slice2.bars == 2
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   with caplog.at_level(logging.WARNING):
     runner.run(InspectStrategy())
@@ -518,7 +519,7 @@ def test_rebalance_and_buy_universe_whitelist_guard():
         # Attempt to allocate 80% to SH600000 (outside universe) and 20% to SZ000001
         ctx.rebalance(np.array([0.8, 0.2]))
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   runner.run(WhitelistStrategy())
 
@@ -552,7 +553,7 @@ def test_set_universe_and_run_selector_missing_objs_warning():
         # Pass an obj not in preloaded pool -> Fail-Fast ValueError
         ctx.set_universe(["SH600000", "SH999999"])
 
-  acc = PortfolioAccount(10000.0, dp)
+  acc = PortfolioAccount(10000.0, dp, fee=Fee.zero())
   runner = PortfolioRunner(acc)
   with pytest.raises(ValueError, match="set_universe: 1 obj\\(s\\) not in pre-loaded pool"):
     runner.run(MissingObjStrategy())

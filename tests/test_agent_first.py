@@ -156,7 +156,8 @@ class BadStrat(mbt.Strategy):
     },
     objs=["SZ000001"],
   )
-  acc = PortfolioAccount(100000.0, dp)
+  from mbt import Fee
+  acc = PortfolioAccount(100000.0, dp, fee=Fee.zero())
   ctx = PortfolioContext(acc)
 
   # Out-of-pool rebalance_objs and buy must raise ValueError

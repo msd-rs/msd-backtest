@@ -288,13 +288,17 @@ def extract_holding_counts(
     for b in range(total_bars):
       for rec in by_bar.get(b, ()):
         obj = str(getattr(rec, "obj", ""))
-        action = str(getattr(rec, "action", "")).upper()
-        sh = float(getattr(rec, "shares", 0.0))
-        if action == "BUY":
-          shares_by_obj[obj] = shares_by_obj.get(obj, 0.0) + sh
-        elif action == "SELL":
-          rem = shares_by_obj.get(obj, 0.0) - sh
+        if hasattr(rec, "pos_shares"):
+          rem = float(getattr(rec, "pos_shares", 0.0))
           shares_by_obj[obj] = rem if rem > 1e-6 else 0.0
+        else:
+          action = str(getattr(rec, "action", "")).upper()
+          sh = float(getattr(rec, "shares", 0.0))
+          if action == "BUY":
+            shares_by_obj[obj] = shares_by_obj.get(obj, 0.0) + sh
+          elif action == "SELL":
+            rem = shares_by_obj.get(obj, 0.0) - sh
+            shares_by_obj[obj] = rem if rem > 1e-6 else 0.0
       counts[b] = sum(1 for v in shares_by_obj.values() if v > 1e-6)
     return counts[w: w + n_bars]
 
@@ -718,11 +722,22 @@ def render_strategy_overview(
 
   # 2. KPI Cards Grid (3 rows x 3 columns)
   n_bars = len(report.ror)
-  cagr = (1.0 + float(report.profit)) ** (252.0 / max(1, n_bars)) - 1.0 if n_bars > 0 and (1.0 + float(report.profit)) > 0 else float(report.profit)
+  rep_cagr = getattr(report, "cagr", None)
+  if rep_cagr is not None and abs(float(rep_cagr)) > 1e-12:
+    cagr = float(rep_cagr)
+  else:
+    cagr = (1.0 + float(report.profit)) ** (252.0 / max(1, n_bars)) - 1.0 if n_bars > 0 and (1.0 + float(report.profit)) > 0 else float(report.profit)
   rebal_cnt = getattr(report, "rebalance_count", 0) or len(rebal_events) or report.trade_count
 
   dur_val = f"平均 {round(avg_dur)} 天" if max_dur > 0 else "无持仓"
   dur_sub = f"最长 {max_dur} / 最短 {min_dur} 天" if max_dur > 0 else "-"
+
+  ann_drag = float(getattr(report, "annual_fee_drag", 0.0))
+  fee_turn = float(getattr(report, "fee_to_turnover", 0.0))
+  if ann_drag > 0.0 or fee_turn > 0.0:
+    fee_sub = f"年化费耗 {ann_drag:.2%} · 均费 {fee_turn:.2%}"
+  else:
+    fee_sub = f"累计费比 {report.fee_rate:.2%}"
 
   kpis = [
     ("累计收益", f"{report.profit:+.2%}", f"基准 {report.benchmark_profit:+.2%}", _val_color(report.profit)),
@@ -732,7 +747,7 @@ def render_strategy_overview(
     ("胜率 / 盈亏比", f"{report.win_rate:.1%} / {report.profit_factor:.2f}", f"均盈 {report.avg_win:+.1%} / 亏 {report.avg_loss:+.1%}", PALETTE["text_primary"]),
     ("风险敞口", f"Beta {report.beta:.2f}", f"信息比率 {report.ir:.2f}", PALETTE["text_primary"]),
     ("选股范围", meta.universe_headline, meta.universe_detail, PALETTE["strategy"]),
-    ("交易统计", f"调仓 {rebal_cnt} 次 · {report.trade_count} 笔", f"费率 {report.fee_rate:.2%} (按千1计)", PALETTE["text_primary"]),
+    ("交易统计", f"调仓 {rebal_cnt} 次 · {report.trade_count} 笔", fee_sub, PALETTE["text_primary"]),
     ("持仓统计", dur_val, dur_sub, PALETTE["text_primary"]),
   ]
 

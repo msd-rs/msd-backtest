@@ -67,7 +67,7 @@ export function EquityChart({
       .queryCurve(runId, {
         obj,
         start_idx: 0,
-        max_points: 2000,
+        max_points: 10000,
       })
       .then((res) => {
         if (!cancelled) setOverview(res);
@@ -92,7 +92,7 @@ export function EquityChart({
         obj,
         start_idx: detailReq.start,
         end_idx: detailReq.end,
-        max_points: 2000,
+        max_points: 10000,
       })
       .then((res) => {
         if (!cancelled) setDetail(res);
@@ -213,96 +213,96 @@ export function EquityChart({
     const grids = showDd
       ? fillHeight
         ? [
-            { left: 58, right: 20, top: 28, bottom: "39%" },
-            { left: 58, right: 20, top: "65%", bottom: 46 },
-          ]
+          { left: 58, right: 20, top: 28, bottom: "39%" },
+          { left: 58, right: 20, top: "65%", bottom: 46 },
+        ]
         : [
-            { left: 58, right: 20, top: 34, height: "49%" },
-            { left: 58, right: 20, top: "63%", height: "18%" },
-          ]
+          { left: 58, right: 20, top: 34, height: "49%" },
+          { left: 58, right: 20, top: "63%", height: "18%" },
+        ]
       : fillHeight
         ? [{ left: 58, right: 20, top: 28, bottom: 46 }]
         : [{ left: 58, right: 20, top: 34, bottom: 58 }];
 
     const xAxes: echarts.XAXisComponentOption[] = showDd
       ? [
-          {
-            type: "value",
-            gridIndex: 0,
-            min: 0,
-            max: axisMax,
-            minInterval: 1,
-            axisLabel: { show: false },
-            axisTick: { show: false },
-            axisLine: { lineStyle: { color: gridLine } },
-            splitLine: { show: false },
-            axisPointer: { label: { show: false } },
+        {
+          type: "value",
+          gridIndex: 0,
+          min: 0,
+          max: axisMax,
+          minInterval: 1,
+          axisLabel: { show: false },
+          axisTick: { show: false },
+          axisLine: { lineStyle: { color: gridLine } },
+          splitLine: { show: false },
+          axisPointer: { label: { show: false } },
+        },
+        {
+          type: "value",
+          gridIndex: 1,
+          min: 0,
+          max: axisMax,
+          minInterval: 1,
+          axisLabel: {
+            color: textColor,
+            fontSize: 10,
+            hideOverlap: true,
+            formatter: formatXLabel,
           },
-          {
-            type: "value",
-            gridIndex: 1,
-            min: 0,
-            max: axisMax,
-            minInterval: 1,
-            axisLabel: {
-              color: textColor,
-              fontSize: 10,
-              hideOverlap: true,
-              formatter: formatXLabel,
-            },
-            axisLine: { lineStyle: { color: gridLine } },
-            splitLine: { show: false },
-            axisPointer: { label: { formatter: formatXPointer } },
-          },
-        ]
+          axisLine: { lineStyle: { color: gridLine } },
+          splitLine: { show: false },
+          axisPointer: { label: { formatter: formatXPointer } },
+        },
+      ]
       : [
-          {
-            type: "value",
-            gridIndex: 0,
-            min: 0,
-            max: axisMax,
-            minInterval: 1,
-            axisLabel: {
-              color: textColor,
-              fontSize: 10,
-              hideOverlap: true,
-              formatter: formatXLabel,
-            },
-            axisLine: { lineStyle: { color: gridLine } },
-            splitLine: { show: false },
-            axisPointer: { label: { formatter: formatXPointer } },
+        {
+          type: "value",
+          gridIndex: 0,
+          min: 0,
+          max: axisMax,
+          minInterval: 1,
+          axisLabel: {
+            color: textColor,
+            fontSize: 10,
+            hideOverlap: true,
+            formatter: formatXLabel,
           },
-        ];
+          axisLine: { lineStyle: { color: gridLine } },
+          splitLine: { show: false },
+          axisPointer: { label: { formatter: formatXPointer } },
+        },
+      ];
 
     const yAxes: echarts.YAXisComponentOption[] = showDd
       ? [
-          {
-            type: "value",
-            gridIndex: 0,
-            scale: true,
-            axisLabel: { color: textColor, fontSize: 10, formatter: "{value}%" },
-            splitLine: { lineStyle: { color: gridLine, type: "dashed" } },
-            axisPointer: { label: { formatter: formatYPointer } },
-          },
-          {
-            type: "value",
-            gridIndex: 1,
-            scale: true,
-            axisLabel: { color: textColor, fontSize: 10, formatter: "{value}%" },
-            splitLine: { lineStyle: { color: gridLine, type: "dashed" } },
-            axisPointer: { label: { formatter: formatYPointer } },
-          },
-        ]
+        {
+          type: "value",
+          gridIndex: 0,
+          scale: true,
+          axisLabel: { color: textColor, fontSize: 10, formatter: "{value}%" },
+          splitLine: { lineStyle: { color: gridLine, type: "dashed" } },
+          axisPointer: { label: { formatter: formatYPointer } },
+        },
+        {
+          type: "value",
+          gridIndex: 1,
+          scale: true,
+          axisLabel: { color: textColor, fontSize: 10, formatter: "{value}%" },
+          splitLine: { lineStyle: { color: gridLine, type: "dashed" } },
+          axisPointer: { label: { formatter: formatYPointer } },
+        },
+      ]
       : [
-          {
-            type: "value",
-            gridIndex: 0,
-            scale: true,
-            axisLabel: { color: textColor, fontSize: 10, formatter: "{value}%" },
-            splitLine: { lineStyle: { color: gridLine, type: "dashed" } },
-            axisPointer: { label: { formatter: formatYPointer } },
-          },
-        ];
+        {
+          type: "value",
+          gridIndex: 0,
+          scale: true,
+          axisLabel: { color: textColor, fontSize: 10, formatter: "{value}%" },
+          splitLine: { lineStyle: { color: gridLine, type: "dashed" } },
+          axisPointer: { label: { formatter: formatYPointer } },
+        },
+      ];
 
     const dzStart = zoomRef.current
       ? Math.max(0, Math.min(maxIdx, zoomRef.current.start))
@@ -525,7 +525,7 @@ export function EquityChart({
       <div
         ref={containerRef}
         className={
-          error ? "hidden" : fillHeight ? "min-h-0 w-full flex-1" : "h-[350px] w-full"
+          error ? "hidden" : fillHeight ? "min-h-0 w-full flex-1" : "h-87.5 w-full"
         }
       />
     </div>

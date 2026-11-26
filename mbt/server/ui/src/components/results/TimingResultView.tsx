@@ -15,6 +15,7 @@ interface TimingResultViewProps {
 
 const TIMING_COLUMNS: ColumnSpec[] = [
   { key: "obj", label: "标的", align: "left" },
+  { key: "name", label: "名称", align: "left" },
   { key: "profit", label: "策略收益", fmt: "pct", align: "right", colorSign: true },
   { key: "profit_original", label: "买入持有", fmt: "pct", align: "right", colorSign: true },
   { key: "benchmark_profit", label: "基准收益", fmt: "pct", align: "right" },

@@ -663,6 +663,20 @@ def _ensure_stocks_loaded():
     g["FOUNDS"] = all_stocks.filter(pl.col("kind") == KIND_FUND).get_column("obj").to_list()
 
 
+def get_stock_name_map() -> dict[str, str]:
+  """Return a cached mapping from security code (``obj``) to its display name."""
+  _ensure_stocks_loaded()
+  g = globals()
+  if "_STOCK_NAME_MAP" not in g:
+    df = g["ALL_STOCKS"].select(["obj", "name"])
+    g["_STOCK_NAME_MAP"] = {
+      str(obj): str(name)
+      for obj, name in df.iter_rows()
+      if obj is not None and name is not None
+    }
+  return g["_STOCK_NAME_MAP"]
+
+
 def __getattr__(name: str):
   if name in _LAZY_VARS:
     _ensure_stocks_loaded()

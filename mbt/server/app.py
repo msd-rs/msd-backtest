@@ -9,6 +9,9 @@ import asyncio
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
+import signal
+import threading
+import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -141,6 +144,18 @@ def create_app(
   async def health_check() -> str:
     """Return service health status and installed msd-backtest version."""
     return f"OK, msd-backtest {version}"
+
+  @app.post("/api/shutdown", tags=["system"])
+  async def shutdown_server() -> dict[str, str]:
+    """Gracefully shut down the running server process."""
+    pid = os.getpid()
+
+    def _trigger_exit() -> None:
+      time.sleep(0.05)
+      os.kill(pid, signal.SIGTERM)
+
+    threading.Thread(target=_trigger_exit, daemon=True).start()
+    return {"status": "shutting_down"}
 
   @app.get("/api/config", response_model=SystemConfigResponse, tags=["system"])
   async def get_system_config() -> dict[str, Any]:

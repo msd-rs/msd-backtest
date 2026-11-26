@@ -749,6 +749,15 @@ def read_manifest(result_dir: Path | str) -> dict[str, Any]:
   return json.loads(m_path.read_text(encoding="utf-8"))
 
 
+def _get_stock_name_map_safe() -> dict[str, str]:
+  """Best-effort lookup of security code -> display name from MSD stock metadata."""
+  try:
+    from mbt.shared.stocks import get_stock_name_map
+    return get_stock_name_map()
+  except Exception:
+    return {}
+
+
 def query_table(
   result_dir: Path | str,
   table_name: str,
@@ -778,6 +787,35 @@ def query_table(
   lf = pl.scan_parquet(pq_path)
   schema = lf.collect_schema()
   col_names = schema.names()
+
+  if "obj" in col_names and "name" not in col_names:
+    name_map = _get_stock_name_map_safe()
+    if name_map:
+      name_expr = pl.col("obj").replace_strict(name_map, default=None, return_dtype=pl.Utf8).alias("name")
+    else:
+      name_expr = pl.lit(None, dtype=pl.Utf8).alias("name")
+    obj_idx = col_names.index("obj")
+    new_cols = col_names[: obj_idx + 1] + ["name"] + col_names[obj_idx + 1 :]
+    lf = lf.with_columns(name_expr).select(new_cols)
+    schema = lf.collect_schema()
+    col_names = schema.names()
+
+  if "entry_date" in col_names and "exit_date" in col_names and "days" not in col_names:
+    def _parse_date_expr(col_name: str) -> pl.Expr:
+      s = pl.col(col_name).cast(pl.Utf8).str.strip_chars()
+      return pl.coalesce([
+        s.str.slice(0, 10).str.strptime(pl.Date, "%Y-%m-%d", strict=False),
+        s.str.slice(0, 8).str.strptime(pl.Date, "%Y%m%d", strict=False),
+      ])
+
+    entry_dt = _parse_date_expr("entry_date")
+    exit_dt = _parse_date_expr("exit_date")
+    days_expr = (exit_dt - entry_dt).dt.total_days().cast(pl.Int32).alias("days")
+    exit_idx = col_names.index("exit_date")
+    new_cols = col_names[: exit_idx + 1] + ["days"] + col_names[exit_idx + 1 :]
+    lf = lf.with_columns(days_expr).select(new_cols)
+    schema = lf.collect_schema()
+    col_names = schema.names()
 
   if factor and "factor" in col_names:
     lf = lf.filter(pl.col("factor") == factor)

@@ -416,7 +416,11 @@ def test_worker_parquet_storage_and_queries_all_modes(tmp_path):
     )
   assert m_port["summary"]["rebalance_records_count"] > 0
   assert query_table(port_dir, "rebalances")["total_rows"] > 0
-  assert query_table(port_dir, "trades")["total_rows"] > 0
+  trades_tbl = query_table(port_dir, "trades", sort_by="days", sort_dir="desc")
+  assert trades_tbl["total_rows"] > 0
+  assert "days" in [c["name"] for c in trades_tbl["columns"]]
+  assert isinstance(trades_tbl["rows"][0]["days"], int)
+  assert trades_tbl["rows"][0]["days"] >= 0
   assert query_table(port_dir, "attribution")["total_rows"] > 0
   c_port = query_curve(port_dir)
   assert len(c_port["series"]["ror"]) == 30
@@ -1008,6 +1012,95 @@ def test_resolve_spec_default_objs_and_internal_selector(tmp_path):
     spec_explicit = rm.resolve_spec(defaults, s_cprt, overrides={"objs": "SH600000"})
     assert spec_explicit["objs"] == "SH600000"
     assert spec_explicit["use_internal_selector"] is False
+
+
+def test_query_table_enriches_stock_name(tmp_path: Path):
+  from mbt.server.storage import write_select_result
+
+  sel_dir = tmp_path / "sel_names"
+  write_select_result(
+    sel_dir,
+    strategy_name="demo",
+    select_date="2024-05-10",
+    stocks=["SH600000", "SZ000001"],
+    factors=None,
+    elapsed=0.1,
+  )
+
+  with patch(
+    "mbt.server.storage._get_stock_name_map_safe",
+    return_value={"SH600000": "浦发银行", "SZ000001": "平安银行"},
+  ):
+    res = query_table(sel_dir, "select_factors", sort_by="name", sort_dir="asc")
+    col_names = [c["name"] for c in res["columns"]]
+    assert col_names[:2] == ["obj", "name"]
+    assert res["rows"][0]["name"] == "平安银行"
+    assert res["rows"][1]["name"] == "浦发银行"
+
+    filtered = query_table(sel_dir, "select_factors", q="浦发")
+    assert filtered["total_rows"] == 1
+    assert filtered["rows"][0]["obj"] == "SH600000"
+
+  with patch("mbt.server.storage._get_stock_name_map_safe", return_value={}):
+    res_empty = query_table(sel_dir, "select_factors", sort_by="obj", sort_dir="asc")
+    assert [c["name"] for c in res_empty["columns"][:2]] == ["obj", "name"]
+    assert res_empty["rows"][0]["name"] is None
+
+
+def test_cli_down_stops_daemon_from_different_cwd(tmp_path: Path, monkeypatch, capsys):
+  import re
+  from mbt.server.__main__ import main as server_main
+
+  cfg_dir = tmp_path / "cfg"
+  data_dir = tmp_path / "data"
+  other_dir = tmp_path / "other_cwd"
+  other_dir.mkdir()
+
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    free_port = s.getsockname()[1]
+
+  url = f"http://127.0.0.1:{free_port}"
+  pid: int | None = None
+  try:
+    rc = server_main([
+      "serve",
+      "--daemon",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      str(free_port),
+      "--config-dir",
+      str(cfg_dir),
+      "--data-dir",
+      str(data_dir),
+    ])
+    assert rc == 0
+    out_start = capsys.readouterr().out
+    m = re.search(r"pid:\s*(\d+)", out_start)
+    assert m is not None
+    pid = int(m.group(1))
+
+    # Switch to a completely different working directory and run `down`
+    monkeypatch.chdir(other_dir)
+    assert server_main(["down", "--host", "127.0.0.1", "--port", str(free_port), "--config-dir", str(cfg_dir)]) == 0
+    out_down = capsys.readouterr().out
+    assert f"Stopped mbt.server at {url}" in out_down
+
+    # Confirm server is down and second `down` is idempotent
+    assert server_main(["status", "--url", url]) == 1
+    assert server_main(["down", "--url", url]) == 0
+    assert "not running" in capsys.readouterr().out
+    pid = None
+  finally:
+    if pid is not None:
+      import signal
+      try:
+        os.kill(pid, signal.SIGTERM)
+      except OSError:
+        pass
+
+
 
 
 

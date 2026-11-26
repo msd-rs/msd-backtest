@@ -139,12 +139,17 @@ export function ServerDataTable({
     };
   }, [runId, tableName, page, pageSize, sortBy, sortDir, debouncedQ, factor, period]);
 
+  const DEFAULT_COLUMN_LABELS: Record<string, string> = {
+    obj: "标的",
+    name: "名称",
+  };
+
   const effectiveCols: ColumnSpec[] = (() => {
     if (columns && columns.length > 0) return columns;
     if (!data) return [];
     return data.columns.map((c) => ({
       key: c.name,
-      label: c.name,
+      label: DEFAULT_COLUMN_LABELS[c.name] ?? c.name,
       align: c.dtype.includes("Float") || c.dtype.includes("Int") ? "right" : "left",
     }));
   })();
@@ -310,7 +315,8 @@ export function ServerDataTable({
                     onClick={onRowClick ? () => onRowClick(row) : undefined}
                     className={cn(
                       "border-b transition-colors last:border-b-0",
-                      onRowClick ? "cursor-pointer hover:bg-accent/60" : "hover:bg-muted/30",
+                      !isSelected && "even:bg-muted/30",
+                      onRowClick ? "cursor-pointer hover:bg-accent/60" : "hover:bg-muted/55",
                       isSelected && "bg-primary/12",
                     )}
                   >

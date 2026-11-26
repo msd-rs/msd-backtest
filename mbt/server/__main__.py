@@ -81,12 +81,16 @@ def check_existing_server(
 def _resolve_server_url(
   explicit_url: str | None,
   config_dir: str | None,
+  *,
+  host: str | None = None,
+  port: int | None = None,
 ) -> str:
   if explicit_url:
     return explicit_url.rstrip("/")
   cfg = load_server_config(config_dir)
-  probe_host = _probe_host_for(cfg.server.host)
-  return f"http://{probe_host}:{cfg.server.port}"
+  probe_host = _probe_host_for(host or cfg.server.host)
+  resolved_port = int(port or cfg.server.port)
+  return f"http://{probe_host}:{resolved_port}"
 
 
 def _start_daemon(
@@ -303,6 +307,67 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_down(args: argparse.Namespace) -> int:
+  base_url = _resolve_server_url(
+    args.url,
+    args.config_dir,
+    host=getattr(args, "host", None),
+    port=getattr(args, "port", None),
+  )
+  health_url = f"{base_url}/api/health"
+  try:
+    with urllib.request.urlopen(health_url, timeout=2.0) as resp:
+      body = resp.read().decode("utf-8", errors="replace").strip()
+      if resp.status != 200 or not body.startswith("OK, msd-backtest"):
+        print(
+          f"Error: Service at {base_url} is not mbt.server.",
+          file=sys.stderr,
+        )
+        return 1
+  except urllib.error.HTTPError as exc:
+    print(
+      f"Error: Service at {base_url} is not mbt.server (HTTP {exc.code}).",
+      file=sys.stderr,
+    )
+    return 1
+  except (urllib.error.URLError, OSError):
+    print(f"mbt.server is not running at {base_url}.")
+    return 0
+
+  req = urllib.request.Request(
+    f"{base_url}/api/shutdown",
+    data=b"",
+    method="POST",
+  )
+  try:
+    with urllib.request.urlopen(req, timeout=5.0) as resp:
+      if resp.status != 200:
+        print(f"Error: Shutdown request failed with HTTP {resp.status}.", file=sys.stderr)
+        return 1
+  except urllib.error.HTTPError as exc:
+    print(f"Shutdown failed ({exc.code}): {_format_http_error(exc)}", file=sys.stderr)
+    return 1
+  except (urllib.error.URLError, OSError) as exc:
+    print(f"Failed to send shutdown request to {base_url}: {exc}", file=sys.stderr)
+    return 1
+
+  deadline = time.monotonic() + 10.0
+  while time.monotonic() < deadline:
+    try:
+      with urllib.request.urlopen(health_url, timeout=0.5):
+        pass
+    except (urllib.error.URLError, OSError):
+      print(f"Stopped mbt.server at {base_url}.")
+      return 0
+    time.sleep(0.1)
+
+  print(
+    f"Error: Timed out waiting for mbt.server at {base_url} to stop.",
+    file=sys.stderr,
+  )
+  return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
   """Construct the CLI parser for ``mbt-server`` / ``python -m mbt.server``."""
   parser = argparse.ArgumentParser(
@@ -352,6 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
   p_stat.add_argument("--url", default=None, help="Override server URL")
   p_stat.add_argument("--config-dir", default=argparse.SUPPRESS, help="Override OS config directory")
 
+  p_down = sub.add_parser("down", help="Stop the running mbt.server instance")
+  p_down.add_argument("--url", default=None, help="Override server URL")
+  p_down.add_argument("--host", default=argparse.SUPPRESS, help="Override server host from server.json")
+  p_down.add_argument("--port", type=int, default=argparse.SUPPRESS, help="Override server port from server.json")
+  p_down.add_argument("--config-dir", default=argparse.SUPPRESS, help="Override OS config directory")
+
   return parser
 
 
@@ -366,6 +437,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     return _cmd_link(args)
   if args.command == "status":
     return _cmd_status(args)
+  if args.command == "down":
+    return _cmd_down(args)
   return _cmd_serve(args)
 
 

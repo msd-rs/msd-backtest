@@ -17,6 +17,7 @@ interface PortfolioResultViewProps {
 const REBALANCE_COLS: ColumnSpec[] = [
   { key: "date", label: "日期", align: "left" },
   { key: "obj", label: "标的", align: "left" },
+  { key: "name", label: "名称", align: "left" },
   { key: "action", label: "方向", align: "center" },
   { key: "shares", label: "成交股数", fmt: "int", align: "right" },
   { key: "deal_price", label: "成交价", fmt: "price", align: "right" },
@@ -28,14 +29,17 @@ const REBALANCE_COLS: ColumnSpec[] = [
 
 const TRADE_COLS: ColumnSpec[] = [
   { key: "obj", label: "标的", align: "left" },
+  { key: "name", label: "名称", align: "left" },
   { key: "entry_date", label: "买入日期", align: "left" },
   { key: "exit_date", label: "卖出日期", align: "left" },
+  { key: "days", label: "天数", fmt: "int", align: "right" },
   { key: "profit_rate", label: "持仓收益率", fmt: "pct", align: "right", colorSign: true },
   { key: "profit_amount", label: "持仓盈亏额", fmt: "money_signed", align: "right", colorSign: true },
 ];
 
 const ATTRIB_COLS: ColumnSpec[] = [
   { key: "obj", label: "标的", align: "left" },
+  { key: "name", label: "名称", align: "left" },
   { key: "trade_count", label: "交易轮次", fmt: "int", align: "right" },
   { key: "win_rate", label: "胜率", fmt: "pct_plain", align: "right" },
   { key: "total_profit", label: "累计盈亏", fmt: "money_signed", align: "right", colorSign: true },

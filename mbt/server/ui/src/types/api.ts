@@ -97,6 +97,7 @@ export interface ShortcutRecord {
   name: string;
   mode: RunMode;
   params: Record<string, unknown>;
+  notes?: string;
   created_at: string;
   updated_at: string;
   latest_run: RunSummaryRecord | null;
@@ -109,6 +110,7 @@ export interface StrategyRecord {
   path: string;
   default_mode: RunMode;
   metadata: StrategyMetadata;
+  default_params?: Record<string, unknown>;
   notes: string;
   file_exists: boolean;
   created_at: string;

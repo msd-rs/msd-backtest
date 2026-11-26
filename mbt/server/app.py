@@ -208,7 +208,13 @@ def create_app(
   async def register_strategy(req: StrategyRegisterRequest) -> dict[str, Any]:
     """Register a strategy/factor file by path, deduplicating idempotently on canonical realpath."""
     try:
-      rec, created = store.upsert_strategy(req.path, name=req.name, notes=req.notes)
+      rec, created = store.upsert_strategy(
+        req.path,
+        name=req.name,
+        notes=req.notes,
+        default_mode=req.default_mode,
+        default_params=req.default_params,
+      )
     except FileNotFoundError as exc:
       raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -226,9 +232,15 @@ def create_app(
 
   @app.patch("/api/strategies/{strategy_id}", response_model=StrategyResponse, tags=["strategies"])
   async def update_strategy(strategy_id: str, req: StrategyUpdateRequest) -> dict[str, Any]:
-    """Rename or update notes on an existing strategy."""
+    """Rename, update notes, or update default mode/parameters on an existing strategy."""
     try:
-      return store.update_strategy(strategy_id, name=req.name, notes=req.notes)
+      return store.update_strategy(
+        strategy_id,
+        name=req.name,
+        notes=req.notes,
+        default_mode=req.default_mode,
+        default_params=req.default_params,
+      )
     except KeyError as exc:
       raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -286,6 +298,7 @@ def create_app(
         name=req.name,
         mode=req.mode,
         params=req.params,
+        notes=req.notes,
       )
     except KeyError as exc:
       raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -303,13 +316,14 @@ def create_app(
   @app.put("/api/shortcuts/{shortcut_id}", response_model=ShortcutResponse, tags=["shortcuts"])
   @app.patch("/api/shortcuts/{shortcut_id}", response_model=ShortcutResponse, tags=["shortcuts"])
   async def update_shortcut(shortcut_id: str, req: ShortcutUpdateRequest) -> dict[str, Any]:
-    """Update a shortcut's name, mode, or saved parameters."""
+    """Update a shortcut's name, mode, notes, or saved parameters."""
     try:
       return store.update_shortcut(
         shortcut_id,
         name=req.name,
         mode=req.mode,
         params=req.params,
+        notes=req.notes,
       )
     except KeyError as exc:
       raise HTTPException(status_code=404, detail=str(exc)) from exc

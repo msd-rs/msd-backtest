@@ -62,11 +62,15 @@ class StrategyRegisterRequest(BaseModel):
   path: str = Field(..., min_length=1, description="Absolute or relative path to .py/.txt/.json strategy or factor file")
   name: str | None = None
   notes: str | None = None
+  default_mode: RunModeLiteral | None = None
+  default_params: dict[str, Any] | None = None
 
 
 class StrategyUpdateRequest(BaseModel):
   name: str | None = None
   notes: str | None = None
+  default_mode: RunModeLiteral | None = None
+  default_params: dict[str, Any] | None = None
 
 
 class ShortcutParamsModel(BaseModel):
@@ -108,12 +112,14 @@ class ShortcutCreateRequest(BaseModel):
   name: str = Field(..., min_length=1)
   mode: RunModeLiteral
   params: dict[str, Any] = Field(default_factory=dict)
+  notes: str = ""
 
 
 class ShortcutUpdateRequest(BaseModel):
   name: str | None = None
   mode: RunModeLiteral | None = None
   params: dict[str, Any] | None = None
+  notes: str | None = None
 
 
 class ShortcutDuplicateRequest(BaseModel):
@@ -151,6 +157,7 @@ class ShortcutResponse(BaseModel):
   name: str
   mode: str
   params: dict[str, Any]
+  notes: str = ""
   created_at: str
   updated_at: str
   latest_run: RunSummaryResponse | None = None
@@ -163,6 +170,7 @@ class StrategyResponse(BaseModel):
   path: str
   default_mode: str
   metadata: dict[str, Any]
+  default_params: dict[str, Any] = Field(default_factory=dict)
   notes: str
   file_exists: bool
   created_at: str

@@ -1101,7 +1101,172 @@ def test_cli_down_stops_daemon_from_different_cwd(tmp_path: Path, monkeypatch, c
         pass
 
 
+def test_cli_register_with_params_and_shortcuts(tmp_path, capsys):
+  """Registering with params sets default_params if new, or creates a shortcut if existing."""
+  import urllib.request
+  import uvicorn
+  from mbt.server.__main__ import main as server_main
 
+  cfg_dir = tmp_path / "cfg"
+  data_dir = tmp_path / "data"
+  strat_file = _write_sample_strategy(tmp_path / "param_reg_strat.py")
 
+  app = create_app(config_dir=cfg_dir, data_dir=data_dir)
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
 
+  server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+  t = threading.Thread(target=server.run, daemon=True)
+  t.start()
+  url = f"http://127.0.0.1:{port}"
+  try:
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+      try:
+        with urllib.request.urlopen(f"{url}/api/health", timeout=0.5) as resp:
+          if resp.status == 200:
+            break
+      except Exception:
+        time.sleep(0.05)
+
+    # 1. Unregistered file + params -> registers strategy and stores default_params
+    rc1 = server_main([
+      "register",
+      str(strat_file),
+      "--mode",
+      "portfolio",
+      "-s",
+      "SH600000",
+      "SZ000001",
+      "-b",
+      "2023-01-01",
+      "-e",
+      "2024-12-31",
+      "-c",
+      "500000",
+      "-a",
+      "hold_bars=7",
+      "--url",
+      url,
+    ])
+    assert rc1 == 0
+    out1 = capsys.readouterr().out.strip()
+    assert out1.startswith(f"{url}/strategies/")
+    assert "/shortcuts/" not in out1
+    sid = out1.rsplit("/", 1)[-1]
+
+    with urllib.request.urlopen(f"{url}/api/strategies/{sid}", timeout=5.0) as resp:
+      strat_rec = json.loads(resp.read().decode("utf-8"))
+    assert strat_rec["default_mode"] == "portfolio"
+    assert strat_rec["default_params"]["objs"] == "SH600000 SZ000001"
+    assert strat_rec["default_params"]["begin"] == "2023-01-01"
+    assert strat_rec["default_params"]["end"] == "2024-12-31"
+    assert strat_rec["default_params"]["cash"] == "500000"
+    assert strat_rec["default_params"]["strategy_args"] == {"hold_bars": "7"}
+    assert strat_rec["shortcuts"] == []
+
+    # Verify RunManager.resolve_spec inherits strategy.default_params
+    resolved = app.state.run_manager.resolve_spec(SystemDefaults(), strat_rec)
+    assert resolved["mode"] == "portfolio"
+    assert resolved["objs"] == "SH600000 SZ000001"
+    assert resolved["begin"] == "2023-01-01"
+    assert resolved["strategy_args"] == {"hold_bars": "7"}
+
+    # 2. Already registered + params WITHOUT --name / --notes -> fail fast
+    rc_missing_name = server_main([
+      "register",
+      str(strat_file),
+      "-b",
+      "2024-01-01",
+      "--notes",
+      "only notes",
+      "--url",
+      url,
+    ])
+    assert rc_missing_name == 1
+    assert "--name and --notes" in capsys.readouterr().err
+
+    rc_missing_notes = server_main([
+      "register",
+      str(strat_file),
+      "--name",
+      "only name",
+      "-b",
+      "2024-01-01",
+      "--url",
+      url,
+    ])
+    assert rc_missing_notes == 1
+    assert "--name and --notes" in capsys.readouterr().err
+
+    # 3. Already registered + params WITH --name and --notes -> creates shortcut
+    rc2 = server_main([
+      "register",
+      str(strat_file),
+      "--name",
+      "高仓位方案",
+      "--notes",
+      "2024年沪深300测试",
+      "--params",
+      '{"benchmark": "SH000905"}',
+      "-b",
+      "2024-01-01",
+      "-a",
+      "hold_bars=3",
+      "--url",
+      url,
+    ])
+    assert rc2 == 0
+    out2 = capsys.readouterr().out.strip()
+    assert out2.startswith(f"{url}/strategies/{sid}/shortcuts/")
+    sc_id = out2.rsplit("/", 1)[-1]
+
+    with urllib.request.urlopen(f"{url}/api/shortcuts/{sc_id}", timeout=5.0) as resp:
+      sc_rec = json.loads(resp.read().decode("utf-8"))
+    assert sc_rec["name"] == "高仓位方案"
+    assert sc_rec["notes"] == "2024年沪深300测试"
+    assert sc_rec["mode"] == "portfolio"
+    assert sc_rec["params"]["benchmark"] == "SH000905"
+    assert sc_rec["params"]["begin"] == "2024-01-01"
+    assert sc_rec["params"]["strategy_args"] == {"hold_bars": "3"}
+
+    # 3b. Same path + same --name -> updates existing shortcut in place
+    rc2_upd = server_main([
+      "register",
+      str(strat_file),
+      "--name",
+      "高仓位方案",
+      "--notes",
+      "2024年沪深300测试-已更新",
+      "-b",
+      "2024-06-01",
+      "-a",
+      "hold_bars=9",
+      "--url",
+      url,
+    ])
+    assert rc2_upd == 0
+    out2_upd = capsys.readouterr().out.strip()
+    assert out2_upd == out2
+
+    with urllib.request.urlopen(f"{url}/api/strategies/{sid}", timeout=5.0) as resp:
+      strat_after = json.loads(resp.read().decode("utf-8"))
+    assert len(strat_after["shortcuts"]) == 1
+    assert strat_after["shortcuts"][0]["id"] == sc_id
+    assert strat_after["shortcuts"][0]["notes"] == "2024年沪深300测试-已更新"
+    assert strat_after["shortcuts"][0]["mode"] == "portfolio"
+    assert strat_after["shortcuts"][0]["params"]["begin"] == "2024-06-01"
+    assert strat_after["shortcuts"][0]["params"]["strategy_args"] == {"hold_bars": "9"}
+
+    # 4. Invalid --params or -a fails fast
+    assert server_main(["register", str(strat_file), "--params", "{bad", "--url", url]) == 1
+    assert "Invalid JSON" in capsys.readouterr().err
+    assert server_main(["register", str(strat_file), "--params", '{"unknown_k": 1}', "--url", url]) == 1
+    assert "Unknown parameter key" in capsys.readouterr().err
+    assert server_main(["register", str(strat_file), "-a", "badtoken", "--url", url]) == 1
+    assert "key=value" in capsys.readouterr().err
+  finally:
+    server.should_exit = True
+    t.join(timeout=5.0)
 

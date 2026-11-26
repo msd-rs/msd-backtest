@@ -49,6 +49,7 @@ class StateStore:
           path TEXT NOT NULL UNIQUE,
           default_mode TEXT NOT NULL,
           metadata_json TEXT NOT NULL,
+          default_params_json TEXT NOT NULL DEFAULT '{}',
           notes TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
@@ -60,6 +61,7 @@ class StateStore:
           name TEXT NOT NULL,
           mode TEXT NOT NULL,
           params_json TEXT NOT NULL,
+          notes TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -88,6 +90,22 @@ class StateStore:
         CREATE INDEX IF NOT EXISTS idx_runs_strategy ON runs(strategy_id);
         """
       )
+      strat_cols = {
+        str(r["name"])
+        for r in self._conn.execute("PRAGMA table_info(strategies)").fetchall()
+      }
+      if "default_params_json" not in strat_cols:
+        self._conn.execute(
+          "ALTER TABLE strategies ADD COLUMN default_params_json TEXT NOT NULL DEFAULT '{}'"
+        )
+      sc_cols = {
+        str(r["name"])
+        for r in self._conn.execute("PRAGMA table_info(shortcuts)").fetchall()
+      }
+      if "notes" not in sc_cols:
+        self._conn.execute(
+          "ALTER TABLE shortcuts ADD COLUMN notes TEXT NOT NULL DEFAULT ''"
+        )
       self._conn.commit()
 
   def close(self) -> None:
@@ -130,6 +148,7 @@ class StateStore:
       "name": row["name"],
       "mode": row["mode"],
       "params": json.loads(row["params_json"]),
+      "notes": row["notes"] or "",
       "created_at": row["created_at"],
       "updated_at": row["updated_at"],
       "latest_run": latest_run,
@@ -150,6 +169,7 @@ class StateStore:
       "path": path_str,
       "default_mode": row["default_mode"],
       "metadata": json.loads(row["metadata_json"]),
+      "default_params": json.loads(row["default_params_json"] or "{}"),
       "notes": row["notes"] or "",
       "file_exists": os.path.isfile(path_str),
       "created_at": row["created_at"],
@@ -182,8 +202,14 @@ class StateStore:
     path: str | Path,
     name: str | None = None,
     notes: str | None = None,
+    default_mode: str | None = None,
+    default_params: dict[str, Any] | None = None,
   ) -> tuple[dict[str, Any], bool]:
     """Register or idempotently refresh a strategy by its canonical real path."""
+    if default_mode is not None and default_mode not in VALID_RUN_MODES:
+      raise ValueError(
+        f"Unsupported mode '{default_mode}'. Expected one of {VALID_RUN_MODES}."
+      )
     canonical = os.path.realpath(os.path.abspath(str(path)))
     meta = inspect_strategy_file(canonical)
     meta_json = json.dumps(meta.to_dict(), ensure_ascii=False)
@@ -201,13 +227,27 @@ class StateStore:
           else existing["name"]
         )
         new_notes = notes if notes is not None else existing["notes"]
+        new_mode = default_mode if default_mode is not None else meta.default_mode
+        new_default_params_json = (
+          json.dumps(dict(default_params), ensure_ascii=False)
+          if default_params is not None
+          else existing["default_params_json"]
+        )
         self._conn.execute(
           """
           UPDATE strategies
-          SET name = ?, default_mode = ?, metadata_json = ?, notes = ?, updated_at = ?
+          SET name = ?, default_mode = ?, metadata_json = ?, default_params_json = ?, notes = ?, updated_at = ?
           WHERE id = ?
           """,
-          (new_name, meta.default_mode, meta_json, new_notes, now, existing["id"]),
+          (
+            new_name,
+            new_mode,
+            meta_json,
+            new_default_params_json,
+            new_notes,
+            now,
+            existing["id"],
+          ),
         )
         self._conn.commit()
         updated = self.get_strategy(existing["id"])
@@ -221,12 +261,24 @@ class StateStore:
         else Path(canonical).stem
       )
       strat_name = (name.strip() if name and name.strip() else default_name)
+      eff_mode = default_mode if default_mode is not None else meta.default_mode
+      default_params_json = json.dumps(dict(default_params or {}), ensure_ascii=False)
       self._conn.execute(
         """
-        INSERT INTO strategies (id, name, path, default_mode, metadata_json, notes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO strategies (id, name, path, default_mode, metadata_json, default_params_json, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (sid, strat_name, canonical, meta.default_mode, meta_json, notes or "", now, now),
+        (
+          sid,
+          strat_name,
+          canonical,
+          eff_mode,
+          meta_json,
+          default_params_json,
+          notes or "",
+          now,
+          now,
+        ),
       )
       self._conn.commit()
       created_rec = self.get_strategy(sid)
@@ -302,8 +354,14 @@ class StateStore:
     *,
     name: str | None = None,
     notes: str | None = None,
+    default_mode: str | None = None,
+    default_params: dict[str, Any] | None = None,
   ) -> dict[str, Any]:
-    """Update a strategy's display name or notes."""
+    """Update a strategy's display name, notes, default mode, or default parameters."""
+    if default_mode is not None and default_mode not in VALID_RUN_MODES:
+      raise ValueError(
+        f"Unsupported mode '{default_mode}'. Expected one of {VALID_RUN_MODES}."
+      )
     with self._lock:
       existing = self._conn.execute(
         "SELECT * FROM strategies WHERE id = ?",
@@ -318,10 +376,20 @@ class StateStore:
           raise ValueError("Strategy name cannot be empty.")
         new_name = stripped
       new_notes = notes if notes is not None else existing["notes"]
+      new_mode = default_mode if default_mode is not None else existing["default_mode"]
+      new_default_params_json = (
+        json.dumps(dict(default_params), ensure_ascii=False)
+        if default_params is not None
+        else existing["default_params_json"]
+      )
       now = _utc_now()
       self._conn.execute(
-        "UPDATE strategies SET name = ?, notes = ?, updated_at = ? WHERE id = ?",
-        (new_name, new_notes, now, strategy_id),
+        """
+        UPDATE strategies
+        SET name = ?, notes = ?, default_mode = ?, default_params_json = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (new_name, new_notes, new_mode, new_default_params_json, now, strategy_id),
       )
       self._conn.commit()
       updated = self.get_strategy(strategy_id)
@@ -419,6 +487,7 @@ class StateStore:
     name: str,
     mode: str,
     params: dict[str, Any] | None = None,
+    notes: str = "",
   ) -> dict[str, Any]:
     """Create a new execution shortcut for an existing strategy."""
     if mode not in VALID_RUN_MODES:
@@ -439,10 +508,19 @@ class StateStore:
         raise KeyError(f"Strategy '{strategy_id}' not found.")
       self._conn.execute(
         """
-        INSERT INTO shortcuts (id, strategy_id, name, mode, params_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO shortcuts (id, strategy_id, name, mode, params_json, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (sc_id, strategy_id, clean_name, mode, json.dumps(params_dict, ensure_ascii=False), now, now),
+        (
+          sc_id,
+          strategy_id,
+          clean_name,
+          mode,
+          json.dumps(params_dict, ensure_ascii=False),
+          notes or "",
+          now,
+          now,
+        ),
       )
       self._conn.commit()
       created = self.get_shortcut(sc_id)
@@ -456,8 +534,9 @@ class StateStore:
     name: str | None = None,
     mode: str | None = None,
     params: dict[str, Any] | None = None,
+    notes: str | None = None,
   ) -> dict[str, Any]:
-    """Update a shortcut's name, mode, and/or parameter dictionary."""
+    """Update a shortcut's name, mode, notes, and/or parameter dictionary."""
     if mode is not None and mode not in VALID_RUN_MODES:
       raise ValueError(f"Unsupported mode '{mode}'. Expected one of {VALID_RUN_MODES}.")
 
@@ -480,14 +559,15 @@ class StateStore:
         if params is not None
         else existing["params_json"]
       )
+      new_notes = notes if notes is not None else existing["notes"]
       now = _utc_now()
       self._conn.execute(
         """
         UPDATE shortcuts
-        SET name = ?, mode = ?, params_json = ?, updated_at = ?
+        SET name = ?, mode = ?, params_json = ?, notes = ?, updated_at = ?
         WHERE id = ?
         """,
-        (new_name, new_mode, new_params_json, now, shortcut_id),
+        (new_name, new_mode, new_params_json, new_notes, now, shortcut_id),
       )
       self._conn.commit()
       updated = self.get_shortcut(shortcut_id)
@@ -510,6 +590,7 @@ class StateStore:
         name=copy_name,
         mode=orig["mode"],
         params=orig["params"],
+        notes=orig.get("notes", ""),
       )
 
   def delete_shortcut(self, shortcut_id: str) -> list[str]:

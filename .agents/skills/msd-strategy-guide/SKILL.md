@@ -86,10 +86,20 @@ uv run mbt-server serve --daemon
 2. **Register the strategy / selector / factor file** (idempotent on canonical file path; directly prints the clickable Web UI link on success, or the failure reason on stderr):
 
 ```bash
+# Register without parameters (or idempotently refresh an existing strategy)
 uv run mbt-server register <STRATEGY_PATH>
+
+# Register a new file with default execution parameters (sets strategy default_params / default_mode)
+uv run mbt-server register <STRATEGY_PATH> --mode portfolio -s A_STOCKS_EXCLUDE_ST -b 2023-01-01 -e 2025-12-31 -a hold_bars=5
+
+# Already registered + parameters -> creates a new shortcut (BOTH --name and --notes are required)
+uv run mbt-server register <STRATEGY_PATH> --name "2024沪深300" --notes "2024年沪深300回测方案" -s SH000300 -b 2024-01-01 -a hold_bars=10
 ```
 
-   This outputs the strategy URL (e.g., `http://127.0.0.1:8765/strategies/<id>`). Include this link in your response to the user so they can click directly to open it in the Web UI.
+   - **No parameters passed**: registers (or idempotently updates `name`/`notes` for) the strategy and prints `http://127.0.0.1:8765/strategies/<id>`.
+   - **Parameters passed + file not yet registered**: registers the strategy and updates its `default_params` (and `default_mode` if `--mode` is given), printing `http://127.0.0.1:8765/strategies/<id>`.
+   - **Parameters passed + file already registered**: creates a new shortcut under that strategy with those parameters (or updates the existing shortcut in place if one with the same `--name` already exists); **`--name` and `--notes` are both required** (fails fast if either is omitted), and prints `http://127.0.0.1:8765/strategies/<id>/shortcuts/<shortcut_id>`.
+   - Supported parameter flags include `--mode`, `-s`/`--objs`, `--use-internal-selector`, `-b`/`--begin`, `-e`/`--end`, `-d`/`--select-date`, `-B`/`--benchmark`, `-c`/`--cash`, `-f`/`--fee`, `--exec-mode`, `--warmup-bars`, `--holdout`, `-a`/`--args` (`key=value`), `--factor-*`, and `--params '<JSON>'`. Include the printed link in your response to the user so they can click directly to open it in the Web UI.
 
 - You can also look up the URL for an already-registered file without re-registering via `uv run mbt-server link <STRATEGY_PATH>`, check server health with `uv run mbt-server status`, or register via HTTP `POST http://127.0.0.1:8765/api/strategies` with JSON `{"path": "<ABS_STRATEGY_PATH>"}`.
 

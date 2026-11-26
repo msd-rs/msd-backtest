@@ -19,6 +19,8 @@ from typing import Any, Sequence
 
 from mbt.server.app import create_app
 from mbt.server.config import get_config_file, get_data_dir, load_server_config
+from mbt.server.schemas import ShortcutParamsModel
+from mbt.shared.inspect_strategy import VALID_RUN_MODES
 
 
 def _probe_host_for(listen_host: str) -> str:
@@ -216,24 +218,228 @@ def _format_http_error(exc: urllib.error.HTTPError) -> str:
   return exc.reason or f"HTTP {exc.code}"
 
 
+def _request_json(
+  url: str,
+  *,
+  method: str = "GET",
+  payload: dict[str, Any] | None = None,
+  timeout: float = 10.0,
+) -> Any:
+  """Send an HTTP JSON request and return the decoded response body."""
+  data = (
+    json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    if payload is not None
+    else None
+  )
+  headers = {"Content-Type": "application/json"} if payload is not None else {}
+  req = urllib.request.Request(url, data=data, headers=headers, method=method)
+  with urllib.request.urlopen(req, timeout=timeout) as resp:
+    return json.loads(resp.read().decode("utf-8"))
+
+
+def _extract_register_params(args: argparse.Namespace) -> tuple[str | None, dict[str, Any]]:
+  """Parse run mode and default/shortcut parameters from ``register`` CLI arguments."""
+  params: dict[str, Any] = {}
+  valid_param_keys = set(ShortcutParamsModel.model_fields)
+
+  raw_json = getattr(args, "params", None)
+  mode: str | None = getattr(args, "mode", None)
+  if raw_json is not None:
+    try:
+      loaded = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+      raise ValueError(f"Invalid JSON for --params: {exc}") from exc
+    if not isinstance(loaded, dict):
+      raise ValueError("--params must be a JSON object.")
+    if "mode" in loaded:
+      raw_mode = loaded.pop("mode")
+      if mode is None and raw_mode is not None:
+        mode = str(raw_mode)
+    unknown = sorted(set(loaded) - valid_param_keys)
+    if unknown:
+      raise ValueError(f"Unknown parameter key(s) in --params: {unknown}.")
+    params.update(loaded)
+
+  if mode is not None and mode not in VALID_RUN_MODES:
+    raise ValueError(f"Unsupported mode '{mode}'. Expected one of {VALID_RUN_MODES}.")
+
+  if getattr(args, "objs", None):
+    objs_str = " ".join(tok.strip() for tok in args.objs if tok.strip())
+    if objs_str:
+      params["objs"] = objs_str
+
+  str_fields = (
+    "begin",
+    "end",
+    "select_date",
+    "benchmark",
+    "cash",
+    "fee",
+    "exec_mode",
+    "holdout",
+    "msd_host",
+    "fin_fields",
+    "extra_args",
+    "factor_periods",
+    "factor_entry",
+    "factor_winsorize",
+    "factor_standardize",
+    "factor_neutralize",
+    "factor_industry_category",
+  )
+  for key in str_fields:
+    val = getattr(args, key, None)
+    if val is not None:
+      params[key] = str(val)
+
+  num_as_str_fields = (
+    "warmup_bars",
+    "fin_lookback_days",
+    "factor_primary_period",
+    "factor_quantiles",
+    "factor_min_listed_days",
+    "factor_cost_bps",
+    "factor_min_obs",
+  )
+  for key in num_as_str_fields:
+    val = getattr(args, key, None)
+    if val is not None:
+      params[key] = str(val)
+
+  bool_fields = (
+    "use_internal_selector",
+    "fin_only_year",
+    "factor_exclude_limit",
+    "factor_by_industry",
+    "factor_causality_check",
+  )
+  for key in bool_fields:
+    val = getattr(args, key, None)
+    if val is not None:
+      params[key] = bool(val)
+
+  factor_direction = getattr(args, "factor_direction", None)
+  if factor_direction is not None:
+    params["factor_direction"] = int(factor_direction)
+
+  raw_kv = getattr(args, "args", None)
+  if raw_kv:
+    kv_dict = dict(params.get("strategy_args") or {})
+    for tok in raw_kv:
+      if "=" not in tok:
+        raise ValueError(f"Invalid -a/--args token '{tok}': expected key=value format.")
+      k, v = tok.split("=", 1)
+      k = k.strip()
+      if not k:
+        raise ValueError(f"Invalid -a/--args token '{tok}': key cannot be empty.")
+      kv_dict[k] = v.strip()
+    params["strategy_args"] = kv_dict
+
+  return mode, params
+
+
 def _cmd_register(args: argparse.Namespace) -> int:
+  try:
+    mode, params = _extract_register_params(args)
+  except ValueError as exc:
+    print(f"Error: {exc}", file=sys.stderr)
+    return 1
+
   base_url = _resolve_server_url(args.url, args.config_dir)
   abs_path = os.path.realpath(os.path.abspath(args.path))
-  payload = {
-    "path": abs_path,
-    "name": args.name,
-    "notes": args.notes,
-  }
-  req = urllib.request.Request(
-    f"{base_url}/api/strategies",
-    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-    headers={"Content-Type": "application/json"},
-    method="POST",
-  )
+  has_params = bool(params) or (mode is not None)
+
   try:
-    with urllib.request.urlopen(req, timeout=10.0) as resp:
-      body = resp.read().decode("utf-8")
-      rec = json.loads(body)
+    if not has_params:
+      payload: dict[str, Any] = {
+        "path": abs_path,
+        "name": args.name,
+        "notes": args.notes,
+      }
+      rec = _request_json(f"{base_url}/api/strategies", method="POST", payload=payload)
+      strat_id = rec.get("id") if isinstance(rec, dict) else None
+      if not strat_id:
+        print(f"Server response missing strategy id: {rec}", file=sys.stderr)
+        return 1
+      print(f"{base_url}/strategies/{strat_id}")
+      return 0
+
+    strategies = _request_json(f"{base_url}/api/strategies", method="GET")
+    matched = next(
+      (
+        item
+        for item in strategies
+        if item.get("path")
+        and os.path.realpath(os.path.abspath(str(item["path"]))) == abs_path
+      ),
+      None,
+    )
+
+    if matched is None:
+      payload = {
+        "path": abs_path,
+        "name": args.name,
+        "notes": args.notes,
+        "default_params": params,
+      }
+      if mode is not None:
+        payload["default_mode"] = mode
+      rec = _request_json(f"{base_url}/api/strategies", method="POST", payload=payload)
+      strat_id = rec.get("id") if isinstance(rec, dict) else None
+      if not strat_id:
+        print(f"Server response missing strategy id: {rec}", file=sys.stderr)
+        return 1
+      print(f"{base_url}/strategies/{strat_id}")
+      return 0
+
+    sc_name = (args.name or "").strip()
+    sc_notes = (args.notes or "").strip()
+    if not sc_name or not sc_notes:
+      print(
+        f"Error: Strategy '{abs_path}' is already registered. "
+        "Creating a shortcut with parameters requires both --name and --notes.",
+        file=sys.stderr,
+      )
+      return 1
+
+    existing_sc = next(
+      (
+        sc
+        for sc in (matched.get("shortcuts") or [])
+        if str(sc.get("name") or "").strip() == sc_name
+      ),
+      None,
+    )
+    if existing_sc is not None:
+      sc_payload: dict[str, Any] = {
+        "name": sc_name,
+        "notes": sc_notes,
+        "mode": mode or existing_sc.get("mode") or matched["default_mode"],
+        "params": params,
+      }
+      sc_rec = _request_json(
+        f"{base_url}/api/shortcuts/{existing_sc['id']}",
+        method="PUT",
+        payload=sc_payload,
+      )
+    else:
+      sc_payload = {
+        "name": sc_name,
+        "notes": sc_notes,
+        "mode": mode or matched["default_mode"],
+        "params": params,
+      }
+      sc_rec = _request_json(
+        f"{base_url}/api/strategies/{matched['id']}/shortcuts",
+        method="POST",
+        payload=sc_payload,
+      )
+    sc_id = sc_rec.get("id") if isinstance(sc_rec, dict) else None
+    if not sc_id:
+      print(f"Server response missing shortcut id: {sc_rec}", file=sys.stderr)
+      return 1
+    print(f"{base_url}/strategies/{matched['id']}/shortcuts/{sc_id}")
+    return 0
   except urllib.error.HTTPError as exc:
     print(f"Registration failed ({exc.code}): {_format_http_error(exc)}", file=sys.stderr)
     return 1
@@ -247,14 +453,6 @@ def _cmd_register(args: argparse.Namespace) -> int:
   except json.JSONDecodeError as exc:
     print(f"Invalid JSON response from mbt.server at {base_url}: {exc}", file=sys.stderr)
     return 1
-
-  strat_id = rec.get("id") if isinstance(rec, dict) else None
-  if not strat_id:
-    print(f"Server response missing strategy id: {rec}", file=sys.stderr)
-    return 1
-
-  print(f"{base_url}/strategies/{strat_id}")
-  return 0
 
 
 def _cmd_link(args: argparse.Namespace) -> int:
@@ -403,10 +601,74 @@ def build_parser() -> argparse.ArgumentParser:
 
   p_reg = sub.add_parser("register", help="Submit a strategy or factor file path to the running server")
   p_reg.add_argument("path", help="Path to .py strategy/selector/factor or .txt/.json expression file")
-  p_reg.add_argument("--name", default=None, help="Optional display name")
-  p_reg.add_argument("--notes", default=None, help="Optional notes")
+  p_reg.add_argument("--name", default=None, help="Display name (required with --notes when creating a shortcut)")
+  p_reg.add_argument("--notes", default=None, help="Notes/description (required with --name when creating a shortcut)")
   p_reg.add_argument("--url", default=None, help="Override server URL (default from server.json)")
   p_reg.add_argument("--config-dir", default=argparse.SUPPRESS, help="Override OS config directory")
+  p_reg.add_argument(
+    "--mode",
+    choices=list(VALID_RUN_MODES),
+    default=None,
+    help="Execution mode (select, timing, portfolio, factor)",
+  )
+  p_reg.add_argument("-s", "--objs", nargs="+", action="extend", default=None, help="Stock codes, pool name, or selector path")
+  p_reg.add_argument(
+    "--use-internal-selector",
+    action=argparse.BooleanOptionalAction,
+    default=None,
+    help="Use embedded Selector class in timing/portfolio mode",
+  )
+  p_reg.add_argument("-b", "--begin", default=None, help="Start date (YYYY-MM-DD)")
+  p_reg.add_argument("-e", "--end", default=None, help="End date (YYYY-MM-DD)")
+  p_reg.add_argument("-d", "--select-date", default=None, help="Selection date (YYYY-MM-DD) for select mode")
+  p_reg.add_argument("-B", "--benchmark", default=None, help="Benchmark index code")
+  p_reg.add_argument("-c", "--cash", default=None, help="Initial cash")
+  p_reg.add_argument("-f", "--fee", default=None, help="Fee config path")
+  p_reg.add_argument("--exec-mode", choices=["close", "next_open"], default=None, help="Execution mode ('close' or 'next_open')")
+  p_reg.add_argument("--warmup-bars", type=int, default=None, help="Warmup bars before start date")
+  p_reg.add_argument("--holdout", default=None, help="Holdout split date or duration")
+  p_reg.add_argument("-m", "--msd-host", default=None, help="MSD server URL")
+  p_reg.add_argument("--fin-fields", default=None, help="Comma-separated financial fields")
+  p_reg.add_argument(
+    "--fin-only-year",
+    action=argparse.BooleanOptionalAction,
+    default=None,
+    help="Only query annual financial reports",
+  )
+  p_reg.add_argument("--fin-lookback-days", type=int, default=None, help="Financial lookback window in days")
+  p_reg.add_argument("-a", "--args", nargs="*", action="extend", default=None, help="Strategy/Selector/Factor arguments in key=value format")
+  p_reg.add_argument("--extra-args", default=None, help="Extra key=value arguments string")
+  p_reg.add_argument("--factor-periods", default=None, help="Comma-separated forward return periods")
+  p_reg.add_argument("--factor-primary-period", type=int, default=None, help="Primary holding period")
+  p_reg.add_argument("--factor-quantiles", type=int, default=None, help="Number of quantile buckets")
+  p_reg.add_argument("--factor-entry", choices=["next_open", "open_close", "close"], default=None, help="Forward return entry timing")
+  p_reg.add_argument(
+    "--factor-exclude-limit",
+    action=argparse.BooleanOptionalAction,
+    default=None,
+    help="Exclude limit-up bars from entry mask",
+  )
+  p_reg.add_argument("--factor-min-listed-days", type=int, default=None, help="Minimum listed trading days")
+  p_reg.add_argument("--factor-winsorize", choices=["none", "mad", "sigma", "percentile"], default=None, help="Winsorization method")
+  p_reg.add_argument("--factor-standardize", choices=["none", "zscore", "rank"], default=None, help="Standardization method")
+  p_reg.add_argument("--factor-neutralize", default=None, help="Neutralization methods")
+  p_reg.add_argument("--factor-cost-bps", type=float, default=None, help="Transaction cost in bps")
+  p_reg.add_argument("--factor-min-obs", type=int, default=None, help="Minimum cross-sectional observations")
+  p_reg.add_argument(
+    "--factor-by-industry",
+    action=argparse.BooleanOptionalAction,
+    default=None,
+    help="Evaluate factor by industry",
+  )
+  p_reg.add_argument("--factor-industry-category", default=None, help="Industry classification category")
+  p_reg.add_argument(
+    "--factor-causality-check",
+    action=argparse.BooleanOptionalAction,
+    default=None,
+    help="Enable causality check",
+  )
+  p_reg.add_argument("--factor-direction", type=int, choices=[-1, 1], default=None, help="Factor direction (-1 or 1)")
+  p_reg.add_argument("--params", default=None, help="JSON object of default/shortcut parameters (merged with CLI flags)")
 
   p_link = sub.add_parser("link", help="Print the Web UI URL for a registered strategy file path")
   p_link.add_argument("path", help="Path to .py strategy/selector/factor or .txt/.json expression file")

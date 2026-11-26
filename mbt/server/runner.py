@@ -124,6 +124,8 @@ class RunManager:
           continue
         spec[k] = v
 
+    strat_params = dict(strategy.get("default_params") or {})
+    _apply_layer(strat_params, replace_strategy_args=False)
     _apply_layer(sc_params, replace_strategy_args=False)
     _apply_layer(ovr, replace_strategy_args=("strategy_args" in ovr))
 

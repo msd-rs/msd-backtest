@@ -41,7 +41,9 @@ function buildDraftFromSelection(
   strat: StrategyRecord,
   sc: ShortcutRecord | null,
 ): DraftParams {
-  const p = sc?.params ?? {};
+  const defaultParams = strat.default_params ?? {};
+  const p = sc?.params ?? defaultParams;
+  const hasSavedParams = sc !== null || Object.keys(defaultParams).length > 0;
   const mode: RunMode = sc?.mode ?? strat.default_mode;
   const rawArgs = (p.strategy_args as Record<string, unknown> | undefined) ?? {};
   const strategyArgs: Record<string, string> = {};
@@ -59,14 +61,14 @@ function buildDraftFromSelection(
   const targetDefaults = defaultTargetParamsForMode(strat, mode);
   const rawObjs = s("objs");
   const hasExplicitUseInternal = typeof p.use_internal_selector === "boolean";
-  const useInternal = sc
+  const useInternal = hasSavedParams
     ? hasExplicitUseInternal
       ? Boolean(p.use_internal_selector)
       : rawObjs.trim() === ""
         ? targetDefaults.use_internal_selector
         : false
     : targetDefaults.use_internal_selector;
-  const objs = sc
+  const objs = hasSavedParams
     ? rawObjs.trim() === "" && !useInternal
       ? targetDefaults.objs
       : rawObjs

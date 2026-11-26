@@ -224,7 +224,7 @@ export function ParamPanel({
           </div>
           <p className="truncate text-[11px] text-muted-foreground" title={strategy.path}>
             {strategy.path}
-            {meta?.docstring ? ` · ${meta.docstring}` : ""}
+            {shortcut?.notes ? ` · ${shortcut.notes}` : meta?.docstring ? ` · ${meta.docstring}` : ""}
           </p>
         </div>
 
